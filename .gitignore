@@ -1,0 +1,54 @@
+# Large binary assets — project data, not source (~215 MB)
+samples/
+Issues examples/
+
+# Vendored third-party reference copies (wt-tools, Dagor Asset Explorer),
+# including their prebuilt .dll / .exe blobs
+reference/
+
+# RAD's Oodle blob. CLAUDE.md §0.2: compiled from Unreal Engine SDK source, governed by the UE
+# EULA, for the owner's own install only. It was tracked until 2026-08-25 — harmlessly, since this
+# repo has no remote — but no build except the `--rad` diagnostic uses it (the default carries
+# the project's own decoder, codecs/wtlz.js), so there is nothing left to weigh against getting it
+# out of every future commit.
+#
+# The history that carried it is gone: the repository was reset to a single root commit on
+# 2026-08-25 and `tools/t46_wtlz.mjs` now scans every git object over 100 KB for the RAD bytes on
+# every `npm test`, so committing a RAD-built artifact fails the suite instead of going unnoticed.
+# docs/LICENSING.md has the whole account. Everything builds and every test passes without this
+# file present — it is only needed for `npm run build:rad`, the local A/B diagnostic.
+src/vendor/oodle-b64.js
+
+# Scratch and build output
+# dist/ holds the diagnostic builds (npm run build:rad, build:ooz-page, build:nooodle) and the
+# CDN-loading page (build:cdn) — one of them carries RAD's blob, so keeping dist/ untracked is one
+# more thing between that blob and a public repo.
+scratchpad/
+dist/
+# Renamed copies of a build left in the repo root. The tracked artifact is wt_skin_studio.html and
+# it IS the release build; another copy is duplicate churn, and this is a repository that
+# specifically has to keep large blobs OUT of its history (docs/LICENSING.md).
+/wt_skin_studio?*.html
+tools/_*.html
+tools/_*.mjs
+node_modules/
+*.wtproj
+# ...except the stored project the format test reads (tools/t57_groups.mjs, case 20). It is
+# synthetic — no assets/ folder, nothing from the game — which is the only kind that may be tracked.
+!tools/fixtures/*.wtproj
+*.zip
+*.tar.gz
+*.dll
+*.exe
+*.wasm
+*.obj
+
+# Personal notes
+personal notes.txt
+
+# Claude Code: skills and launch config are project knowledge and are tracked;
+# settings.local.json is this machine's permission list and is not.
+.claude/settings.local.json
+
+# Local-only notes and lists, never committed
+private/

@@ -1,0 +1,145 @@
+{
+ "note": "Golden bytes for the export encoders. Regenerate with: node tools/t29_encode.mjs --update",
+ "cases": {
+  "bc3block/three-hue": {
+   "len": 16,
+   "sha": "b2596616082d8f08e7e76cd9a96f11755e6c5da6593b959c3bc28f0d0a6727d8",
+   "hex": "ff8000000000902444c94108aa0a0055"
+  },
+  "bc3block/flat": {
+   "len": 16,
+   "sha": "c2d8d6c17714d4217d2888c2177bb32cba54ee5e0ccb147ddb015e07d14e9dea",
+   "hex": "ffff000000000000cb6bca6b55555555"
+  },
+  "bc3block/flat-alpha0": {
+   "len": 16,
+   "sha": "996aa7ff41f3506e95ea582f2a4091df40f68f1b5111e20f6b86f858d21fb84f",
+   "hex": "00000000000000004208410855555555"
+  },
+  "bc3block/ramp": {
+   "len": 16,
+   "sha": "3c2786adcc2c3616de5f418a843b665b30ddfeb9cde6a2e9864d29a99a27fcc6",
+   "hex": "ff00c96fb7e42601f107f00755555555"
+  },
+  "encodeBC3/4x4": {
+   "len": 16,
+   "sha": "b3b69b0a3fb715e199b616a8e9361b7d26fc9b70fd62e0642ebdd263402b066b",
+   "hex": "ff0040000425f00044c93a4f2a2aafbd"
+  },
+  "encodeBC3/64x64": {
+   "len": 4096,
+   "sha": "f7fd69bcb092b5353b54504b71df94a29f55da8205ed248f2f952d53a6d05870"
+  },
+  "encodeBC3/130x66": {
+   "len": 8976,
+   "sha": "529b5db7e9d32106738ccdd4ba8e3b2f7bc0ca612b61a5194c898ea3803cf63c"
+  },
+  "encodeBC3/1x1": {
+   "len": 16,
+   "sha": "c2d8d6c17714d4217d2888c2177bb32cba54ee5e0ccb147ddb015e07d14e9dea",
+   "hex": "ffff000000000000cb6bca6b55555555"
+  },
+  "encodeBC3/7x3": {
+   "len": 32,
+   "sha": "b3e4cbe1e14150dc9815a5216742244f286422495a76d3e17f2005eeacf8189d",
+   "hex": "ff0000000003333009b1a90faaaa8989ff0001100000000044c948950303f5f5"
+  },
+  "buildMips/64x64/L0": {
+   "len": 16384,
+   "sha": "1f9c8100affe4f565a38adaaedacccd5e890a92bcaefe3818343221d6e0abf6f"
+  },
+  "buildMips/64x64/L1": {
+   "len": 4096,
+   "sha": "15470b9a03add51754f28411a9fe399d9f9057b0148e837e2d68da51246b928a"
+  },
+  "buildMips/64x64/L2": {
+   "len": 1024,
+   "sha": "43f4a09655a76cac9de984b92022c9b20df254fa276c850f2d8d088872e66e91"
+  },
+  "buildMips/64x64/L3": {
+   "len": 256,
+   "sha": "6058eabf30a60fc4b0c990ac89fd2352958a1e8134cec218755bfea990a36ea4",
+   "hex": "6e7852ff6e7852ff6e7852ff6e7852ff6e785200905a4160c82823ffc82823ff6e7852ff6e7852ff6e7852ff6e7852ff6e785200905a4160c82823ffc82823ff6e7852ff6e7852ff6e7852ff6e7852ff6e785200905a4160c82823ffc82823ff6e7852ff6e7852ff6e7852ff6e7852ff6e785200905a4160c82823ffc82823ff7b8284817a7e847275837e8175827d848d8d40ffad8d40ffcd8d40ffed8d40ff847a787c7c958a708d7b8574758a7c7a8dad40ffadad40ffcdad40ffedad40ff926b90887a8080818571837d827d87898dcd40ffadcd40ffcdcd40ffedcd40ff7c7f879376868476818a6d886b85707b8ded40ffaded40ffcded40ffeded40ff"
+  },
+  "buildMips/64x64/L4": {
+   "len": 64,
+   "sha": "0adb7ac76f3653ed6bb069c3c9eb8f30584c88da7286c188e08fdd6f933dbbdb",
+   "hex": "6e7852ff6e7852ff7f694a30c82823ff6e7852ff6e7852ff7f694a30c82823ff7d8483787b837f7d9d9d40ffdd9d40ff807c87857d7f7a829ddd40ffdddd40ff"
+  },
+  "buildMips/64x64/L5": {
+   "len": 16,
+   "sha": "991bc41092abf1c450231e91bf48261a9ca4b432fb41d910e3882471a6c256a9",
+   "hex": "6e7852ffa44937987d81817fbdbd40ff"
+  },
+  "buildMips/64x64/L6": {
+   "len": 4,
+   "sha": "d2a104f5663280e4ac8800b574f658406ceaed9f80555908b16f2293bdf40e06",
+   "hex": "938053c5"
+  },
+  "buildMipsN/32x32/L0": {
+   "len": 4096,
+   "sha": "84189dbbca60587cb0aa54b18e0c2902c0180c2fa2274a1e9236b517fb2c872c"
+  },
+  "buildMipsN/32x32/L1": {
+   "len": 1024,
+   "sha": "689b55ee504e7c725e8492cd6860bc082ff11e8076a0191ba4ef3817f16e6a78"
+  },
+  "buildMipsN/32x32/L2": {
+   "len": 256,
+   "sha": "ec907a1207938449a7b02ab5e52e10656682ecdf14c91a283116b37c666b2728",
+   "hex": "0cc000de2bd700d94b3b00dd6b2c00da8bc900dcabd000dbcb3300dbeb3300dc0cc500382bdc003d4b3600396b27003c8bce003aabd5003bcb2e003aeb2e003a0cc100252bd8002a4b3a00266b2b00298bca0027abd10028cb320027eb3200270cc400cc2bda00c74b3700cb6b2800c88bcc00caabd300c9cb2f00caeb3000ca0cc1ffd72bd8ffd24b39ffd66b2affd38bcaffd5abd1ffd4cb31ffd5eb32ffd50cc3ff2f2bdaff344b38ff306b29ff338bccff31abd3ff32cb30ff32eb30ff310cc2ff2c2bd9ff314b38ff2d6b29ff308bcbff2eabd2ff2fcb30ff2eeb31ff2e0cc2ffd42bd9ffcf4b39ffd36b2affd08bcbffd2abd2ffd1cb30ffd2eb31ffd2"
+  },
+  "buildMipsN/32x32/L3": {
+   "len": 64,
+   "sha": "8efeca5e2a680fbec1a2d8cbec1190005a564d98cb7515d744daad3f006d90d6",
+   "hex": "1cce008b5b31008b9bcf008bdb31008b1cce00795b3100799bcf0079db3100791cceff835b31ff839bcfff83db31ff831cceff805b31ff809bcfff80db31ff80"
+  },
+  "buildMipsN/32x32/L4": {
+   "len": 16,
+   "sha": "509314add7871a043cc277cebf4764a40decfa0cfc98d6d91e4771f2176f66c4",
+   "hex": "3c800082bb8000823c80ff82bb80ff82"
+  },
+  "buildMipsN/32x32/L5": {
+   "len": 4,
+   "sha": "c8ab7c8a2635ecb533e5e112da3f901e870793652f7b737bab21cb110d925818",
+   "hex": "7c808082"
+  },
+  "renormalizeWTNormal/16x16": {
+   "len": 1024,
+   "sha": "529400986591d7c8bd566663d9690a624df19990e34f9cb3028e46aff0b5ab9c"
+  },
+  "writeDDS/DXT5/64x64": {
+   "len": 5616,
+   "sha": "940647f92aa4a072ea60673885a1e3c3bb2a6bf4c1360f0479266c1bbb218330"
+  },
+  "writeDDS/BGRA8/64x64": {
+   "len": 21972,
+   "sha": "81571a23eac80f7fc630c335533281aa0b4307fc05d346d04398261ee2a4ee50"
+  },
+  "writeDDS/DXT5/8x8-nomip": {
+   "len": 192,
+   "sha": "a5b709112f6392cb8f4974b81e3198a609631a521a61a386c7883eae3ef8c055",
+   "hex": "444453207c000000071008000800000008000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000040000004458543500000000000000000000000000000000000000000010000000000000000000000000000000000000ffff000000000000cb6bca6b55555555ff0009900009900044c9ca6b05050505ec0a29cd60de58ff1fff0601b39a3d6bffff000000000000e8dee87bbdaf2b0a"
+  },
+  "writeTGA/32x16": {
+   "len": 2066,
+   "sha": "4a2088b087ecea8e1e31a3fd8bedd8886c63a2e928256a385d790b0cc107092e"
+  },
+  "padSeams/32x32/d0": {
+   "len": 4096,
+   "sha": "df06bd6dce50a5977831d58587921c5b63adabd6bca551e5df2fafa76947c56e"
+  },
+  "padSeams/32x32/d1": {
+   "len": 4096,
+   "sha": "7010680b29e6f9fa87897bf274e43bdfa05cf22d616fa029a6fccaa384d88792"
+  },
+  "padSeams/32x32/d3": {
+   "len": 4096,
+   "sha": "374e527b305b4263bbd7307904e745ecb81ede8a9e27c20772d10607fbda355e"
+  },
+  "padSeams/32x32/d8": {
+   "len": 4096,
+   "sha": "3b77ff28403d8302dca2987606ea353b56d4f4fb7d02d2dcc2110b03201ce22a"
+  }
+ }
+}

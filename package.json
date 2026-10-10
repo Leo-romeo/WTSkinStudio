@@ -1,0 +1,21 @@
+{
+  "name": "wt-skin-studio",
+  "version": "1.0.0-beta.1",
+  "private": true,
+  "description": "Browser-based editor for War Thunder user skins. Source is src/; the product is the single self-contained wt_skin_studio.html it builds into. No dependencies — every script here runs on a bare Node.",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "build:rad": "node tools/build.mjs --rad --out dist/wt_skin_studio_rad.html",
+    "build:ooz-page": "node tools/build.mjs --ooz --out dist/wt_skin_studio_ooz.html",
+    "dev": "node tools/build.mjs --watch",
+    "serve": "node tools/serve.mjs",
+    "test": "node tools/all.mjs",
+    "test:all": "node tools/all.mjs --all",
+    "test:list": "node tools/all.mjs --list",
+    "check": "node tools/check.mjs",
+    "golden": "node tools/t29_encode.mjs --update",
+    "build:nooodle": "node tools/build.mjs --no-oodle --out dist/wt_skin_studio_nooodle.html",
+    "build:cdn": "node tools/build.mjs --cdn --out dist/wt_skin_studio_cdn.html"
+  }
+}

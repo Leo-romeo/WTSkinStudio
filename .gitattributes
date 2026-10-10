@@ -1,0 +1,14 @@
+# Every text file is LF in the repository and in every checkout. Git for Windows installs with
+# core.autocrlf=true, and a clone made that way (2026-10-10) had
+# CRLF everywhere: the build no longer matched the committed page, the --cdn rewrite could not find
+# its sentence, and three suites failed on a stranger's first `npm test`. The two fixtures are bytes.
+* text=auto eol=lf
+tools/fixtures/*.block0 binary
+tools/fixtures/*.wtproj binary
+
+# The two third-party libraries in src/vendor/ are pinned to the bytes cdnjs's SRI hashes name, and
+# tools/t41_build.mjs checks that on every `npm test` (ROADMAP 4.50 (1)). A checkout that rewrote
+# their line endings — Git for Windows installs with core.autocrlf=true — would hand the build, and
+# the check, different bytes from the pin. `-text` leaves them exactly as committed.
+src/vendor/three-r128.min.js -text
+src/vendor/jszip-3.10.1.min.js -text

@@ -1,0 +1,348 @@
+// ---------- Export ----------
+// Per-texture export settings. "Definition" (resolution), format and whether the texture ships at
+// all are per texture, not per skin: one 8K albedo can stay 8K while the twelve pylon textures
+// around it drop to 1K, which is usually the difference between fitting War Thunder's archive cap
+// and not. `off` is per texture rather than per slot on purpose — shipping an `_n` without its `_c`
+// is a legal and sometimes wanted skin (a surface-only edit), and so is the reverse.
+function expOpt(slot, kind){
+  slot.exp = slot.exp || {};
+  // A cockpit or engine-flame sheet starts UNTICKED (ROADMAP 3.31): the CDK forbids modifying it,
+  // and until 2026-09-19 an edited flame sheet shipped by default and was only refused at export.
+  return (slot.exp[kind] = slot.exp[kind] || { size: 0, fmt: "", off: slotRole(slot) !== "exterior" });
+}
+// The gate's own truth, read here rather than through ui/gate.js so the export layer does not
+// reach upward: a protected sheet stays out of the archive while its gate is locked, whatever a
+// stale tick or an older project file says.
+function expGateOff(slot, o){
+  if (slotRole(slot) !== "exterior" && !App.gateOpen.has("protected")) o.off = true;
+  return o.off;
+}
+// Box-filtered resample through a canvas — nearest-neighbour dropping of an 8K skin to 2K
+// aliases badly, and this is the last step before the texture ships.
+function resampleRGBA(rgba, w, h, dw, dh){
+  if (w === dw && h === dh) return rgba;
+  const src = mkCanvas(w, h);
+  ctx2d(src).putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+  let cw = w, ch = h, cur = src;
+  while (cw > dw * 2 && ch > dh * 2) {                     // halve repeatedly: keeps detail, no aliasing
+    const nx = mkCanvas(Math.max(dw, cw >> 1), Math.max(dh, ch >> 1));
+    const g = nx.getContext("2d");
+    g.imageSmoothingQuality = "high";
+    g.drawImage(cur, 0, 0, nx.width, nx.height);
+    cur = nx; cw = nx.width; ch = nx.height;
+  }
+  const out = mkCanvas(dw, dh);
+  const g = out.getContext("2d");
+  g.imageSmoothingQuality = "high";
+  g.drawImage(cur, 0, 0, dw, dh);
+  return ctx2d(out).getImageData(0, 0, dw, dh).data;
+}
+const EXP_SIZES = [0, 8192, 4096, 2048, 1024, 512];
+// One texture's row in the "textures out" list. Split out of updateExportList, which is the panel's
+// layout and its running size total; these are one texture's own controls.
+function expListRow(it){
+  const o = expOpt(it.slot, it.kind);
+  const row = document.createElement("div");
+  row.className = "exprow";
+  // Ship this texture or not. Unticking drops the file AND its .blk line together (collectExports
+  // and buildExportPlan both filter on the same tag) — leaving out only the file would name a
+  // texture the archive does not contain, which is a rejection under CLAUDE.md §1.
+  const on = document.createElement("input");
+  on.type = "checkbox";
+  on.checked = !it.off;
+  on.style.cssText = "flex:0 0 auto;margin:0";
+  on.title = "Include this texture in the skin. Unticking leaves out the file and its " +
+    (exportMode() === "set_tex" && it.kind === "c" ? "set_tex" : "replace_tex") + " line together.";
+  on.onchange = () => { o.off = !on.checked; updateExportList(); };
+  // ROADMAP 3.31: a cockpit or flame sheet's tick is behind the gate — disabled in the shared
+  // style until the mark beside it is opened, and the mark stays lit once it is.
+  const prot = Gate.bites.protected(it.slot);
+  if (prot) Gate.control(on, "protected");
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = it.fileNameBase + (it.kind === "n" ? " (_n)" : "");
+  nm.title = it.fileNameBase + " — native " + it.w + "×" + it.h + (it.kind === "n" ? ", surface map" : ", albedo") +
+    (it.covNote ? "\nCoverage mask (alpha): " + it.covNote : "");
+  if (it.covNote) {
+    const cov = document.createElement("span");
+    cov.style.cssText = "font-size:11px;flex:0 0 auto;color:" + (/⚠|no mask/.test(it.covNote) ? "var(--danger)" : "var(--muted)");
+    cov.textContent = it.covNote;
+    cov.title = "What goes into this texture's alpha channel — the mask the game blends your skin over the camouflage with";
+    nm.appendChild(document.createTextNode(" "));
+    nm.appendChild(cov);
+  }
+  const sz = document.createElement("select");
+  sz.title = "Resolution this texture is written at. Native keeps what you are editing.";
+  // Larger than native is offered now. It cannot invent detail in the base sheet, but a decal or
+  // a brush stroke IS re-rasterised at the export size, so it is not a no-op — and the tooltip
+  // says which of the two you are getting. Paint at the size you want (slot ⋮ → resolution…) and
+  // this can stay on native.
+  for (const v of EXP_SIZES) {
+    const op = document.createElement("option");
+    op.value = String(v);
+    op.textContent = v === 0 ? "native " + it.w : v + "px" + (v > it.w ? " ↑" : "");
+    if (v > it.w) op.title = "Above what you are painting at — resamples, it cannot add detail. Raise the slot's own resolution instead.";
+    sz.appendChild(op);
+  }
+  // 8192 is listed but locked for anything but a rank VI+ aircraft (3.31); the one mark for the
+  // rule sits in the list header rather than on every row.
+  sz.value = String(o.size);
+  if (Gate.bites.size8k() && Gate.options(sz, ["8192"], "size8k", "0")) o.size = 0;
+  sz.onchange = () => { o.size = +sz.value; updateExportList(); };
+  const fm = document.createElement("select");
+  fm.title = "Format for this one texture. Preset follows the dropdown above.";
+  for (const [v, label] of [["", "preset"], ["bc3", "BC3"], ["rgba8", "RGBA8"], ["tga", "TGA"]]) {
+    const op = document.createElement("option");
+    op.value = v; op.textContent = label;
+    fm.appendChild(op);
+  }
+  fm.value = o.fmt;
+  fm.onchange = () => { o.fmt = fm.value; updateExportList(); };
+  // resolution and format say nothing about a texture that is not being written
+  sz.disabled = fm.disabled = !!it.off;
+  if (it.off) { row.style.opacity = "0.45"; nm.style.textDecoration = "line-through"; }
+  row.append(on, nm, sz, fm);
+  if (prot) { row.appendChild(Gate.mark("protected", updateExportList)); row.title = "Cockpit or engine-flame sheet — " + Gate.WHY.protected; }
+  return row;
+}
+function updateExportList(){
+  const el = $("expList"), cnt = $("expCount"), btn = $("expAllNone");
+  if (!el) return;
+  const items = collectExports(true);
+  const live = items.filter(it => !it.off);
+  cnt.textContent = !items.length ? "—" : live.length === items.length ? String(items.length)
+    : live.length + " of " + items.length;
+  if (btn) {
+    btn.style.display = items.length ? "" : "none";
+    btn.textContent = live.length ? "None" : "All";
+    Gate.place(btn.parentNode, "size8k", updateExportList, items.length > 0 && Gate.bites.size8k());
+  }
+  el.innerHTML = "";
+  if (!items.length) {
+    el.className = "hint";
+    el.textContent = "Nothing edited yet — painted or replaced textures show up here.";
+    if ($("expValidate")) $("expValidate").style.display = "none";
+    updateExportWarnings();
+    return;
+  }
+  el.className = "";
+  el.style.cssText = "max-height:190px;overflow-y:auto";
+  let est = 0;
+  for (const it of items) {
+    el.appendChild(expListRow(it));
+    if (it.off) continue;
+    // one size formula for the whole app — estimateBytes is what the rule check below uses too,
+    // and two footers disagreeing about the archive size is worse than either being approximate
+    const o = expOpt(it.slot, it.kind);
+    const side = o.size || it.w, fmt = o.fmt || (it.kind === "c" ? exportFormats().c : exportFormats().n);
+    est += estimateBytes(side, side === it.w ? it.h : Math.max(1, Math.round(it.h * side / it.w)), fmt, $("optMips").checked);
+  }
+  const sum = document.createElement("div");
+  sum.className = "hint";
+  const cap = (vehicleClass() === "tank" || vehicleClass() === "ship") ? 40 : 70;
+  const mb = est / 1048576;
+  if (!live.length) {
+    sum.textContent = "Nothing ticked — the skin would ship no textures at all";
+    sum.style.color = "var(--warn)";
+  } else {
+    sum.textContent = "≈ " + mb.toFixed(1) + " MB of " + cap + " MB allowed for this vehicle class" +
+      (live.length < items.length ? " (" + (items.length - live.length) + " left out)" : "");
+    if (mb > cap) sum.style.color = "var(--danger)";
+  }
+  el.appendChild(sum);
+  // The warnings and the camouflage-pin summary describe the same export, and they used to be
+  // refreshed only when a unit was ticked or a dropdown moved — so after loading a vehicle they
+  // still said "no camouflage texture was found" while the pin list sat empty.
+  updateExportWarnings();
+  updateExportValidation(live);
+}
+$("optMips").addEventListener("change", updateExportList);
+// All / none. Bound once rather than per refresh, and it reads the current list rather than
+// closing over one — the set of edited textures changes under it as the user paints.
+$("expAllNone").onclick = () => {
+  const items = collectExports(true);
+  const off = items.some(it => !it.off);          // anything ticked → this button means "none"
+  for (const it of items) expOpt(it.slot, it.kind).off = off;
+  updateExportList();
+};
+// What goes in the archive, and what each file's bytes actually are. Two questions that used to be
+// one 107-line loop, and the reason they had to be separated is that four of the branches inside it
+// are CLAUDE.md §1 semantics rather than bookkeeping — what an albedo's alpha means, the `_n`'s
+// channel order, the post-2022 roughness curve. Same move as `Composite` and `SkinLoad`: the
+// once-per-call decisions live on a context so each step can be read alone, and the steps are
+// methods on one object rather than eight new top-level names (CLAUDE.md §4).
+//
+// `t40_exportpick`'s section 10 is the oracle. Sections 1-9 of that test have always covered which
+// textures come out and what the `.blk` says about them; not one of them read a byte of what is
+// written, so the alpha decision, the `_n` packing and the roughness curve could all have been
+// changed by a refactor without anything failing. It was proved able to fail before this split.
+const ExportCollect = {
+  // Compositing is deferred to the next animation frame, so an edit followed straight away by an
+  // export (a raw-channel fill, then Ctrl+E) read the previous frame's sheet and shipped the change
+  // one edit behind. Settle everything first — but only on the real path: the preview call happens
+  // on every slot-list refresh and reads no pixels at all.
+  settle(preview){
+    if (preview) return;
+    if (compPending.size || chanPending.size) flushComposites();
+  },
+  // The decisions that are the same for every texture in one call, taken once. The roughness LUT in
+  // particular used to be rebuilt inside the per-slot loop.
+  ctx(preview){
+    const alphaMode = $("expAlpha") ? $("expAlpha").value : "auto";
+    // Since "Wind of Change" the _n red channel holds inverted roughness, not linear smoothness.
+    // Textures pulled from the game are already in that form, so the default is a straight
+    // pass-through; unticking the box means "I authored plain smoothness, convert it".
+    const convert = !$("optInvRough").checked;
+    let lut = null;
+    if (convert) {
+      lut = new Uint8Array(256);
+      for (let v = 0; v < 256; v++) { const s = v / 255, t = 1 - Math.pow(1 - 0.7 * s, 3); lut[v] = Math.round(t * 255); }
+    }
+    return { preview, alphaMode, groundPaint: exportMode() === "set_tex", convert, lut };
+  },
+  // Every exported file is named after the texture it replaces, and the extension is decided later
+  // by the format — this was written out four times, once per branch.
+  baseName(fileName, stem){ return (fileName || stem + ".dds").replace(/\.(tga|dds)$/i, ""); },
+
+  // ---- the albedo ----
+  // cEdited covers "replace albedo…" / "→slot": the base bitmap changed even with no layers. The
+  // wear mask lives in the albedo's alpha, so editing it means the albedo has to ship too.
+  // `carries` and not `layerChan`: since 4.28(e) a layer can hold colour content while its PRIMARY
+  // slot is something else, and asking about the primary would have shipped a `.blk` naming an
+  // albedo whose edits were never written.
+  albedoEdited(slot){
+    return !!((slot.cEdited || chanEdited(slot, "wear") ||
+      visibleLeaves(slot.layers).some(l => LayerNode.carries(l, "color"))) && slot.composite);
+  },
+  // ---- what the exported alpha means depends on which slot the sheet lands in ----
+  // `set_tex … param:t="camo_skin_tex"` does not replace the vehicle's `*_c`; it adds a PAINT sheet
+  // beside it. The alpha of that paint sheet means "my paint instead of the player's scalable
+  // camouflage", and every published ground skin checked here (M60A1 Blanc, LVT-A(1), M1128 MGS,
+  // WZ-141 and two others) ships it 255 everywhere — the wear does not come from the skin at all,
+  // it comes from the vehicle's own sheet, which set_tex leaves in place.
+  // `replace_tex` DOES replace the sheet, so there its alpha is the real paint/wear mask and
+  // dropping it would flatten the vehicle. Hence: opaque for ground albedo, kept for everything
+  // else, unless the user overrides. A hand-painted mask is always an explicit instruction and
+  // always wins.
+  wantsMask(cx, slot){
+    return chanHasLayers(slot, "wear") || cx.alphaMode === "keep" || (cx.alphaMode === "auto" && !cx.groundPaint);
+  },
+  // Say what will land in the alpha without touching a pixel — this is the half of the file nobody
+  // can see, and getting it wrong is what makes a skin look wrong in game.
+  albedoRow(cx, slot, off){
+    const covNote = chanHasLayers(slot, "wear") ? "painted mask"
+      : !ExportCollect.wantsMask(cx, slot) ? "opaque"
+      : (slot.covBase || App.decoded.get(String(slot.cStem || "").toLowerCase())) ? "mask kept" : "no mask";
+    return { kind: "c", slot, off, w: slot.composite.width, h: slot.composite.height, covNote,
+      fileNameBase: ExportCollect.baseName(slot.cFileName, slot.cStem), fromStem: slot.cStem };
+  },
+  albedoPixels(cx, slot){
+    const w = slot.composite.width, h = slot.composite.height;
+    const img = ctx2d(slot.composite).getImageData(0, 0, w, h);
+    const rgba = new Uint8ClampedArray(img.data);
+    // The composite holds colour only; the mask comes from the wear stack if there is one,
+    // otherwise from the imported texture's own alpha.
+    const wearPainted = chanHasLayers(slot, "wear");
+    let covNote = "opaque";
+    if (ExportCollect.wantsMask(cx, slot)) {
+      const cov = coverageForExport(slot, w, h);
+      if (cov) {
+        let differs = false;
+        for (let i = 0, n = w * h; i < n; i++) { if (cov[i] !== 255) differs = true; rgba[i*4+3] = cov[i]; }
+        if (differs && !wearPainted) slot._alphaRestored = true;
+        covNote = wearPainted ? "painted mask" : differs ? "kept from texture" : "fully opaque";
+      } else covNote = "none found — opaque";
+    }
+    return { kind: "c", slot, rgba, w, h, covNote,
+      fileNameBase: ExportCollect.baseName(slot.cFileName, slot.cStem), fromStem: slot.cStem };
+  },
+
+  // ---- the surface map ----
+  surfEdited(slot){ return !!(slot.smooth && SURF_CHANS.some(ch => chanEdited(slot, ch))); },
+  surfRow(slot, off){
+    return { kind: "n", slot, off, w: slot.nSize, h: slot.normal.height,
+      fileNameBase: ExportCollect.baseName(slot.nFileName, slot.nStem), fromStem: slot.nStem };
+  },
+  // Three sheets into one texture, in the order CLAUDE.md §1 gives: R = inverted roughness,
+  // G = normal X, B = metallicity, A = normal Y. Getting this order wrong produces a file that
+  // loads, renders, and looks subtly wrong everywhere.
+  surfPixels(cx, slot){
+    const w = slot.nSize, h = slot.normal.height;
+    const sm = ctx2d(chanOut(slot, "smooth")).getImageData(0, 0, w, h).data;
+    const mt = ctx2d(chanOut(slot, "metal")).getImageData(0, 0, w, h).data;
+    const nr = ctx2d(chanOut(slot, "normal")).getImageData(0, 0, w, h).data;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      rgba[i*4]   = cx.convert ? cx.lut[sm[i*4]] : sm[i*4];
+      rgba[i*4+1] = nr[i*4];
+      rgba[i*4+2] = mt[i*4];
+      rgba[i*4+3] = nr[i*4+1];
+    }
+    return { kind: "n", slot, rgba, w, h,
+      fileNameBase: ExportCollect.baseName(slot.nFileName, slot.nStem), fromStem: slot.nStem };
+  },
+
+  // ---- a camouflage tile of your own (ROADMAP 4.50 (6)) ----
+  // Written only in its own mode and only for a set_tex skin: it is the file the camouflage pins name
+  // (camoPinPlan), not a sheet of the vehicle, so it has no `from` and no set_tex line. Its alpha is
+  // the camouflage's own (CamoTile.alphaOf says why, and where the number came from), whatever the
+  // composite holds.
+  tile(cx, slot, preview){
+    // Nothing to pin it on (a model with no camouflage material) would ship a file no line names —
+    // a rejection under §1 — so it stays out, and the pin panel says why.
+    if (!CamoTile.on() || !cx.groundPaint || !slot.composite || !CamoTile.stems().length) return null;
+    const off = expGateOff(slot, expOpt(slot, "c"));
+    const w = slot.composite.width, h = slot.composite.height, al = CamoTile.alphaOf(), a = al.a;
+    const row = { kind: "c", camoTile: true, slot, off, w, h, fromStem: null, fileNameBase: CamoTile.ID,
+      covNote: al.from === "sheet" ? "alpha " + a + ", the camouflage's own"
+        : al.from === "project" ? "alpha " + a + ", the camouflage's own as the project recorded it"
+        : "alpha 255 — no camouflage sheet was read" };
+    if (preview) return row;
+    if (off) return null;
+    const rgba = new Uint8ClampedArray(ctx2d(slot.composite).getImageData(0, 0, w, h).data);
+    for (let i = 3; i < rgba.length; i += 4) rgba[i] = a;
+    return Object.assign(row, { rgba });
+  },
+  // Per-texture resolution override, applied last so painting always happens at full size — and
+  // only on the real path, so the list reports the sheet you are editing rather than the file that
+  // will be written.
+  override(items){
+    for (const it of items) {
+      const o = expOpt(it.slot, it.kind);
+      if (o.size && o.size < it.w) {
+        it.rgba = resampleRGBA(it.rgba, it.w, it.h, o.size, Math.max(1, Math.round(it.h * o.size / it.w)));
+        it.h = Math.max(1, Math.round(it.h * o.size / it.w));
+        it.w = o.size;
+        it.resized = true;
+      }
+      it.fmtOverride = o.fmt || "";
+    }
+  },
+};
+function collectExports(preview){
+  ExportCollect.settle(preview);
+  const cx = ExportCollect.ctx(preview);
+  const out = [];
+  for (const slot of App.slots.values()) {
+    // a placeholder has no real texture name to replace in-game — nothing to export
+    if (slot.missing) continue;
+    if (CamoTile.is(slot)) { const t = ExportCollect.tile(cx, slot, preview); if (t) out.push(t); continue; }
+    // Unticking a texture in the export list drops it here, before a single pixel of it is read.
+    // The preview path still lists it — the row is how you tick it back on — but tagged `off`, and
+    // everything downstream (the size estimate, the rule check, and buildBlk) filters on that tag.
+    // That is what keeps CLAUDE.md §1's archive/.blk symmetry: skipping only the *file* would leave
+    // a set_tex pointing at something the archive does not contain, which the game rejects.
+    if (ExportCollect.albedoEdited(slot)) {
+      const off = expGateOff(slot, expOpt(slot, "c"));
+      if (preview) out.push(ExportCollect.albedoRow(cx, slot, off));
+      else if (!off) out.push(ExportCollect.albedoPixels(cx, slot));
+    }
+    if (ExportCollect.surfEdited(slot)) {
+      const off = expGateOff(slot, expOpt(slot, "n"));
+      if (preview) out.push(ExportCollect.surfRow(slot, off));
+      else if (!off) out.push(ExportCollect.surfPixels(cx, slot));
+    }
+  }
+  if (!preview) ExportCollect.override(out);
+  return out;
+}

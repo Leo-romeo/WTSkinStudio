@@ -1,0 +1,275 @@
+{
+  "note": "Markup of the sidebar panels, hashed. A change here is a change the user sees. Regenerate with: node tools/t44_panels.mjs --update, then READ THE DIFF — it is the only place the change is visible.",
+  "cases": {
+    "parts-selection": {
+      "what": "parts panel: a selection spanning two textures, a protected part, a hidden part",
+      "chars": 24454,
+      "sha256": "6681ec889386d8970714e7e246c26ad2d9623e9ab458e2ec145496b9174b8e65"
+    },
+    "parts-folded": {
+      "what": "parts panel: nothing selected, categories only",
+      "chars": 14779,
+      "sha256": "477172dd1085c9fcf71f361b95cf4a2755ede9847ba05b819f04cbdcbffeeaae"
+    },
+    "parts-empty": {
+      "what": "parts panel with no model loaded says what to do",
+      "chars": 12,
+      "sha256": "75f71fd45ceed1772a4bfd90538b0264f2188cd929e5fb0bbacbda6f988dd013"
+    },
+    "layers-stack": {
+      "what": "layer list: one of every row the builder can draw, flat",
+      "chars": 3342,
+      "sha256": "e42336c73bb02652c6e23ed77748a830d06d6a1cb2785a2232e7c66c66b88bc3"
+    },
+    "layers-none": {
+      "what": "layer list with no layer selected says the brush writes into the base texture",
+      "chars": 711,
+      "sha256": "67be3ae6d6c8cbd22541136568b6564d10b956eaa847579e58133c300b54f4e4"
+    },
+    "layers-panel-tree": {
+      "what": "layers panel: a tree — a decal's folder, a group inside a group, a folded one, a masked and scoped one",
+      "chars": 15627,
+      "sha256": "f5ac425fff7ddbe4c54b1b13fcd35e9d4427e17114612797ebd5cb7485bd41cb"
+    },
+    "layers-panel-props-paint": {
+      "what": "layers panel: a masked, part-scoped paint layer's properties, with parts selected to take from",
+      "chars": 8241,
+      "sha256": "3bdc3a75564ecb6c5ca80fa7d58b99e9f11aa6b18f2f24ffb140b570ccd655c4"
+    },
+    "layers-panel-props-fill-value": {
+      "what": "layers panel: a smoothness fill takes a value and no colour picker, and says what the numbers mean",
+      "chars": 8636,
+      "sha256": "46abed06467e8c7903f6958d635811713cdc6ad9bf101a34c3f6228238d23113"
+    },
+    "layers-panel-props-adjust": {
+      "what": "layers panel: an adjustment layer's four parameters — the rows 4.28's D2 turns into an effect",
+      "chars": 6154,
+      "sha256": "4e4ce4512bb63d8cf7e19c79f2e3211826639f1f4e65904244fbd93244452f46"
+    },
+    "layers-panel-props-group": {
+      "what": "layers panel: a group selected — its properties, and the header button says Ungroup",
+      "chars": 4787,
+      "sha256": "3f30deb17408ef27c95c4f8b16bd830df59caf0803674601e2883b45fb2bd239"
+    },
+    "layers-panel-props-gradient": {
+      "what": "layers panel: a colour gradient fill — its shape rows and three stops with colour pickers",
+      "chars": 11735,
+      "sha256": "01eb98ff274fc544831fc64717f2697586a7bb52e7cd5b7a2b03f37188a22cd3"
+    },
+    "layers-panel-props-gradient-grey": {
+      "what": "layers panel: a smoothness gradient fill — value sliders instead of colour pickers",
+      "chars": 11500,
+      "sha256": "00d139dad83835809ae058141595e68e2a5743c8928255adb4485a4730b66c7c"
+    },
+    "layers-panel-props-noise": {
+      "what": "layers panel: a colour Perlin noise — its kind, scale, detail, roughness and seed, then levels and stops",
+      "chars": 12946,
+      "sha256": "95aeb7e4b1a6c06fa31d2c16df0849d563bd9804ece3a6524f38629ef6947923"
+    },
+    "layers-panel-props-noise-streaks-grey": {
+      "what": "layers panel: a streaks noise on smoothness — the stretch row, and value sliders for its stops",
+      "chars": 13161,
+      "sha256": "0371b02e5e4b95f33cc70086956fae66ffa6b74acce0fb261ba909a2645fb98b"
+    },
+    "layers-panel-props-pattern-uv": {
+      "what": "layers panel: a pattern on the sheet — the tile row, repeats, angle and offsets",
+      "chars": 9989,
+      "sha256": "894f1942f1d2ebaeb53be6ef37ae9a5ad3be861fd6deae44976ed6796f4a6bdb"
+    },
+    "layers-panel-props-pattern-model-normal": {
+      "what": "layers panel: a pattern along the model on the normal map — the size in metres, the blend, and the warning",
+      "chars": 10583,
+      "sha256": "20042dde33adc9ca03a99639bafa080605374c4bd1665311a657f40074108b60"
+    },
+    "layers-panel-fx-levels": {
+      "what": "layers panel: a colour Levels effect with its red channel in hand — the Channel select, five numbers, reset",
+      "chars": 7379,
+      "sha256": "93233d68f3e245076f092f405ebbf7b9225cd3af3efef39b4b642c5a64848f10"
+    },
+    "layers-panel-fx-curves": {
+      "what": "layers panel: a colour Curves effect — the box, reset and the hint",
+      "chars": 6554,
+      "sha256": "c8cff1bd84cb50a6e9aa55b3a31e51079bbdf7b48f740da970fdc1e4f9908b7f"
+    },
+    "layers-panel-fx-balance": {
+      "what": "layers panel: a Colour balance with its midtones shifted — the range select, three sliders, keep luminosity",
+      "chars": 6816,
+      "sha256": "68545d3d83a4cce147f18358f6f49da3e7f4ee499b3160b69fad7c7bc84ac37e"
+    },
+    "layers-panel-fx-gradmap": {
+      "what": "layers panel: a Gradient map — the stop rows, pointed at the effect's own stops",
+      "chars": 7828,
+      "sha256": "704f12fee5481b7698818f0167e5cc09072b8174d65f61d2c2888ae556fe4373"
+    },
+    "layers-panel-fx-grey-levels": {
+      "what": "layers panel: a Levels effect on smoothness — no Channel select, no colour-only kinds, the map's own hint",
+      "chars": 6888,
+      "sha256": "3ce410a58f7f0b8bd2d0269d98409ecd3ac0aa2dc08dcdf3035a3120aa4f8f90"
+    },
+    "layers-panel-fx-grey-threshold": {
+      "what": "layers panel: a Threshold on smoothness — one number and its hint",
+      "chars": 5875,
+      "sha256": "fcc8ecd6403d2c72bb0c6a196b7973899487f1f41d51c721c9a81829478bef7c"
+    },
+    "layers-panel-fx-invert": {
+      "what": "layers panel: an Invert effect — the kind select and its hint, and nothing to set",
+      "chars": 5824,
+      "sha256": "6263a0a3ad2bb821899aebd56fa85bb05e53b48ecbac783a1f014e71bf5d45be"
+    },
+    "layers-panel-fx-posterize": {
+      "what": "layers panel: a Posterize effect — one number and its hint",
+      "chars": 5995,
+      "sha256": "02a0b8ddbfb6a5f534db613470b37d9f97385f912d0ad7f6479ddb9e3d800ba1"
+    },
+    "layers-panel-fx-unknown": {
+      "what": "layers panel: an effect kind from a newer build — named as such, with no rows",
+      "chars": 5743,
+      "sha256": "e90c4ea6748cb3fc10249cf53a7e22689d8586d86815df1280702e2bb5e4b7c0"
+    },
+    "layers-panel-multichannel": {
+      "what": "layers panel: one layer carrying three channels — the strip, the dots, and the rows describing the channel in hand",
+      "chars": 9267,
+      "sha256": "757d0db1ca9c3c11b51cbf1f153c2f54492ddff5b825b0c565e5d0c4252f3ae4"
+    },
+    "brush-no-slot": {
+      "what": "brush panel: nothing loaded — every tool that needs a slot is off, and says so",
+      "chars": 14057,
+      "sha256": "4fd610c705fb7a9c4371b3c58b82251879750bc801579bc101aa3949a8b58007"
+    },
+    "brush-air-paint": {
+      "what": "brush panel: an aircraft with both sheets and a paint layer — the wear mask is not a concept here",
+      "chars": 14513,
+      "sha256": "d4fff28b063723a822720a43f7cf3a13cc504e27815a1c68280ee83dd1da068a"
+    },
+    "brush-tank-no-n": {
+      "what": "brush panel: a tank with no _n — the wear mask appears, every surface tool goes off with the reason",
+      "chars": 15047,
+      "sha256": "0fa11ce9db7fb0cc6fa92c8029834013181ec75013f42204d9043e66eb2908b5"
+    },
+    "brush-wrong-channel": {
+      "what": "brush panel: a smoothness layer selected — every tool that can make its own slot stays on, the Eraser does not",
+      "chars": 14455,
+      "sha256": "973442fa02570f524dd7962e39bed6bd3038848af614d375fa935589cd29443c"
+    },
+    "brush-mask-target": {
+      "what": "brush panel: the mask brush — the value row renames itself and Alt stops picking and starts revealing",
+      "chars": 14417,
+      "sha256": "24a2760ffd15294076c7e3513a658c0dcf2d6e49d1bbd1d406eaa37e16ca9617"
+    },
+    "brush-panel-line": {
+      "what": "brush panel: Panel line — the value row reads Depth, and Flow and Build up are hidden because a height stroke always adds",
+      "chars": 14547,
+      "sha256": "3322dca18e135736cb4e6adcc8b055b40322d70dcd65c4206d180d9181c5e1f6"
+    },
+    "brush-camo-tile": {
+      "what": "brush panel: a camouflage tile — the Wear mask brush is off and says the tile carries the camouflage's alpha",
+      "chars": 15025,
+      "sha256": "eb723e40dcd438ef2029f96dd1e5727c33a29dc0c67c4adaa6b72cf767ad3299"
+    },
+    "slots-list": {
+      "what": "texture slots: one loaded and active, one missing, one runtime-built (2D only)",
+      "chars": 1068,
+      "sha256": "69aa6efbb83c1171a8a76f1311b732e2b6ef5541eac0915723a097eb0b89d80a"
+    },
+    "slots-list-camo-tile": {
+      "what": "texture slots: the camouflage tile beside an ordinary slot, the tile's ⋮ menu open",
+      "chars": 1615,
+      "sha256": "79ed332b844dd76f65bb7093a322aa1d892dad9073f329d9d27cf7dfe7cbac1c"
+    },
+    "slots-list-menu": {
+      "what": "texture slots: an ordinary loaded texture with its ⋮ menu open",
+      "chars": 1991,
+      "sha256": "65dde0526fab195c109e27f1b8cd51eb9e7e96169b0ff53e04e114545623c6e6"
+    },
+    "channels-panel": {
+      "what": "the Channels panel: two sheets with their four raw channels, and the alpha line",
+      "chars": 6966,
+      "sha256": "d4061a2cf81af99ca7904021f70207c85929a2ca0d99c433e21c9f37dd35fe19"
+    },
+    "search-results": {
+      "what": "vehicle search: a selected result, an unselected one, and a bare model with no unit record",
+      "chars": 2279,
+      "sha256": "c1db2531f01d60fb4626cffe9ea2b9203290c423d95318c5c3a5990de72e68eb"
+    },
+    "search-empty-filtered": {
+      "what": "vehicle search: a filter picked with an empty query lists what it lets through",
+      "chars": 866,
+      "sha256": "13da39558aeedabf59b7e5614964703e488802b208acb1b315c6fdb4be30b29b"
+    },
+    "skins-list": {
+      "what": "UserSkins list: a folder, a zip, and an archive that cannot be read",
+      "chars": 1543,
+      "sha256": "768a2ea4db690177005de337214cbeb8451e9c220c41d5effd9109ca0a06eb7d"
+    },
+    "search-control": {
+      "what": "the search control over both lists: the box, reset, the type / nation / rank chips and the sort",
+      "chars": 5309,
+      "sha256": "0d5633781b5f43bef9a35ca3ea7952870fc39c9cc58415e38d976fd75362dac6"
+    },
+    "search-outside-filters": {
+      "what": "vehicle search: a query with the aircraft filter on — the T-34 it asked for, and a raw texture",
+      "chars": 1634,
+      "sha256": "81e53e5ea29bf1fcb6ddb6c4374c8461fdf9e15e068c495df9125e165f4062da"
+    },
+    "search-forgiving": {
+      "what": "vehicle search: a typo (abrahms) and a missing hyphen (f4e) still find the vehicle",
+      "chars": 2500,
+      "sha256": "6fcf6f0e79469f00cffa1b88f50266b2bdca64749e853c3cbbcb965e9d6ba2a1"
+    },
+    "skins-search": {
+      "what": "UserSkins list under the one search: the aircraft filter with nothing typed, then a query it leaves out",
+      "chars": 1776,
+      "sha256": "10150414d380d5a66152b5e13c114beefc54dfe88b3fa5c3a0d79b8b4e06b34e"
+    },
+    "export-validate": {
+      "what": "the pre-export rule check: one row of every level, worst first",
+      "chars": 695,
+      "sha256": "0a493a1db2600e4f3da701e04fb8fb1b3808cfe1fc8f6d5eda7ed7fdaebb3034"
+    },
+    "export-camo-tile": {
+      "what": "Camo under skin ▸ My own pattern: the preview row at 150 % / −30°, and the pin list naming the tile and the stem that keeps the game's own",
+      "chars": 1078,
+      "sha256": "a808677b0c1cf9ef54d44e7b72288aa27d18bd6ba6c583d42931bfbe743eea1b"
+    },
+    "select-panel": {
+      "what": "Selection tab: the wand with a patch picked (its row shown), a lasso with two corners down, then off and empty",
+      "chars": 21261,
+      "sha256": "1668a4c4184063c2b4b7aaea14e784830a1cd4b57d775f947fb15819f9629dd5"
+    },
+    "shape-panel": {
+      "what": "Shape tab: a closed path (Fill, Stamp along and → selection offered), then the same path open (→ selection refused)",
+      "chars": 4484,
+      "sha256": "9449ba95c8837395dfb3d85b3cd0b52d0e6843fe74b425cb4c3c90d66a5fdeb4"
+    },
+    "mask-bake-dialog": {
+      "what": "the model dialog: its two mask sources with no cockpit model, then From the cockpit on a sheet the body on screen does not use",
+      "chars": 7129,
+      "sha256": "aacfe684df579ed9b9c64f3ac7287ce941231b353db242c968e10c0969c1c9cd"
+    },
+    "history-window": {
+      "what": "history window: a named Start, costs in KB and MB, two checkpoints, the current state and two undone steps",
+      "chars": 5413,
+      "sha256": "734a229b0dd13199c2f9549a20161719fbfb40bf03dbcccebe3b17fbfa047851"
+    },
+    "weapons-empty": {
+      "what": "weapons panel: the builder with every station empty",
+      "chars": 3086,
+      "sha256": "50fbe9b3fc9d95e8216c1312bc6840546a074c9c73203fdf0aff1b9ded733ffb"
+    },
+    "weapons-built": {
+      "what": "weapons panel: a build filled from a game preset, one station changed by hand and open",
+      "chars": 4606,
+      "sha256": "b86ecd314f45dd1a4f2371c5cc55728871dd52f0b8071423281f3e552a58a5b4"
+    },
+    "pose-tank": {
+      "what": "moving parts: a tank's turret and gun, ranged by its own datasheet",
+      "chars": 1069,
+      "sha256": "8c78dac6adad63c19dc77e414c23d34ad83c5c55ce04f7361cb941315590125c"
+    },
+    "pose-bare": {
+      "what": "moving parts: a model with no skeleton says why there is nothing to move",
+      "chars": 132,
+      "sha256": "f3ba14e82d245ad1eda34059ac7f23f6f8ca3e3e19d02d2d5d15f08f3acf1424"
+    }
+  }
+}

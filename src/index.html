@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<!--
+  WT Skin Studio — a browser editor for War Thunder user skins.
+  Copyright (C) 2026 the WT Skin Studio authors.
+
+  This program is free software: you can redistribute it and/or modify it under the terms of the
+  GNU General Public License as published by the Free Software Foundation, either version 3 of the
+  License, or (at your option) any later version. It is distributed in the hope that it will be
+  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+  FOR A PARTICULAR PURPOSE. See <https://www.gnu.org/licenses/> for the full licence.
+
+  This file is a build artifact: one self-contained page assembled from many sources. The complete
+  corresponding source is available from the project repository and on request from whoever gave
+  you this copy.
+
+  It reads your own War Thunder install and never writes to it, sends nothing anywhere, and
+  contains no game assets. It needs no network either, not even the first time it is opened:
+  everything it runs is in this file, both decompressors included, and so are two libraries by
+  other authors, which it uses under the MIT licence:
+
+    three.js r128   Copyright 2010-2021 Three.js Authors
+    JSZip 3.10.1    (c) 2009-2016 Stuart Knightley <stuart [at] stuartk.com>. Dual-licensed,
+                    MIT or GPL-3; used here under MIT. It includes pako
+                    (https://github.com/nodeca/pako), also MIT:
+                    Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn
+
+  Each library's own notice heads its script below. The MIT licence, as it applies to all three:
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+    and associated documentation files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or
+    substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+    BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WT Skin Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- three.js r128 and JSZip 3.10.1, inlined by the build like every other source since 2026-09-26
+     (ROADMAP 4.50 (1)). Until then they were the only two things this file loaded from the
+     network: from cdnjs, pinned by Subresource Integrity because the app holds a File System
+     Access handle to your War Thunder install and a compromised CDN response would have run with
+     that access. So a first open with no connection stopped at the boot guard (src/main.js) with
+     no 3-D view, and every first open made a request to a third party. Carrying them ends both.
+     The copies in src/vendor/ are the bytes those SRI hashes pinned; tools/build.mjs's VENDORED
+     table keeps each URL and hash, and tools/t41_build.mjs re-hashes the copies against it on
+     every npm test. `npm run build:cdn` writes the page that fetches them instead, from the same
+     table. The file names carry the versions so the pins stay visible here; moving to another
+     version is a new copy, a new name here and a new entry in that table.
+     zstd used to be the third: fzstd from unpkg. It is gone because the app now carries its own
+     zstd decoder as WASM (/*==ZSTD==*/), which it needed anyway for the dictionary-compressed
+     files in aces.vromfs.bin that no JS zstd can read. -->
+<script src="./vendor/three-r128.min.js"></script>
+<script src="./vendor/jszip-3.10.1.min.js"></script>
+<style>
+:root{
+  --bg:#16181d; --panel:#1e2128; --panel2:#242832; --border:#333845;
+  --text:#d6d9e0; --muted:#8b91a0; --accent:#4f8ff7; --accent2:#2c5cb0;
+  --danger:#e05555; --ok:#4fbf7a; --warn:#e0a03c; --radius:6px;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overflow:hidden}
+body{background:var(--bg); color:var(--text); font:13px/1.45 system-ui, Segoe UI, sans-serif; display:flex; flex-direction:column}
+button{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:5px 10px; cursor:pointer; font:inherit}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent2); border-color:var(--accent)}
+/* `.active` used to declare the same two properties with the same two values as `.primary`, so a
+   button that was BOTH — #btnProjMove, #btnProject3d — changed by literally nothing when its mode
+   came on. Measured 2026-08-23 and again 2026-08-25: rgb(44,92,176) background / rgb(79,143,247)
+   border, before and after adding the class. A mode has to be visible on the control that sets it
+   (ROADMAP 3.14), so "on" is now the FILLED accent with dark text — an inverted chip that reads as
+   on against a plain button and against a primary one alike, and at 5.7:1 rather than the 3.2:1
+   white-on-accent would have given. The tabs keep their own look: `.tabs button.active` is more
+   specific and sets colour and background itself. */
+button.active{background:var(--accent); border-color:var(--accent); color:var(--bg)}
+button:disabled{opacity:.45; cursor:default}
+/* A mode that is on but cannot be used right now — the Color tool, with nothing loaded. Filled accent
+   at the 45 % every disabled control gets, it measured 2.2:1 and read as neither on nor off (review,
+   2026-10-10). It is drawn as the off control it is for the moment, like its neighbours, and the
+   accent border alone says which one is selected. tools/t133_fit.mjs compares it with the Eraser. */
+button.active:disabled{background:var(--panel2); color:var(--text); border-color:var(--accent)}
+input[type=text]{background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:4px 8px; font:inherit; width:120px}
+textarea{background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:4px 8px; font:inherit}
+input[type=number]{background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:4px 6px; font:inherit; width:100%}
+/* Sliders are DRAWN HERE, not left to the browser: reported 2026-09-25 as "white bars" in Opera, and
+   even Chrome paints a disabled native one as a light-grey bar on this dark page — `accent-color` only
+   tints the parts a browser chooses to tint. `appearance:none` hands every Blink browser (Chrome,
+   Edge, Opera) the same box to draw.
+   The filled part left of the thumb has no pseudo-element in Blink, and a JS-set width would drift
+   whenever code sets `.value` (prefs, reset, a layer picked), so it is the thumb's own border-image:
+   accent to its left, track to its right, 100vw each way, one line thick, clipped by the input's
+   overflow. Firefox has ::-moz-range-progress for the same thing. Focus inverts the thumb rather
+   than ringing it, because a ring would be clipped by that same overflow. */
+input[type=range]{--sl-thumb:14px; --sl-line:4px; --sl-track:#3d4352;
+  -webkit-appearance:none; appearance:none; width:100%; height:var(--sl-thumb); margin:0; padding:0;
+  background:none; cursor:pointer; overflow:hidden; border-radius:calc(var(--sl-thumb) / 2); accent-color:var(--accent)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; appearance:none;
+  width:var(--sl-thumb); height:var(--sl-thumb); border:none; border-radius:50%; background:var(--accent);
+  border-image:linear-gradient(90deg, var(--accent) 50%, var(--sl-track) 0) 0 1 / calc(50% - var(--sl-line) / 2) 100vw / 0 100vw}
+input[type=range]::-moz-range-track{height:var(--sl-line); border-radius:2px; background:var(--sl-track)}
+input[type=range]::-moz-range-progress{height:var(--sl-line); border-radius:2px; background:var(--accent)}
+input[type=range]::-moz-range-thumb{width:var(--sl-thumb); height:var(--sl-thumb); border:none; border-radius:50%; background:var(--accent)}
+input[type=range]:focus{outline:none}
+input[type=range]:focus-visible::-webkit-slider-thumb{background:var(--text); box-shadow:inset 0 0 0 3px var(--accent)}
+input[type=range]:focus-visible::-moz-range-thumb{background:var(--text); box-shadow:inset 0 0 0 3px var(--accent)}
+input[type=range]:disabled{opacity:.45; cursor:default}
+select{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:3px 6px; font:inherit}
+input[type=color]{width:34px; height:26px; border:1px solid var(--border); border-radius:var(--radius); background:none; padding:1px; cursor:pointer}
+input[type=checkbox]{accent-color:var(--accent)}
+#topbar{display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--border); flex:0 0 auto; flex-wrap:wrap}
+#topbar .title{font-weight:600; font-size:14px; margin-right:6px; white-space:nowrap}
+#topbar .title span{color:var(--accent)}
+.sep{width:1px; align-self:stretch; background:var(--border); margin:0 4px}
+#topbar .grow{flex:1 1 0}
+/* One row on a laptop (review, 2026-10-10). The bar needs 1 516 px at its widest (a vehicle ticked and
+   its name unlocked: the 160 px field and the pencil both up), so on a 1366 screen and at 1280 — a
+   1080p laptop at 150 % — it wrapped, and the work area started at 87 px instead of 48. Each step was
+   measured in that widest state, cheapest first: below 1540 px the app's name goes (the window title
+   and the welcome card carry it) and the gaps close by 2 px — 1 345 px; below 1360 the buttons lose
+   3 px of padding a side and the gaps one more — 1 239 px. The vehicle field keeps its 160 px: a unit
+   id is typed into it whole. Under that the bar wraps, as it always did. tools/t133_fit.mjs holds
+   one row at 2560, 1920, 1366 and 1280, and the name in view at the first two. */
+@media (max-width:1539px){ #topbar{gap:6px} #topbar .sep{margin:0 2px} #topbar .title{display:none} }
+@media (max-width:1359px){ #topbar{gap:5px} #topbar button:not(.tbicon){padding-left:7px; padding-right:7px} }
+/* An icon-only top-bar button (the camera): as tall as its text neighbours, the icon centred. */
+.tbicon{display:inline-flex; align-items:center; justify-content:center; padding:6px 9px}
+.tbicon svg{display:block}
+/* The status line is a bar along the bottom of the window (ROADMAP 3.36), one line, small and quiet;
+   anything it cuts, and any detail a message carries, is one hover or click away — ui/dom.js,
+   StatusLog. It used to be the tail of the top bar, where a long sentence took the row's attention. */
+#statusbar{display:flex; align-items:center; flex:0 0 auto; padding:1px 6px; background:var(--panel); border-top:1px solid var(--border)}
+#status{flex:1 1 0; min-width:0; text-align:left; color:var(--muted); font-size:11.5px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; border-radius:4px; padding:1px 4px}
+#status.err{color:var(--danger)} #status.ok{color:var(--ok)}
+#status:hover, #status:focus-visible{background:var(--panel2); outline:none}
+#status[data-clip]{text-decoration:underline dotted; text-underline-offset:3px}
+#statusLog{position:fixed; z-index:160; width:min(560px, calc(100vw - 16px)); max-height:min(60vh, 520px); display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:12px; user-select:text}
+#statusLog[hidden]{display:none}
+#statusLog .slog-head{display:flex; align-items:center; gap:6px; padding:5px 6px 5px 10px; border-bottom:1px solid var(--border);
+  font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); user-select:none}
+#statusLog .slog-head .grow{flex:1 1 auto}
+#statusLog .slog-head button{display:inline-flex; align-items:center; gap:4px; padding:2px 7px; font-size:11px; text-transform:none; letter-spacing:0}
+#statusLog .slog-list{overflow-y:auto; padding:4px 0}
+#statusLog .slog-row{display:flex; gap:10px; padding:4px 10px; line-height:1.45}
+#statusLog .slog-t{flex:0 0 auto; color:var(--muted); opacity:.7; font-variant-numeric:tabular-nums; font-size:11px; padding-top:1px}
+#statusLog .slog-msg{flex:1 1 auto; min-width:0; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere}
+#statusLog .slog-row:first-child{background:var(--panel2)}
+#statusLog .slog-row:first-child .slog-msg{color:var(--text)}
+#statusLog .slog-row.err .slog-msg{color:var(--danger)}
+#statusLog .slog-row.ok .slog-msg{color:var(--ok)}
+#main{display:flex; flex:1 1 auto; min-height:0}
+.sidebar{width:230px; flex:0 0 auto; background:var(--panel); border-right:1px solid var(--border); overflow:hidden; display:flex; flex-direction:column}
+#rightbar{width:250px; border-right:none; border-left:1px solid var(--border)}
+.resizer{flex:0 0 6px; cursor:col-resize; background:transparent; transition:background .12s; z-index:6; touch-action:none}
+.resizer:hover, .resizer.active{background:var(--accent)}
+.section{border-bottom:1px solid var(--border); padding:10px}
+.section h3{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none}
+/* The caret is drawn, not typed. It was "▾" at 9px and 60% opacity against 11px header text —
+   a glyph whose ink is about 5x3 px, which is why it was reported as looking like a dot and not
+   like something that folds (ROADMAP 3.11a). Borders give an exact 8x5 px triangle at full
+   opacity, in the header's own colour, and identical on every platform — which is the same reason
+   §4 says icons are SVG and never emoji. `.mini` still lands on the right: this is one flex item
+   of three and the header is still space-between. */
+.section h3::before{content:""; flex:0 0 auto; width:0; height:0; margin-right:6px;
+  border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid currentColor}
+.section.collapsed h3::before{border-top:4px solid transparent; border-bottom:4px solid transparent;
+  border-left:5px solid currentColor; border-right:none}
+.section.collapsed > *:not(h3){display:none}
+.section.collapsed h3{margin-bottom:0}
+.section h3 .mini{display:flex; gap:4px}
+.section h3 .mini button{padding:1px 7px; font-size:12px}
+#views{flex:1 1 auto; display:flex; min-width:0; position:relative}
+/* `flex-basis:0` rather than `50%`, so the two panes divide the FREE space in proportion to their
+   grow factors. That is what makes the divider draggable by one number: pane = free * grow, so
+   moving the bar by dx is grow += dx/free exactly, at any window width and with either sidebar any
+   size. With `50%` the two bases already total the whole row, the panes are in overflow, and a
+   dragged basis is resolved through shrink instead — the bar lags the cursor and the ratio is not
+   the one that was stored. Both grow 1 here, so the default is still an even split and, as with the
+   sidebar widths, that default lives in this stylesheet and nowhere else. */
+.viewwrap{position:relative; flex:1 1 0; min-width:0; border-right:1px solid var(--border)}
+.viewwrap:last-child{border-right:none}
+/* Under #welcome (z-index 5) rather than over it, unlike the sidebar bars: the welcome card covers
+   the views completely, so an accent strip lighting up across it would be a bar for a split that
+   cannot be seen. Being covered also takes the pointer, so no separate hiding is needed. */
+#viewSep{z-index:4}
+.viewwrap canvas{display:block; width:100%; height:100%; touch-action:none}
+/* The view's controls sit along the top and are held INSIDE the view: pinned only on the right, the
+   3-D bar grew leftward out of its pane and covered the sidebar's tabs at 1024, 1280 and 1366 px
+   (measured 2026-09-25 — bodySel and camPreset lay over Vehicle / Textures). Now it wraps to a
+   second line instead, and the strip it spans lets the pointer through to the model. The mouse
+   hint moved to the bottom corner, where a wrapped bar can never cover it. */
+.viewlabel{position:absolute; bottom:8px; left:10px; font-size:11px; color:var(--muted); background:rgba(20,22,28,.7); padding:2px 8px; border-radius:10px; pointer-events:none; z-index:2}
+.viewbtns{position:absolute; top:6px; right:8px; left:8px; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; z-index:2; pointer-events:none}
+.viewbtns > *{pointer-events:auto}
+.viewbtns button{padding:2px 6px; font-size:11px}
+/* ROADMAP 4.50 (15): with the rulers up, the 2-D view's own buttons and label move off them.
+   `--ruler` is written by GuidesUI.sync, the one place the thickness is stated. */
+#view2dwrap.rulers .viewbtns{top:calc(var(--ruler) + 6px); left:calc(var(--ruler) + 8px)}
+#view2dwrap.rulers .viewlabel{left:calc(var(--ruler) + 10px)}
+/* As wide as what it says, not as its longest option: "View…" was 95 px and "Shaded" 152, because a
+   select sizes to "_n red (inv. roughness)" whatever it shows, and the 3-D bar wrapped over the model
+   in Split — two lines at 1366 and 1280, three at 960 (review, 2026-10-10). Sized to its text alone,
+   the channel view then wrapped the bar again whenever it showed more than Shaded: "Auto — follow the
+   layer", a saved preference, is 145 px and put it on two lines at 1366 and 1280, and so did every
+   byte view (review of that fix, the same day). So the channel view starts at about Shaded's 66 px
+   and GROWS into what the line leaves, up to its text — a flex line is broken at the basis, not at
+   the text, so the select never wraps the bar: whole wherever there is room, cut short where there
+   is not. Gaps of 3 px and buttons of 6 px a side (were 4 and 8) leave it 92 px at 1280 rather than
+   71, enough for Smoothness and Metalness whole. t133_fit sets every option at every size. Chrome
+   does not draw text-overflow on a select; the text is clipped. field-sizing is Chrome's own. */
+.viewbtns select{padding:1px 3px; font-size:11px; field-sizing:content}
+#chanViewSel{flex:1 0 66px; min-width:0; max-width:max-content}
+#view2dwrap{background:#101216}
+#drop{position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(30,60,120,.25); border:2px dashed var(--accent); z-index:50; font-size:18px; pointer-events:none}
+.row{display:flex; align-items:center; gap:6px; margin-bottom:6px}
+/* A row of toggles that cannot fit a 230 px panel on one line wraps BETWEEN buttons, never inside
+   one — "Shape: / off" and "→ / parts" were two-line buttons. Only rows marked `wrap`: in a slider
+   row the range is width:100% and would wrap onto a line of its own. */
+.row.wrap{flex-wrap:wrap; row-gap:4px}
+.row.wrap > button{white-space:nowrap}
+.row label{flex:0 0 auto; color:var(--muted); font-size:12px}
+/* The same trap as `.clearbox` below, closed before it opens: a text field in a flex row is a flex
+   item whose `min-width:auto` is its 181 px intrinsic width, so it would overrun whatever shares
+   the row. No `.row` holds a text field today — this fixes nothing and is here so the next one that
+   does starts correct, because the version of this bug that shipped went unnoticed for months and
+   reported nothing (scrollWidth === clientWidth throughout). */
+.row input[type=text]{min-width:0}
+/* A <select> has the same intrinsic width and therefore the same trap, and unlike the line above
+   this one is not hypothetical: it was measured on 2026-08-25, on the decal editor's own Look
+   control. Rewording one option from "Vinyl sticker (gloss + rim)" to "(gloss + raised edge)" —
+   a text change, in a `flex:1` select — pushed it 41 px past the right edge of the 250 px side
+   panel. A select sizes to its WIDEST option, so any wording change anywhere is a layout change
+   until this rule is present. It only bites where an item would be forced wider than its share,
+   so on every row that already fits it does nothing. */
+.row select{min-width:0}
+/* Same rule, third element type: the selection's four number boxes share two rows, and a spinner's
+   intrinsic width is wider than a quarter of a 250 px panel. */
+.row input[type=number]{min-width:0}
+.row .val{margin-left:auto; color:var(--muted); font-size:12px; min-width:28px; text-align:right}
+/* ROADMAP 4.35(3): a readout you can type into — same place, same size, a field instead of a span */
+.row input.val{width:54px; min-width:0; flex:0 0 auto; padding:1px 3px; font:inherit; font-size:12px; color:var(--text);
+  background:var(--panel2); border:1px solid var(--border); border-radius:4px}
+/* Every slider's readout is a box you can type into (ui/dom.js, sliderTyping): it says so by
+   looking like one on hover, and the field that replaces it keeps its place and size. */
+input[type=range] ~ span.val{cursor:text; padding:0 3px; border-radius:4px; border:1px solid transparent;
+  font-variant-numeric:tabular-nums; white-space:nowrap}
+input[type=range] ~ span.val:hover{color:var(--text); background:var(--panel2); border-color:var(--border)}
+input.valedit{flex:0 0 auto; margin-left:auto; padding:1px 4px; font:inherit; font-size:12px; text-align:right;
+  color:var(--text); background:var(--bg); border:1px solid var(--accent); border-radius:4px; outline:none}
+/* ---- ONE clickable row, and five variants of it (ROADMAP 3.26) ----
+   There were five components — `.vrow`, `.skinrow`, `.slot`, `.layer`, `.partrow` — and put side by
+   side they were this one with five sets of numbers: five paddings, four gaps, three ideas of hover
+   and three of "selected", one of which was no selected state at all. That last one is why the
+   skins list read as "nearly the same but flatter". They drifted because each was written where it
+   was needed, so the rule from here is: **a variant is a class you add, not a block you copy**, and
+   **the numbers live in custom properties rather than in rules** — `--radius` already worked that
+   way and was the one thing all five agreed on, which is the proof of it. "Make every row a bit
+   tighter" is now one line.
+   `.vrow` is the one promoted, because it was the most developed: the only one with an icon slot, a
+   hover affordance (`.go`; the vehicle row dropped its "Load ▸" on 2026-10-10 — it cost the name
+   44 px, see game-list.js — while a dialog's choice rows keep theirs, ui/welcome.js), an overflow
+   menu and a real selected state. Each old name survives as a
+   MODIFIER, so a list keeps its own extras — the layer's eye and channel dots, the slot's
+   thumbnail — and stops having its own idea of what a row IS. */
+.rowitem{--row-pad:6px 7px; --row-gap:8px; --row-gapY:4px; --row-t1:12.5px; --row-t2:11px;
+  display:flex; align-items:center; gap:var(--row-gap); padding:var(--row-pad);
+  border-radius:var(--radius); cursor:pointer; border:1px solid transparent;
+  background:var(--panel2); margin-bottom:var(--row-gapY)}
+.rowitem:hover{border-color:var(--accent); background:#2b3140}
+.rowitem.sel{border-color:var(--accent); background:var(--accent2)}
+/* The end of a long vehicle list: the next rows, loaded when it scrolls into sight (game-list.js). */
+.listmore{width:100%; margin:2px 0 6px; font-size:11.5px; color:var(--muted); background:none; border-style:dashed}
+.rowitem .ico{flex:0 0 auto; width:20px; font-size:14px; opacity:.9;
+  display:flex; align-items:center; justify-content:center; color:var(--text)}
+.rowitem.sel .ico, .rowitem:hover .ico{color:var(--accent)}
+.rowitem .txt{flex:1 1 auto; min-width:0}
+.rowitem .t1{font-size:var(--row-t1); color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.rowitem .t2{font-size:var(--row-t2); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* A choice row's verb ("Choose", "Write", "Load") in a dialog (ui/welcome.js choiceDialog), shown
+   under the pointer. The vehicle row no longer has one; these rules are the dialogs'. */
+.rowitem .go{flex:0 0 auto; font-size:11px; color:var(--accent); opacity:0; transition:opacity .12s}
+.rowitem:hover .go{opacity:1}
+/* The download icon on a vehicle row (2026-10-10). It was the muted colour at opacity .55 — 2.4:1 on
+   the row, 2.25 under the pointer, 1.47 on a selected row — and read as a disabled control. Full
+   opacity, the icon's own included (`.vico` draws at .85, which alone made it 3.79 at rest), and a
+   lighter colour where the row's ground is lighter: 4.67, 9.2 and 6.43 to 1. It is
+   16 px wide and sits 6 px from the text, no wider than the glyph was, because every pixel of the
+   row is the name's: 125 px of it, 119 while the column scrolls, for names of 73-114. */
+.rowitem .more{flex:0 0 auto; display:flex; align-items:center; padding:3px 1px; margin-left:-2px; background:none; border:none;
+  border-radius:4px; color:var(--muted)}
+.rowitem .more .vico{width:14px; height:14px; opacity:1}
+.rowitem:hover .more{color:var(--text)}
+.rowitem.sel .more{color:#fff}
+.rowitem .more:hover{color:var(--text); background:var(--border)}
+/* The variants: only what genuinely differs, and every one of them is a number. */
+/* The two DENSE lists. A card that suits four search results is too airy for a twenty-layer stack
+   in a 230 px column, so the space between rows is a number like the rest — measured against what
+   these two had before the unification, which was none at all. */
+.rowitem.slot{--row-pad:5px 6px; --row-gapY:2px}
+.rowitem.skinrow{--row-pad:5px 6px; --row-gap:7px; --row-t1:12px}
+.rowitem.skinrow.bad{opacity:.5; cursor:default}
+.rowitem.layer{--row-pad:4px 6px; --row-gap:6px; --row-gapY:2px; --row-t1:12px; font-size:12px}
+/* A part row is a checkbox line inside a tree, not a card: no ground, no border box, no margin, and
+   the row itself is not the affordance — the checkbox is. It is the one variant that keeps a
+   genuinely different shape rather than a different set of numbers. */
+.rowitem.partrow{--row-pad:2px 0; --row-gap:6px; --row-gapY:0; font-size:12px; color:var(--muted);
+  background:none; border:0; border-radius:0; cursor:default}
+.rowitem.partrow:hover{background:none}
+.slot img, .slot .noimg{width:34px; height:34px; border-radius:4px; background:#0c0e12; object-fit:cover; flex:0 0 auto}
+.slot .noimg{display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:11px}
+.slot .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--row-t1)}
+.slot .sz{color:var(--muted); font-size:var(--row-t2)}
+.layer .eye{cursor:pointer; opacity:.85; width:16px; text-align:center; flex:0 0 auto}
+.layer .eye.off{opacity:.25}
+/* The name keeps 40 px and the tag gives way first, ending in "…" with the whole of it in its title.
+   With a mask's thumbnail beside the layer's, "multiply·mask" squeezed the name to nothing and ran
+   past the row, and a group's "group·2 layers·multiply" did the same to "Markings" — at the default
+   column width (2026-10-10; t133_fit). The shrink factor is what puts the tag first in line. */
+.layer .nm{flex:1 1 auto; min-width:40px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--row-t1)}
+.layer .tag{font-size:11px; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:0 5px;
+  flex:0 100 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* ROADMAP 4.28(e). A layer row said its TYPE, because a layer had one; it carries per-channel
+   content now, so the row says which channels it holds. Dots and not words: five of them fit where
+   one word did, and the set is small and fixed enough to learn — the title on each says the channel
+   and what kind of content is in it, and a dot is only drawn for a channel the layer carries. */
+.layer .cdots{display:flex; gap:2px; flex:0 0 auto}
+.cdot{width:7px; height:7px; border-radius:50%; flex:0 0 auto; border:1px solid var(--border)}
+.cdot.color{background:#4f8ff7} .cdot.smooth{background:#cfd6e0} .cdot.metal{background:#b08d4f}
+.cdot.normal{background:#7fbf7f} .cdot.wear{background:#c07fb0}
+/* The channel strip: what the selected layer carries, and the one place a channel is added,
+   converted, moved or removed (4.20's two commands live in the ▾ menu). A chip the layer has no
+   content on is a "+", so the strip is also the answer to "what else could this layer be". */
+.chanstrip{display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 6px}
+.chanchip{display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 5px; border-radius:9px;
+  border:1px solid var(--border); background:var(--panel2); color:var(--muted); cursor:pointer}
+.chanchip.has{color:var(--text)} .chanchip.cur{border-color:var(--accent)}
+.chanchip button{font-size:11px; padding:0 3px; line-height:1.2; background:none; border:0; color:inherit; cursor:pointer}
+/* The Layers section's add buttons, a pixel tighter than the header buttons they were until 2026-10-10, so
+   "+ Layer  Img  Text  Ungroup" is one line in the column with its scrollbar (203 px; t133_fit). */
+#layerBar{gap:4px}
+#layerBar > button{padding:1px 6px; font-size:12px}
+.brushmodes{display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:8px}
+.brushmodes button{font-size:11px; padding:4px 2px}
+.partrow input{flex:0 0 auto}
+.hint{color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px}
+/* The line above the loadout (WeaponsPanel.info): a hyphenated word is one inline-block, so "F-4E" and
+   "flightmodels/f-4e.blk" go to the next line whole instead of breaking at the hyphen, and one longer
+   than the line — or an underscore id, with nowhere to break at all — wraps where it must instead of
+   running out of the column, which cuts it off: 34 of the install's 1 568 flying units' lines were cut
+   that way, 38 once the path was made one unbreakable span (review, 2026-10-10; t133_fit). */
+#weaponInfo{overflow-wrap:anywhere}
+#weaponInfo .keep{display:inline-block; max-width:100%}
+/* Pre-export rule check. One row per published-skin rule, worst first. */
+.vchk{margin-top:6px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel2)}
+.vchk>summary{cursor:pointer; padding:5px 8px; font-size:11.5px; list-style:none; display:flex; gap:6px; align-items:center}
+.vchk>summary::-webkit-details-marker{display:none}
+.vchk>summary::before{content:""; flex:0 0 auto; width:0; height:0; color:var(--muted);
+  border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:5px solid currentColor}
+.vchk[open]>summary::before{border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid currentColor; border-bottom:none}
+.vchk>div{padding:0 8px 6px}
+/* ROADMAP 3.26 renamed this from `.vrow`. It was a NAME COLLISION and not a style inconsistency:
+   the clickable vehicle-result row was also called `.vrow`, so the cascade gave the
+   second one the shared properties and left this one child rules live — each component was partly
+   styled by the other. Fixed before anything was unified on top of it. */
+.vchkrow{display:flex; gap:6px; align-items:flex-start; padding:3px 0; font-size:11px; border-top:1px solid var(--border)}
+.vchkrow:first-child{border-top:none}
+.vchkrow .vmark{flex:none; width:12px; text-align:center; font-weight:700; line-height:1.5}
+.vchkrow .vtitle{color:var(--text)}
+.vchkrow .vdetail{color:var(--muted); word-break:break-word}
+.v-error .vmark{color:var(--danger)} .v-warn .vmark{color:var(--warn)}
+.v-pass .vmark{color:var(--ok)} .v-info .vmark{color:var(--accent)}
+.v-pass .vtitle,.v-info .vtitle{color:var(--muted)}
+/* ROADMAP 3.31 — ONE style for "off because a published skin may not carry it", so it reads as
+   a rule rather than as a broken control: dashed in the warn colour, distinct from `:disabled`'s
+   plain dimming, and an outline rather than a border so a native checkbox shows it too. The mark
+   beside it (ui/gate.js) names the rule and opens the gate; open, it stays in the warn colour for
+   the rest of the session. */
+.gated{opacity:.55; outline:1px dashed var(--warn); outline-offset:1px; cursor:not-allowed}
+option.gated{color:var(--muted)}
+.gatemark{display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:16px; height:16px;
+  color:var(--muted); cursor:pointer; opacity:.75; border-radius:3px}
+.gatemark svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round}
+.gatemark:hover,.gatemark:focus-visible{opacity:1; color:var(--text); outline:none; background:var(--panel2)}
+.gatemark.open{color:var(--warn); opacity:1}
+.gatemark.open:hover{color:var(--warn)}
+#welcome{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5; background:var(--bg)}
+#welcome .card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:28px 34px; max-width:520px; text-align:center}
+#welcome h1{font-size:20px; margin-bottom:10px}
+#welcome h1 span{color:var(--accent)}
+#welcome p{color:var(--muted); margin-bottom:14px}
+#welcome .big{font-size:14px; padding:9px 18px}
+#welcome .wopt{display:block; width:100%; margin:8px 0; text-align:left; padding:12px 16px}
+#welcome .wopt small{display:block; color:var(--muted); font-size:12px; font-weight:400; margin-top:3px}
+/* muted grey on the blue card is 2.0:1 — unreadable; this measured 4.9:1 (WCAG AA asks 4.5) */
+#welcome .wopt.primary small{color:#d5e2fb}
+/* A session to recover (ROADMAP 4.50(2)) sits above the three ways in, ruled off from them: it is the
+   one thing on the card that cannot wait for later. */
+#welcomeRecover{margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--border)}
+#welcomeRecover .recoverActs{display:flex; gap:8px; justify-content:flex-end; margin:-2px 0 8px}
+#welcomeRecover .recoverActs button{font-size:12px; padding:4px 10px}
+/* Work that is in no file yet: a dot on Save proj, the way an editor tab marks an unsaved document. */
+#btnSaveProj.unsaved::after{content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-left:6px; vertical-align:middle}
+kbd{background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:0 5px; font-size:11px}
+/* ---- sidebar tabs: one job visible at a time instead of four stacked panels ---- */
+.tabs{display:flex; flex:0 0 auto; border-bottom:1px solid var(--border); background:var(--panel2)}
+/* Sized to their labels (flex-basis auto), not four equal quarters: equal quarters cut "Textures 13"
+   to "Textu…" in a 229 px column while "Vehicle" had room to spare. Measured 2026-09-25 at 12 px:
+   46 + 67 + 55 + 61 px, every label whole. */
+.tabs button{flex:1 1 auto; border:none; border-radius:0; background:none; padding:7px 4px; font-size:12px; color:var(--muted);
+  border-bottom:2px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.tabs button:hover{color:var(--text); border-color:var(--border)}
+.tabs button.active{color:var(--text); background:var(--panel); border-bottom-color:var(--accent)}
+.tabs button .cnt{color:var(--muted); font-size:11px; margin-left:3px}
+.tabpage{display:none; flex-direction:column; min-height:0}
+.tabpage.active{display:flex}
+/* ---- ONE LAYOUT RULE FOR BOTH SIDEBARS (ROADMAP 3.6) ----
+   A sidebar is a flex column that never scrolls itself. What has to stay in view is furniture at its
+   natural height — the tab bar, a header, the search box, its chips, its sort — and the only things
+   that scroll are `.pane`s, which share whatever height is left. Measured 2026-09-26 at a
+   1264 x 649 window before this: the left column scrolled 2 208 px of content through a 506 px view
+   with the vehicle list scrolling INSIDE it — two scrollbars, one inside the other — and scrolling
+   down to the skins put the search box 1 448 px above the top of the view.
+   The right column has no search and no results, so its one pane is the whole stack of sections:
+   the same rule, with nothing in it that has to stay put yet — 3.30 decides what should. */
+.sidebar > .pane{flex:1 1 0; min-height:0; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column}
+.sidebar > .pane > *{flex:0 0 auto}
+/* A pane's scrollbar is thin. Chrome on Windows draws no overlay scrollbars and `overflow:overlay`
+   has been plain `auto` since Chrome 114, so a thin gutter with no track is as near an overlay as a
+   page gets without faking the scrollbar: 6 px, where every other scroller keeps the 9 below. */
+.pane::-webkit-scrollbar{width:6px}
+/* The Vehicle tab is the rule twice over: its two result lists are its panes, sharing its height by
+   the ratio the bar between them sets. Its two sections are laid out as if their children were the
+   tab's own (display:contents), so the panes are siblings of everything else. As boxes, the sections
+   would put their furniture inside the share — and the Game files section carries the search, three
+   chip rows and the sort, so the vehicle list would get the smaller part of a 3:2 split. A section
+   still folds: `.collapsed` hides its children, its pane among them, and the other pane takes the
+   height. The tab's floor is its furniture plus both panes' floors, and only below that does the
+   column scroll, as a last resort rather than cutting anything off. */
+#tabVehicle{flex:1 1 0; min-height:auto; padding-bottom:10px}
+#tabVehicle > .section{display:contents}
+#tabVehicle > .section > *{flex:0 0 auto; margin-left:10px; margin-right:10px}
+#tabVehicle > .section > h3{margin-top:10px}
+#tabVehicle > .section > .pane{flex:var(--grow) 1 0; min-height:var(--floor); height:auto; resize:none}
+#tabVehicle > .section > .pane.empty{flex:0 0 auto; min-height:0}
+/* The last resort keeps the search BOX in view, and only the box. The furniture is tall — the box,
+   three chip rows and the sort are 219 px at the default width, the tab's furniture 431 in all — so
+   the last resort is an ordinary laptop, not a corner case: a 1366 x 768 screen gives the column about
+   500 px. When the whole 219 px control was the sticky part (the first version of 3.6), scrolling the
+   column slid the vehicle list UNDER it — measured in the review of 2026-09-27 at 1350 x 640, the
+   control spanned 121-340 px over a list at 312-376. So the control's pieces are the tab's own too
+   (display:contents, like the sections'), which makes the whole tab the box's containing block — a
+   sticky box inside its own 219 px wrapper would have left with the wrapper — and only the box
+   sticks: scrolling the column takes the chips and the sort away first and brings the lists up under
+   the box. The negative margin and the padding keep the box where it was while it is not stuck, and
+   give it an opaque band the width of the column when it is. Scoped to an open section: an id
+   outranks `.section.collapsed > *:not(h3)`, so a bare `#rowGameSearch{display:contents}` kept the
+   whole control on screen when "Game files" was folded. */
+.section:not(.collapsed) > #rowGameSearch{display:contents}
+#rowGameSearch > *{flex:0 0 auto; margin-left:10px; margin-right:10px}
+#rowGameSearch > .searchbig{position:sticky; top:0; z-index:2; background:var(--panel); margin:-6px 0 0; padding:6px 10px 8px}
+/* The default share, 3:2, read off here at boot by Layout.listSplit, so it lives nowhere else — and
+   each list's floor. The vehicle list's is the 210 px box it had before 3.6: the review of 2026-09-27
+   measured the share alone giving it 64-142 px on every laptop size it tried (1350 x 640 to
+   1520 x 739), less than the fixed box it replaced, and a list you browse 3 882 vehicles in is the one
+   thing on this tab that must not be the one to give (below a page of 810 px it is five rows: see
+   A SHORT PAGE, item 3). The skins list's is one row. The skins list never grows past its own rows:
+   a short one hands the rest back to the vehicles. */
+#gameListWrap{--grow:3; --floor:210px}
+#userSkinWrap{--grow:2; --floor:64px; max-height:max-content}
+/* A SHORT PAGE (2026-10-10). Below a page about 810 px tall — where the tab's 705 px stop fitting the
+   column, which is every laptop the review measured: 1536 x 864, 1366 x 768, 1280 x 720 — three things
+   change, and only these three.
+   1. The nation and rank chips fold behind one chip at the end of the type row (#gameMoreFilters,
+      ui/panels/filters.js), which sits on that row's own second line: four lines of chips, 91 px,
+      for none. The chip opens them, by click, Enter or Space, and while they are folded a nation or
+      rank that is on is shown on it, lit, so no filter is ever out of sight.
+   2. Each list starts from its floor and the bar shares what is left. A plain 3:2 share of a short
+      column puts the vehicle list's 60 % under its 210 px floor, so the floor binds and every pixel
+      the fold frees went to the SKINS list: measured at 1366 x 768, 210 / 114 px, the vehicle list
+      still three rows. From the 210 px floor it was 240 / 84, four rows, and the whole tab fit; with
+      item 3's floor it is 273 / 69, five rows, and it still fits. The bar's drag reads each pane's
+      basis (Layout.baseOf), so it still follows the cursor here.
+   3. The vehicle list keeps five rows. Below a page of about 720 px the column scrolled anyway, so
+      the list WAS its floor, and 210 px held three whole rows and a cut fourth (the final audit, 1366 x
+      650 and 1280 x 600 pages; and a report that at 730 px tall or less the list showed 3 rows):
+      a row was 48 px and 4 apart, under a "Vehicles · 450" label that takes 27 px of the box. Here a
+      vehicle row (a raw texture's keeps its own) is 44 px and 2 apart — the padding goes, not the
+      type, nor the 125 px a name has — the two section headings sit 6 px from what is above and
+      below them rather than 10 and 8, and the floor is five such rows, 266 px. But never so much
+      that the "Existing skin" heading leaves a column that is not scrolled: its foot is 219 px of
+      furniture plus the floor below the column's top, the column is the page less 104 (the top bar
+      48, the tab bar 34, the status line 22), so the floor is at most the page less 330, 7 to
+      spare, and falls to the old 210 on a page of 540. A FOLDED heading keeps the 0 below it that
+      `.section.collapsed h3` gives it — the 6 px rule names open sections only, because an id
+      outranks that rule: setting both margins on every heading made a folded "Existing skin" at
+      1280 x 600 leave the column 5 px to scroll (501 / 496; 495 without it). And the tab's own foot
+      is 4 px here rather than 10, so with "Existing skin" folded the tab, that heading's foot plus
+      the foot, fits wherever the floor is the page less 330: with 10 it scrolled 3 px at the 1280 x
+      720 laptop's 592 px page and at 569 (491 / 488, 468 / 465), where the 210 px floor fit; 6 left
+      the list 1 px over its floor there (263 / 262), 4 leaves 3 (265), room for a font a hair taller.
+      Measured, 450 synthetic vehicles: 5 whole rows at 1366 x 650, 1280 x 600, 1280 x 592 and
+      1366 x 768 (3, 3, 3 and 4 before), 4 at 1264 x 569 (3), the heading in view at each, and Load a
+      skin… too from about 630 up. The cost: the column now scrolls a little below about 755 — 19 px at
+      a 1536 x 864 laptop's 737 px page, 36 at 1280 x 720, where the tab had fitted with three rows —
+      and the bar has 12 px to share at 1366 x 768 (50 before), 34 at 1440 x 790.
+   At 1366 x 650 and 1280 x 600, where the whole of "Existing skin" was below the fold, its heading
+   now comes up into view. Gated by tools/t102_sidebar.mjs. */
+@media (max-height: 809px){
+  #gameMoreFilters:not([hidden]){display:flex}
+  #rowGameSearch:has(> #gameClassRow #gameMoreFilters[aria-expanded="false"]:not([hidden])) > :is(#gameNationRow, #gameRankRow){display:none}
+  #tabVehicle > .section > .pane:not(.empty){flex-basis:var(--floor)}
+  #gameListWrap{--floor:clamp(210px, calc(100vh - 330px), 266px)}
+  #gameList > .rowitem:not(.partrow){--row-pad:4px 7px; --row-gapY:2px}
+  #tabVehicle > .section > h3{margin-top:6px}
+  #tabVehicle > .section:not(.collapsed) > h3{margin-bottom:6px}
+  #tabVehicle{padding-bottom:4px}
+}
+#userSkinWrap.empty:has(> #userSkinList:empty){display:none}      /* no UserSkins folder: no pane at all */
+/* The bar between the two lists — also the line between the two sections, now they have no borders
+   of their own. It is only a handle while both lists are lists and both sections are open. */
+#listSep{height:9px; margin-top:4px; position:relative; touch-action:none}
+#listSep::after{content:""; position:absolute; left:0; right:0; top:4px; height:1px; background:var(--border)}
+#tabVehicle:has(#gameListWrap:not(.empty)):has(#userSkinWrap:not(.empty)):not(:has(> .section.collapsed)) #listSep{cursor:row-resize}
+#tabVehicle:has(#gameListWrap:not(.empty)):has(#userSkinWrap:not(.empty)):not(:has(> .section.collapsed)) #listSep:hover::after,
+#listSep.active::after{top:3px; height:3px; background:var(--accent)}
+/* ---- progress ---- */
+#progWrap{display:none; flex:0 0 auto; padding:6px 12px; background:var(--panel); border-bottom:1px solid var(--border); align-items:center; gap:10px}
+#progWrap.on{display:flex}
+#progBar{flex:1 1 auto; height:6px; background:var(--panel2); border-radius:4px; overflow:hidden}
+#progFill{height:100%; width:0%; background:linear-gradient(90deg,var(--accent2),var(--accent)); transition:width .18s}
+#progFill.indet{width:35%; animation:slide 1.1s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+#progLabel{font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:52%}
+#progPct{font-size:11px; color:var(--muted); min-width:34px; text-align:right}
+#progCancel{padding:1px 8px; font-size:11px}
+/* ---- attention cue for the search box once vehicles are ready ---- */
+@keyframes attn{0%,100%{box-shadow:0 0 0 0 rgba(79,143,247,0)}45%{box-shadow:0 0 0 4px rgba(79,143,247,.32)}}
+.attn{animation:attn 1.5s ease-out 3; border-color:var(--accent)!important}
+.searchbig{display:flex; gap:6px; align-items:center; margin-bottom:8px}
+.searchbig input{flex:1 1 auto; width:auto; min-width:0; padding:7px 10px; font-size:13px}
+/* The vehicle row IS `.rowitem` now — see the component above, which was promoted out of it. */
+.emptyhint{color:var(--muted); font-size:11.5px; line-height:1.6; padding:6px 2px}
+.emptyhint b{color:var(--text)}
+.stepnum{display:inline-flex; width:16px; height:16px; border-radius:50%; background:var(--accent2); color:#fff;
+  font-size:11px; align-items:center; justify-content:center; margin-right:6px; flex:0 0 auto}
+/* ---- advanced-options disclosure ---- */
+details.adv{margin-top:6px}
+details.adv > summary{cursor:pointer; font-size:11px; color:var(--muted); user-select:none; list-style:none; padding:3px 0}
+details.adv > summary::-webkit-details-marker{display:none}
+details.adv > summary::before{content:""; display:inline-block; vertical-align:middle; width:0; height:0; margin-right:6px;
+  border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:5px solid currentColor}
+details.adv[open] > summary::before{border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid currentColor; border-bottom:none}
+details.adv > summary:hover{color:var(--text)}
+/* ---- key-hold hint bubble + keymap overlay ---- */
+#keyHint{position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:200; display:none;
+  background:rgba(22,25,32,.96); border:1px solid var(--border); border-radius:8px; padding:8px 14px;
+  font-size:12px; color:var(--text); box-shadow:0 8px 30px rgba(0,0,0,.5); pointer-events:none; max-width:70vw}
+#keyHint .k{color:var(--accent); font-weight:600}
+.keymap{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px 26px}
+.keymap h4{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); margin:0 0 6px}
+.keymap dl{display:grid; grid-template-columns:auto 1fr; gap:3px 10px; align-items:baseline}
+.keymap dt{white-space:nowrap}
+.keymap dd{color:var(--muted); font-size:12px}
+::-webkit-scrollbar{width:9px; height:9px}
+::-webkit-scrollbar-thumb{background:var(--border); border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+/* ---- one icon language for vehicles: inline SVG, never emoji (they differ per platform) ---- */
+.vico{width:16px; height:16px; flex:0 0 auto; display:block; fill:none; stroke:currentColor; stroke-width:1.6;
+  stroke-linejoin:round; stroke-linecap:round; opacity:.85}
+/* ---- search filters: a clear button on every field, flags for nations, icons for classes ---- */
+.clearbox{position:relative; display:flex; flex:1 1 auto; min-width:0}
+/* `min-width:0` is the whole of ROADMAP 3.11(b). A flex item's min-width resolves to `auto`, which
+   for an <input> is its INTRINSIC width — 181 px at the default size=20 — so the search box refused
+   to shrink, overflowed its own 152 px slot and painted 22.7 px over #btnResetFilters at the
+   default 230 px sidebar (52.7 px at 200, gone only at >=256). Nothing reported it: the row's
+   scrollWidth equals its clientWidth, because the input overflows rather than the row. Dragging
+   the sidebar wider is what a user had to do every launch, and raising the default width would
+   only have hidden it. Measured after: input 181 -> 152.3 px, and a +6 px gap at every width. */
+.clearbox input[type=text]{flex:1 1 auto; width:auto; min-width:0; padding-right:22px}
+.clearbox .clr{position:absolute; right:1px; top:1px; bottom:1px; border:none; background:none; color:var(--muted);
+  font-size:11px; padding:0 6px; cursor:pointer; line-height:1; border-radius:var(--radius)}
+.clearbox .clr:hover{color:var(--text); background:var(--panel2)}
+.clearbox .clr[hidden]{display:none}
+/* ---- search results ----
+   Until ROADMAP 3.6 the vehicle results were a box about five rows tall that scrolled inside the
+   sidebar's own scroll, dragged taller by `resize:vertical`: a nation + rank filter can match 300
+   vehicles, and a list at its natural height pushed the "Existing skin" section off screen. Now both
+   result lists are panes that fill the tab (the rule above), so neither needs a height of its own. */
+/* ---- ONE scroll container (ROADMAP 3.27) ----
+   Six of them and five different ideas: the sidebar's whole-column scroll, a `.scroll` used exactly
+   once, this one, `.modal .body`, `.decside` and `.declib`. There was no shared style to copy,
+   which is exactly why they differ — the same cause as the five row styles above. This is the one
+   that works, so it is the one promoted: a fixed height that scrolls, its own inset ground so the
+   list reads as a container rather than as more sidebar, and `resize:vertical` (which Chrome allows
+   on any element whose overflow is not visible) so it can be dragged taller. The height is a custom
+   property, so a caller sets `--box-h` instead of redeclaring the box.
+   `.more` is set by `Scrollbox.watch` while there is content below the fold — see `ui/scrollbox.js`.
+   A scroll bar says a list scrolls, but only once you are in it; this says it before you reach. */
+.scrollbox{--box-h:210px; position:relative;
+  overflow-y:auto; overflow-x:hidden; resize:vertical; height:var(--box-h); min-height:64px;
+  border:1px solid var(--border); border-radius:var(--radius); padding:4px 5px; background:#191b21}
+/* An inset fade rather than an overlay element: it costs no DOM, it cannot be scrolled away from
+   the bottom edge, and it sits under the rows because a row must stay clickable through it. */
+.scrollbox.more{background-image:linear-gradient(to top, rgba(10,12,16,.85), rgba(10,12,16,0) 26px);
+  background-attachment:local, scroll; background-repeat:no-repeat; background-position:bottom;
+  background-size:100% 26px}
+/* Nothing to scroll: the box stops pretending to be one. */
+.scrollbox.empty{resize:none; height:auto; min-height:0; border-color:transparent; background:none; padding:2px 0; overflow:visible}
+#slotListWrap{--box-h:190px}
+/* A group row in the layer stack: the fold caret is a drawn triangle for the same reason the
+   section carets are (ROADMAP 3.11a) — identical on every platform, and §4 forbids emoji icons. */
+.layer.grp .nm{font-weight:600; display:flex; align-items:center; gap:4px}
+/* ROADMAP 4.16(c). A group is a folder: the glyph says so, the guide lines down its children say
+   how far it reaches. 4.16(b): the two drop signals are two different things — a line above the
+   row for "goes above", the whole row lit for "goes into" — and every list ends in a strip that is
+   the one place a drop can mean "at the bottom". The strip is 4 px of nothing until a drag starts. */
+.layer{position:relative}
+.layer .fold{width:12px; height:12px; flex:0 0 auto; fill:none; stroke:var(--accent); stroke-width:1.4; stroke-linejoin:round}
+.layer .lguide{position:absolute; top:-2px; bottom:-2px; width:1px; background:var(--border); pointer-events:none}
+.layer.dropabove{box-shadow:0 -2px 0 0 var(--accent)}
+.layer.dropin{background:var(--accent2); outline:1px solid var(--accent)}
+.ldrop{height:4px; border-radius:3px; margin:0 0 var(--row-gapY, 4px); transition:height .1s}
+#layerList.dragging .ldrop{height:10px; border:1px dashed var(--border)}
+#layerList.dragging .ldrop.over{border-color:var(--accent); background:var(--accent2)}
+/* ROADMAP 4.9a. This was `var(--fg)`, and there is no `--fg` in this stylesheet — it is `--text`.
+   An invalid var() inside a SHORTHAND poisons the whole shorthand at computed-value time, so
+   `border-style` fell back to `none` and the triangle was never painted: measured at 0 x 0 px on a
+   collapsed row and 10 x 0 on an open one. It was still a flex item with a margin, so it also
+   pushed the row's eye about: a group's eye sat 19 px right of a layer's at the same depth, a
+   group's CHILD sat left of its own parent, and folding slid the eye 10 px sideways.
+   The triangle is drawn on ::before inside a FIXED 10x10 box now, so the two states are the same
+   width, and `.lcaret.ghost` reserves that same box on rows that have no caret — which is what puts
+   every eye in one column and leaves the depth indent as the only thing that moves it. */
+.lcaret{flex:0 0 auto; width:10px; height:10px; margin-right:3px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center}
+.lcaret::before{content:""; width:0; height:0;
+  border-left:5px solid transparent; border-right:5px solid transparent; border-top:5px solid var(--text)}
+.lcaret.closed::before{border-top:5px solid transparent; border-bottom:5px solid transparent;
+  border-left:5px solid var(--text); border-right:none}
+.lcaret.ghost{cursor:default}
+.lcaret.ghost::before{border:0}
+/* ROADMAP 3.32. A chip row is a COLUMN OF LINES and the split into lines is computed
+   (renderFilterChips in ui/panels/filters.js), not left to flex-wrap — wrap breaks wherever the
+   next chip fails to fit, so the class row went 2+3 → 3+2 → 4+1 as the sidebar was dragged and
+   the rank row left one chip alone on a line. The lines still wrap as a fallback, so with no
+   ResizeObserver the row degrades to exactly what it was. `.chip` is flex:0 0 auto so a chip's
+   measured width is its natural width whichever line it is on. */
+.chips{display:flex; flex-direction:column; gap:3px; flex:1 1 auto; min-width:0}
+.chipline{display:flex; flex-wrap:wrap; gap:3px}
+.chip.rank{font-variant-numeric:tabular-nums; min-width:22px; justify-content:center}
+.chip{display:flex; flex:0 0 auto; align-items:center; gap:4px; padding:2px 6px; font-size:11px; line-height:1.5;
+  border:1px solid var(--border); border-radius:999px; background:var(--panel2); color:var(--muted); cursor:pointer}
+.chip:hover{border-color:var(--accent); color:var(--text)}
+.chip.on{border-color:var(--accent); color:var(--text); background:var(--accent2)}
+.chip .vico{width:14px; height:14px; opacity:1}
+/* The chip the nation and rank rows fold behind on a short page (see the Vehicle tab's layout rule).
+   A drawn caret, down while they are folded and up while they show. */
+#gameMoreFilters{display:none}
+#gameMoreFilters::after{content:""; width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid currentColor}
+#gameMoreFilters[aria-expanded="true"]::after{border-top:0; border-bottom:5px solid currentColor}
+/* ROADMAP 4.38. The hardpoint row: one chip per pylon, sharing the width equally so thirteen (a
+   P-47's) fit the sidebar and two (a Spitfire's) do not float in a corner. A chip is lit when the
+   station carries something and ringed while its choices are open under the row; the word for
+   which pylon it is lives in the title, because a chip is 20 px wide. The two end labels say which
+   way round the row is — the right wing is on the LEFT, seen from the front. */
+.hprow{display:flex; gap:3px; margin:4px 0 2px}
+.hp{flex:1 1 0; min-width:0; height:22px; display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-variant-numeric:tabular-nums; border:1px solid var(--border); border-radius:4px;
+  background:var(--panel2); color:var(--muted); cursor:pointer; user-select:none}
+.hp:hover{border-color:var(--accent); color:var(--text)}
+.hp.on{border-color:var(--accent); background:var(--accent2); color:var(--text)}
+.hp.open{box-shadow:0 0 0 2px var(--accent)}
+.hp .hpg{width:14px; height:14px; flex:0 0 auto}
+.hp .n{font-size:11px; line-height:1; margin-left:1px}
+.hpends{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-bottom:6px}
+.hpname{font-size:11px; margin:4px 0 2px}
+.hpmass{font-size:11px; color:var(--muted); text-align:center; margin:2px 0 3px; font-variant-numeric:tabular-nums}
+/* A hardpoint's choices, laid out as the game's loadout screen lays them under a chip: a heading per
+   trigger group (Bombs, Guided Bombs, Air to Air Missiles…), each line the store's own name with its
+   ammo and mass, the chosen one lit, Empty last. Picking a line hangs it. */
+.hpmenu{margin:2px 0 6px; border:1px solid var(--border); border-radius:4px; background:var(--panel2); padding:3px 0}
+.hpgrp{font-size:11px; color:#d9b45a; padding:3px 8px 1px}
+.hpitem{display:flex; align-items:center; gap:6px; padding:2px 8px 2px 14px; font-size:11px; color:var(--muted); cursor:pointer}
+.hpitem .t{flex:1 1 auto; min-width:0; line-height:1.25}   /* wraps: the sidebar is narrower than the game's menu, and "R-27ER air-to-air missiles (Ammo: 1, Mass: 350 kg)" is the whole point */
+.hpitem .hpg{width:13px; height:13px; flex:0 0 auto}
+.hpitem:hover{color:var(--text); background:#2b3140}
+.hpitem.on{color:var(--text); background:var(--accent2)}
+.hpg path{fill:none; stroke:currentColor; stroke-width:1.1; stroke-linejoin:round; stroke-linecap:round}
+.flag{width:15px; height:10px; flex:0 0 auto; display:block; border-radius:1px; outline:.5px solid rgba(0,0,0,.5); outline-offset:-.5px}
+/* ---- the top-bar windows (ROADMAP 3.29) ----
+   Non-modal and undimmed on purpose: two of the export settings (camo under skin, alpha) are
+   previewed by the 3-D VIEW ITSELF, so the window has to leave the viewport in sight and stay open
+   while the model is orbited. It sits under its button, right-aligned to it, and scrolls inside
+   its own height rather than growing past the bottom of the page. The sections inside are the
+   sidebar's own elements, moved — so `.section` styling is theirs, and `.topwin .section h3` does
+   not collapse (core/prefs.js skips it) because a window's one section has nowhere to fold to. */
+.topwin{position:fixed; z-index:120; background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  box-shadow:0 18px 60px rgba(0,0,0,.55); display:flex; flex-direction:column; overflow:hidden; max-width:calc(100vw - 16px)}
+.topwin .twbody{display:flex; gap:0; min-height:0; overflow:auto}
+.topwin .twcol{flex:0 0 auto; width:300px; min-width:0}
+.topwin .twcol.pv{width:300px; border-left:1px solid var(--border); padding:10px; display:none}
+.topwin .twcol.pv.on{display:block}
+.topwin .section{border-bottom:none}
+.topwin .section h3 .mini .twx{padding:1px 6px; font-size:12px; margin-left:4px}
+.topwin .twfoot{display:flex; gap:6px; padding:8px 10px; border-top:1px solid var(--border); flex:0 0 auto}
+.topwin .twfoot button{flex:1 1 0; min-width:0; font-size:11px; padding:5px 6px}
+.topwin .twfoot button.primary{flex:1.4 1 0}
+#winView, #winSettings{width:300px}
+#winView .twbody, #winSettings .twbody{flex-direction:column}
+/* The History window (ROADMAP 4.50 (15)). The list scrolls inside the window rather than growing it
+   past the bottom of the page: 250 steps is a real history. A row is a button, so the keyboard can
+   reach every step; the current state is the filled one, and undone steps are greyed until an edit
+   replaces them, the way Photoshop shows them. */
+#winHistory{width:320px}
+#secHistory{display:flex; flex-direction:column; min-height:0}
+.histlist{overflow:auto; max-height:min(60vh, 520px); margin-top:6px; border:1px solid var(--border); border-radius:var(--radius)}
+.histrow{display:flex; align-items:center; gap:6px; width:100%; min-width:0; text-align:left; background:none; border:none;
+  border-radius:0; padding:3px 8px; font-size:11px; color:var(--text)}
+.histrow:hover{background:#2b3140; border-color:transparent}
+.histrow.cur{background:var(--accent2)}
+.histrow.undone{color:var(--muted)}
+.histrow.undone .hn{text-decoration:line-through; text-decoration-color:rgba(139,145,160,.5)}
+.histrow .hi{flex:0 0 auto; display:inline-flex; color:var(--muted)}
+.histrow.cur .hi, .histrow.marked .hi{color:var(--text)}
+.histrow .hn{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.histrow .hm{flex:0 1 auto; min-width:0; display:inline-flex; align-items:center; gap:3px; color:var(--warn);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.histrow .hb{flex:0 0 auto; color:var(--muted); font-variant-numeric:tabular-nums}
+.histrow.cur .hb{color:var(--text)}
+.histhead{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin:8px 0 2px}
+.histmark{display:flex; align-items:center; gap:4px}
+.histmark .histrow{flex:1 1 auto; border-radius:var(--radius)}
+.histmark .histrow .hi{color:var(--warn)}
+.histmark .twx{flex:0 0 auto; padding:1px 6px; font-size:12px}
+/* the preview column */
+.pv h4{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px}
+.pv .pvrow{margin-bottom:10px}
+.pv .pvlab{font-size:11px; color:var(--text); margin-bottom:3px; display:flex; justify-content:space-between; gap:6px}
+.pv .pvlab .tag{font-size:11px; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:0 5px; flex:0 0 auto}
+.pv .pvpair{display:flex; gap:6px; align-items:flex-start}
+.pv .pvpair figure{margin:0; flex:0 1 128px; min-width:0}
+.pv .pvpair canvas{display:block; width:100%; max-width:128px; aspect-ratio:1; image-rendering:pixelated; border:1px solid var(--border); border-radius:4px; background:#0c0e12}
+.pv .pvpair figcaption{font-size:11px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pv .pvpair figure.chosen figcaption{color:var(--text)}
+.pv .pvpair figure.chosen canvas{border-color:var(--accent)}
+.pv .pvnote, .pvnote{font-size:11px; color:var(--muted); line-height:1.4; margin:2px 0 6px}
+.pvnote:empty{display:none}
+/* ---- modal dialogs (decal editor, decal library) ---- */
+.modal{position:fixed; inset:0; z-index:150; background:rgba(10,12,16,.78); display:flex; align-items:center; justify-content:center}
+.modal .box{background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 18px 60px rgba(0,0,0,.6);
+  max-width:min(940px,94vw); max-height:92vh; display:flex; flex-direction:column; overflow:hidden}
+.modal .head{display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border)}
+.modal .head h2{font-size:14px; font-weight:600; flex:1 1 auto}
+.modal .head .x{cursor:pointer; color:var(--muted); font-size:16px; padding:0 4px}
+.modal .head .x:hover{color:var(--text)}
+.modal .body{display:flex; gap:14px; padding:14px; overflow:auto; min-height:0}
+.modal .foot{display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); align-items:center}
+.modal .foot .grow{flex:1 1 auto; color:var(--muted); font-size:11px}
+.decprev{flex:1 1 auto; min-width:320px; display:flex; align-items:center; justify-content:center; border:1px solid var(--border);
+  border-radius:8px; background-color:#22252c;
+  background-image:linear-gradient(45deg,#2b2f38 25%,transparent 25%),linear-gradient(-45deg,#2b2f38 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#2b2f38 75%),linear-gradient(-45deg,transparent 75%,#2b2f38 75%);
+  background-size:16px 16px; background-position:0 0,0 8px,8px -8px,-8px 0; overflow:hidden}
+.decprev canvas{max-width:100%; max-height:56vh; display:block; cursor:crosshair}
+/* The text tool's preview (4.50 (3)): a mid-grey checker, because lettering is as often black as
+   white and the editor's dark one hides black text entirely. */
+.decprev.textprev{background-color:#8a8f99;
+  background-image:linear-gradient(45deg,#9aa0aa 25%,transparent 25%),linear-gradient(-45deg,#9aa0aa 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#9aa0aa 75%),linear-gradient(-45deg,transparent 75%,#9aa0aa 75%)}
+.decprev.textprev canvas{cursor:default}
+.decside{width:250px; flex:0 0 auto; overflow-y:auto; max-height:60vh}
+.decside h4{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:12px 0 6px}
+.decside h4:first-child{margin-top:0}
+.declib{display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; overflow-y:auto; max-height:60vh; flex:1 1 auto}
+.declib .card{border:1px solid var(--border); border-radius:8px; padding:6px; background:var(--panel2); cursor:pointer; text-align:center}
+.declib .card:hover{border-color:var(--accent)}
+.declib .card canvas{width:100%; height:76px; object-fit:contain; display:block; border-radius:4px; background:#15171c}
+.declib .card .nm{font-size:11px; color:var(--muted); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.declib .card .del{font-size:11px; color:var(--muted); float:right; padding:0 3px; background:none; border:none}
+/* ---- decal library folders ---- */
+.declib .card.folder{display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:96px}
+.declib .card.folder svg{width:38px; height:38px; color:var(--accent); flex:0 0 auto}
+.declib .card.folder .cnt{font-size:11px; color:var(--muted)}
+.declib .card.up svg{color:var(--muted)}
+.declib .card.drop{border-color:var(--accent); background:var(--accent-dim,#243244); box-shadow:0 0 0 1px var(--accent) inset}
+.declib .card[draggable="true"]{cursor:grab}
+.declib .card .path{font-size:11px; color:var(--accent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.declib .card.sel{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; background:var(--accent-dim,#243244)}
+.declib .card .vtag{font-size:11px; color:var(--muted)}
+/* ---- the decal you are carrying ---- */
+/* Follows the pointer until the decal is put down. `pointer-events:none` is not decoration: the
+   ghost sits under the cursor, so anything else would eat the click that places it. */
+#carryGhost{position:fixed; z-index:400; pointer-events:none; display:none; padding:4px 6px 3px;
+  background:rgba(18,20,26,.9); border:1px solid var(--accent); border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.5)}
+#carryGhost canvas{display:block; max-width:72px; max-height:72px; opacity:.85}
+#carryGhost .cap{font-size:11px; color:var(--accent); text-align:center; margin-top:2px; max-width:72px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* setPaint3d writes cursor as an INLINE style, so only !important beats it — and carrying a decal
+   genuinely outranks the paint crosshair, because the next click puts the decal down, not paint. */
+body.carrying canvas{cursor:copy !important}
+.decbar{display:flex; align-items:center; gap:6px; margin-bottom:8px; flex-wrap:wrap}
+.decbar .crumbs{display:flex; align-items:center; gap:2px; flex:1 1 auto; font-size:11.5px; overflow:hidden}
+.decbar .crumbs button{padding:2px 6px; font-size:11.5px; background:none; border:none; color:var(--accent); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.decbar .crumbs button:disabled{color:var(--text); cursor:default}
+.decbar .crumbs .sepc{color:var(--muted); flex:0 0 auto}
+.decbar input[type=search]{width:150px; padding:3px 6px; font-size:11.5px}
+/* ---- UserSkins list ---- */
+/* The UserSkins row IS `.rowitem.skinrow` now — and it GAINED a selected state, which it never
+   had; that missing state is why it read as a flatter copy of the vehicle list. */
+/* ---- per-texture export rows ---- */
+.exprow{display:flex; align-items:center; gap:5px; font-size:11px; padding:2px 0}
+.exprow .nm{flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text)}
+.exprow select{padding:1px 4px; font-size:11px}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="title">WT <span>Skin Studio</span></div>
+  <button id="btnAddFiles" class="primary">Add files…</button>
+  <button id="btnNewProject" title="Clear the current model, textures and edits to start fresh (keeps the indexed game folder)">Clear</button>
+  <div class="sep"></div>
+  <label style="color:var(--muted)">Skin name</label>
+  <input type="text" id="skinName" value="" placeholder="my_skin">
+  <label style="color:var(--muted)">Vehicle</label>
+  <!-- Two elements, one value: the <span> shows it, the <input> holds it and is what every reader
+       still asks for `.value`. A read-only input was the wrong shape for the settled state — it
+       takes focus, shows a caret and invites typing, and dimming it reads as disabled rather than
+       as decided (ROADMAP 3.10). `refreshVehicleIdLock()` decides which one is on screen and is
+       the only thing that writes the span, so call it after setting the value. -->
+  <span id="vehicleIdText" style="display:none; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
+  <!-- 160px, not the old 90: a unit id is `us_m1a2_sep3_abrams`, and the field is now only on
+       screen while it is being typed into, which is the worst moment to be truncating it. -->
+  <input type="text" id="vehicleId" value="" placeholder="—" style="width:160px">
+  <button id="btnVehicleIdEdit" style="padding:2px 5px" title="Let me type the vehicle name myself">✎</button>
+  <div class="sep"></div>
+  <button id="btnExport" class="primary">Export as…</button>
+  <button id="btnSaveProj" title="Save project (.wtproj) — reload it later via Add files">Save proj</button>
+  <div class="sep"></div>
+  <button id="btnUndo" title="Undo (Ctrl+Z)">↶</button>
+  <button id="btnRedo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)">↷</button>
+  <button id="btnHistoryWin" title="History — every step held and what it costs. Click one to go back to it, and name a checkpoint (“before weathering”) to come back to">History</button>
+  <div class="sep"></div>
+  <span style="display:flex;gap:2px">
+    <button data-vm="3d">3D</button><button data-vm="split" class="active">Split</button><button data-vm="2d">2D</button>
+  </span>
+  <button id="btnViewWin" title="Exposure, background, camo preview, what is drawn on the model — shows the View &amp; scene panel in the right sidebar">View</button>
+  <!-- Photo mode (ROADMAP 4.37): one camera button next to the view it photographs, rather than a
+       row inside View & scene (moved 2026-09-25, ROADMAP 3.36). -->
+  <button id="btnShot" class="tbicon" aria-label="Screenshot" title="Screenshot — a PNG of the 3-D view as it is now, at up to four times the size, with a transparent background and a soft shadow under the vehicle. For a promo page or a forum post; nothing leaves the machine."><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M1.75 5.5c0-.83.67-1.5 1.5-1.5h1.9l1.2-1.75h3.3L10.85 4h1.9c.83 0 1.5.67 1.5 1.5v6.25c0 .83-.67 1.5-1.5 1.5h-9.5c-.83 0-1.5-.67-1.5-1.5z"/><circle cx="8" cy="8.5" r="2.5"/></svg></button>
+  <button id="btnSides" title="Toggle side panels">⇔</button>
+  <!-- Everything above sits at the left; help and settings are the app's own chrome, so they go to
+       the right edge, Settings last — where they are in most desktop apps (ROADMAP 3.36). -->
+  <div class="grow"></div>
+  <button id="btnHelp" title="Help & shortcuts">?</button>
+  <button id="btnSettingsWin" title="Undo memory, saved settings, reset — the Settings panel, as a window under this button">Settings</button>
+</div>
+<div id="progWrap">
+  <span id="progLabel">Working…</span>
+  <div id="progBar"><div id="progFill"></div></div>
+  <span id="progPct"></span>
+  <button id="progCancel" title="Stop this operation">Cancel</button>
+</div>
+<div id="main">
+  <div class="sidebar" id="leftbar">
+    <div class="tabs" id="leftTabs">
+      <button data-tab="vehicle" class="active" title="Find and load a vehicle from your game files, or load an existing skin">Vehicle</button>
+      <button data-tab="paint" title="Texture slots and the layer stack for the selected slot">Textures<span class="cnt" id="tabCntTex"></span></button>
+      <button data-tab="parts" title="The model's individual parts — pick what painting applies to">Parts<span class="cnt" id="tabCntParts"></span></button>
+      <button data-tab="weapons" title="Pylons, bombs, missiles and drop tanks — every preset this vehicle can actually carry, laid out the way the game's loadout screen lays them">Weapons<span class="cnt" id="tabCntWeapons"></span></button>
+    </div>
+    <div class="pane" id="leftPane">
+      <div class="tabpage active" id="tabVehicle">
+        <div class="section" id="secGame">
+          <h3>Game files<span class="cnt" id="gameCount" title="Vehicles indexed from your install"></span></h3>
+          <div class="row" id="rowGameOpen"><button id="btnGameFolder" class="primary" style="flex:1" title="Reads models &amp; texture packs straight from your War Thunder install. Read-only — nothing is modified and nothing leaves your PC.">Open War Thunder folder…</button></div>
+          <div class="hint" id="hintGameOpen">Installed under <b>Program Files</b>? Chrome's folder picker refuses those — <button id="btnGameFolderAlt" title="Choose the War Thunder folder through the browser's ordinary file chooser, which has no system-folder rule. Read-only, and picked again each visit.">Open it another way…</button></div>
+          <div id="rowGameSearch" style="display:none">
+            <div class="searchbig">
+              <div class="clearbox">
+                <input type="text" id="gameSearch" placeholder="Find a vehicle or skin" disabled title="Type a vehicle's name, or a skin's, then click the result. It searches the vehicle list and your UserSkins folder together, and forgives a typo or a missing hyphen: “abrahms”, “f4e”, “tiger 2”.">
+                <button class="clr" id="gameSearchClear" title="Clear the search" tabindex="-1" hidden>✕</button>
+              </div>
+              <button id="btnResetFilters" style="flex:0 0 auto;padding:2px 8px;font-size:11px" title="Clear the search box and every filter">Reset</button>
+            </div>
+            <!-- All three filters are chip rows, and all three are multi-select: a class is a
+                 silhouette, a nation is a flag and a rank is two characters, so each reads faster
+                 as a chip than as a list of words — and picking "ranks V and VI of Germany and
+                 Italy" is one gesture instead of four searches. An <option> can hold neither an
+                 image nor more than one selection. -->
+            <div class="row" id="gameClassRow" style="margin-bottom:4px"></div>
+            <div class="row" id="gameNationRow" style="margin-bottom:4px"></div>
+            <div class="row" id="gameRankRow" style="margin-bottom:4px"></div>
+            <!-- ROADMAP 3.5: the order was nation → rank → name, hardcoded. One sort for both lists;
+                 each list says what an entry means for its rows (ui/panels/finder.js). -->
+            <div class="row" id="rowGameSort" style="margin-bottom:6px"><label for="gameSort">Sort</label>
+              <select id="gameSort" style="flex:1" title="How both lists are ordered. Best match: while you type, the closest names first (the whole name, then its start, whole words, letters inside a name, near misses); with nothing typed, vehicles in tree order and your skins newest first. Rank: highest rank first.">
+                <option value="best" selected>Best match</option><option value="tree">Tree order</option><option value="name">Name</option><option value="rank">Rank</option></select></div>
+          </div>
+          <div id="gameListWrap" class="scrollbox pane empty"><div id="gameList" class="emptyhint"><span class="stepnum">1</span>Open your War Thunder folder to load any vehicle — model and textures — with no external tools.</div></div>
+          <details class="adv" id="advGame" style="display:none">
+            <summary>Advanced</summary>
+            <div class="row"><label title="Which texture quality tier to load. Auto picks the largest your install has.">Quality</label>
+              <select id="gameQuality" style="flex:1"><option value="auto">Auto (best)</option><option value="hq">HQ</option><option value="base">Base (smaller)</option></select></div>
+            <div class="row"><button id="btnFillFromGame" style="flex:1" title="Load the best game texture for every slot that is still missing one" disabled>Fill missing slots</button></div>
+            <div class="row"><button id="btnRescan" style="flex:1" title="Read every pack again from scratch. The index is stored between visits and refreshes itself when the game is patched or a content pack is installed or removed, so you only need this if you have changed files by hand.">Rescan install</button></div>
+            <div class="row"><button id="btnForgetFolder" style="flex:1" title="Forget the remembered game folder and cached index">Forget folder &amp; cache</button></div>
+            <!-- ROADMAP 3.28(2). This used to print under the search box, in the reading path of
+                 every search: "N of M entries not decodable — unknown formats: …". It is a fact
+                 about the INSTALL, read once if at all, so it lives with the other install
+                 details. appendGameDiagnostics fills it and hides it when there is nothing wrong. -->
+            <div id="gameDiag"></div>
+          </details>
+        </div>
+        <div id="listSep" title="Drag to share the height between the vehicle list and your skins · double-click to put it back"></div>
+        <div class="section" id="secSkin">
+          <h3>Existing skin</h3>
+          <div class="row"><button id="btnLoadSkin" style="flex:1" title="Load a skin you already have (a UserSkins folder or a .zip from WT Live) and see it on the game model">Load a skin…</button>
+            <button id="btnRescanSkins" title="Re-read the UserSkins folder" style="display:none">↻</button></div>
+          <div id="userSkinWrap" class="scrollbox pane empty"><div id="userSkinList"></div></div>
+          <div class="hint" id="skinInfo">Puts a downloaded or hand-made skin onto the real model so you can inspect and edit it.</div>
+        </div>
+      </div>
+
+      <div class="tabpage" id="tabPaint">
+        <!-- Folded on open. The slot list is a thing you touch once per sheet and then stop
+             touching, and on a vehicle with a dozen materials it pushed Channels, the base colour
+             and the whole layer stack off the bottom of the sidebar — so the panel you work in was
+             below the fold and the one you had finished with was above it. -->
+        <!-- "Slots" and not "Texture slots" (2026-10-10): the longer name and its two buttons need
+             234 px of the column's 203–209, so the header was two lines at every window size. The
+             buttons stay in the header because it is folded on open and Paste… is used from the
+             layer stack, not from the slot list. -->
+        <div class="section collapsed">
+          <h3>Slots <span class="mini"><button id="btnPasteTex" title="Add a texture as a new layer — one of the model's own sheets, or an image file — without overwriting anything. Each channel lands where it belongs.">Paste…</button><button id="btnReplaceTex" title="Replace the active slot's base texture. Files with _n in the name replace the surface map; others replace the albedo.">Replace…</button></span></h3>
+          <div id="slotListWrap" class="scrollbox empty"><div id="slotList"><div class="hint">Nothing loaded yet</div></div></div>
+          <div class="row" id="chanToggles" style="margin-top:6px" title="Switch a channel off to see what it is contributing to the shaded preview. View only — nothing is exported differently.">
+            <label style="flex:0 0 auto">Contributing</label>
+            <label style="font-size:11px"><input type="checkbox" data-chan="color" checked> col</label>
+            <label style="font-size:11px"><input type="checkbox" data-chan="smooth" checked> rough</label>
+            <label style="font-size:11px"><input type="checkbox" data-chan="metal" checked> metal</label>
+            <label style="font-size:11px"><input type="checkbox" data-chan="normal" checked> normal</label>
+          </div>
+        </div>
+        <div class="section" id="secChannels">
+          <h3>Channels <span class="mini"><button id="btnChanShaded" title="Back to the lit preview">Shaded</button></span></h3>
+          <div id="chanPanel"><div class="hint">Select a texture slot.</div></div>
+        </div>
+        <div class="section" id="secBaseColor">
+          <h3>Whole-vehicle base colour</h3>
+          <div class="row">
+            <input type="color" id="baseColorPick" value="#5a6b3c" style="width:38px;padding:0" title="The colour the whole vehicle is painted">
+            <button id="btnPaintBase" class="primary" style="flex:1" title="Repaint the whole vehicle this colour by setting the camouflage under it. The albedo is untouched, so stock wear, dirt and panel detail stay — the way the game's own camouflages work.">Paint whole vehicle</button>
+          </div>
+          <div class="hint" id="baseColorHint">Recolours the camouflage under the albedo, so the stock wear and detail stay intact.</div>
+        </div>
+        <div class="section">
+          <!-- The four add buttons are a row under the header, not in it (2026-10-10): beside the
+               name they needed 256 px of the column's 209 and "Group" was cut 37 px — "Ungroup" 52. -->
+          <h3>Layers</h3>
+          <div class="row wrap" id="layerBar">
+            <button id="btnNewLayer" class="primary" title="Add an empty layer on the brush's channel. Give it content on other channels later, from its channel strip.">+ Layer</button>
+            <button id="btnAddDecal" title="Add an image / decal layer from a file or from your decal library">Img</button>
+            <button id="btnAddText" title="Add lettering (T) — a serial, a code, a name — in any installed font or a font file you load. It is a decal whose image is drawn from the text, so it projects, mirrors and takes a Look like any decal, and stays editable as text.">Text</button>
+            <button id="btnGroupLayer" title="Put the selected layer in a group. The group's visibility, opacity, blend, mask and part limit apply to everything inside it. Drag layers in and out in the list.">Group</button>
+          </div>
+          <div id="layerList"><div class="hint">Select a slot</div></div>
+          <div id="layerProps"></div>
+        </div>
+      </div>
+
+      <div class="tabpage" id="tabWeapons">
+        <div class="section">
+          <h3>Suspended armament</h3>
+          <div class="hint" id="weaponInfo">Open your War Thunder folder and load a vehicle.</div>
+          <div id="weaponList"><div class="hint">—</div></div>
+        </div>
+        <div class="section">
+          <h3>Find a weapon or pylon</h3>
+          <input type="text" id="weaponSearch" placeholder="mk 82 · aim 9 · pylon · drop tank" style="width:100%; margin-bottom:5px">
+          <div id="weaponFind" class="hint">Type a name to add a model to the aircraft, or to open it on its own for painting.</div>
+        </div>
+        <div class="section">
+          <h3>Saved weapon paint</h3>
+          <div class="row"><button id="btnMergeProj" style="flex:1" title="Take the layers out of a .wtproj you painted a bomb or pylon in and lay them onto this project's matching textures, so one export carries both.">Merge a .wtproj…</button></div>
+          <input type="file" id="mergeProjPick" accept=".wtproj,.zip" style="display:none">
+          <div class="hint">Paint a weapon on its own (“Edit alone” above), save the project, then merge it into any vehicle that carries the same weapon.</div>
+        </div>
+      </div>
+      <div class="tabpage" id="tabParts">
+        <div class="section">
+          <h3>Parts</h3>
+          <div id="partList" class="hint">Load a model</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="resizer" data-side="left" title="Drag to resize · double-click to reset"></div>
+  <div id="views">
+    <div class="viewwrap" id="view3dwrap">
+      <div class="viewlabel">3D — drag rotate · wheel zoom · right-drag pan · <kbd>B</kbd> paint</div>
+      <div class="viewbtns">
+        <select id="bodySel" disabled title="Load a vehicle first"><option value="exterior">Exterior</option><option value="cockpit">Cockpit</option></select>
+        <select id="camPreset" title="Camera views"><option value="" selected disabled>View…</option><option value="reset">Reset / frame</option><option value="seat">Pilot's seat</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="iso">Isometric</option></select>
+        <button id="btnFly" title="Fly camera: WASD move, Q/E down/up, Shift fast, drag to look (F)">Fly</button>
+        <select id="chanViewSel" title="Show one channel on its own, flat and unlit — the only way to judge a roughness map, a normal map, or the coverage mask that lives in the albedo's alpha. Shaded is the normal lit preview. Auto picks for you from the layer you are on.">
+          <option value="shaded" selected>Shaded</option>
+          <option value="auto" title="Follow the layer: a Smoothness, Metalness or Normal layer switches the preview to that channel flat and unlit, where the edit is actually visible; Colour and Wear stay shaded. Picking any view by hand turns this back off.">Auto — follow the layer</option>
+          <optgroup label="Maps">
+            <option value="color">Colour</option>
+            <option value="smooth">Smoothness</option>
+            <option value="metal">Metalness</option>
+            <option value="normal">Normal</option>
+            <option value="wear">Wear / coverage</option>
+          </optgroup>
+          <optgroup label="Albedo _c bytes">
+            <option value="c:r">_c red</option>
+            <option value="c:g">_c green</option>
+            <option value="c:b">_c blue</option>
+            <option value="c:a">_c alpha (coverage)</option>
+          </optgroup>
+          <optgroup label="Surface _n bytes">
+            <option value="n:r">_n red (inv. roughness)</option>
+            <option value="n:g">_n green (normal X)</option>
+            <option value="n:b">_n blue (metalness)</option>
+            <option value="n:a">_n alpha (normal Y)</option>
+          </optgroup>
+        </select>
+        <button id="btnCompare" title="Hold to see the original (or hold ` key)">Compare</button>
+        <button id="btnPaint3d" title="Painting on / off (B) — the same switch as the one under the brush, and it covers both views">Paint: off</button>
+      </div>
+      <canvas id="view3d"></canvas>
+    </div>
+    <div class="resizer" id="viewSep" title="Drag to resize the 3D / 2D split · double-click to even them up"></div>
+    <div class="viewwrap" id="view2dwrap">
+      <div class="viewlabel">2D — <kbd>B</kbd> paint · wheel zoom · space-drag pan</div>
+      <div class="viewbtns">
+        <button id="btnPaint2d" title="Painting on / off (B) — the same switch as the one in the 3D view">Paint: off</button>
+        <button id="btnSel2d" title="Rectangular selection (M). While it is on, a drag here makes or adjusts a rectangle instead of painting. The selection stays when you switch it off, and confines the brush in both views until you clear it.">Select: off</button>
+        <button id="btnUv">UV islands</button>
+        <button id="btnGrid2d" title="Pixel grid (Ctrl+') — the edge of every texel, drawn once you zoom in past 600 %">Grid</button>
+        <button id="btnGuides2d" title="Rulers and guides (Ctrl+;) — drag out of a ruler to add a guide. The marquee, the shape tool and flat decals snap to guides; hold Ctrl to place freely.">Guides</button>
+        <button id="btnGuidesClear" hidden title="Remove every guide on this texture — one undo step">Clear guides</button>
+        <button id="btnFit">Fit</button>
+      </div>
+      <canvas id="view2d"></canvas>
+    </div>
+    <div id="welcome">
+      <div class="card" style="max-width:560px">
+        <h1>WT <span>Skin Studio</span></h1>
+        <p>Browser editor for War Thunder user skins. Everything stays on your machine.</p>
+        <p class="hint" id="buildStamp" style="margin-top:-6px"></p>
+        <div id="welcomeRecover" style="display:none"></div>
+        <div id="welcomeHome">
+          <button class="big primary wopt" id="btnWelcomeGame">Open War Thunder folder
+            <small>The normal way to start. Search any vehicle, click it, and its real model and textures load straight from the game.</small></button>
+          <button class="big wopt" id="btnWelcomeSkin">Open a skin I already have
+            <small>Point at a UserSkins folder or a WT&nbsp;Live .zip and see it on the real model.</small></button>
+          <button class="big wopt" id="btnWelcomeClose">Start empty
+            <small>Begin blank, or drag in an .obj / .dds / .wtproj — you can open the game folder any time.</small></button>
+        </div>
+        <p class="hint" id="dragHint" style="margin-top:12px; display:none; text-align:left; border:1px solid var(--border); border-radius:8px; padding:10px 12px">
+          <b>Chrome won’t open folders inside <span style="white-space:nowrap">Program&nbsp;Files</span></b>, where Steam installs War Thunder by default. That is a browser rule, not a bug.<br>
+          <button id="btnWelcomeGameAlt" class="primary" style="margin:8px 0 6px">Open it another way…</button><br>
+          Pick the <b>War Thunder</b> folder. The browser may ask to “upload” it — nothing leaves your PC; that is its wording for reading a folder. You pick it again each visit, and export with <b>Download .zip</b>.</p>
+        <p class="hint" style="margin-top:12px">Everything runs on your machine. The game folder is only ever read — the one thing written inside it is your skin's UserSkins folder, when you export there.<br>
+          Press <kbd>?</kbd> at any time for the full list of controls.</p>
+      </div>
+    </div>
+    <div id="drop">Drop the War Thunder folder, a skin folder, or OBJ / DDS / image files</div>
+  </div>
+  <div class="resizer" data-side="right" title="Drag to resize · double-click to reset"></div>
+  <!-- ROADMAP 3.6: the column never scrolls; its one pane does (the rule in the stylesheet). -->
+  <div class="sidebar" id="rightbar"><div class="pane" id="rightPane">
+    <div class="section">
+      <h3>Brush <span class="mini"><button class="prefreset" data-sec="brush" title="Put this section back to the defaults this build ships">Reset</button></span></h3>
+      <div class="brushmodes" id="brushModes">
+        <button data-bm="color" class="active" data-need="paintable" title="Paint colour onto a paint layer. With no layer selected one is created for you — nothing is ever painted onto the game's own texture.">Color</button>
+        <button data-bm="erase" data-need="paint" title="Rub paint back off the active paint layer">Eraser</button>
+        <button data-bm="clone" data-need="paintable" title="Copy pixels from elsewhere on the sheet — rivets, panel lines, dirt. Alt-click sets the source, then paint. Match tone adjusts each copy to the brightness where it lands.">Clone</button>
+        <button data-bm="wear" data-need="albedo" data-cls="tank ship boat" title="Paint the coverage / wear mask (the albedo's alpha). Light: your paint covers the player's camouflage. Dark: the camouflage shows through, like worn edges. Shown live.">Wear mask</button>
+        <button data-bm="smooth" data-need="n" title="How glossy the surface is (the _n red channel)">Smoothness</button>
+        <button data-bm="metal" data-need="n" title="How metallic the surface is (the _n blue channel)">Metal</button>
+        <button data-bm="flatten" data-need="n" title="Flatten bumps back to a smooth surface — useful to remove the baked-in mud on old tank models">Flatten normal</button>
+        <button data-bm="height" data-need="n" title="Carve a groove or raise a ridge in the surface — for panel lines and rivets">Panel line</button>
+        <button data-bm="cloneN" data-need="n" title="Copy the normal map from elsewhere on the sheet — a row of rivets or a panel line the model already has, onto where one is missing. Alt-click sets the source, then paint where the copy should go.">Clone normal</button>
+        <button data-bm="mask" data-need="layer" title="Hide or reveal parts of the active layer without deleting them">Mask</button>
+      </div>
+      <!-- Under the tools it explains (2026-10-10): it sat after Tip dynamics, 337 px below them. -->
+      <div id="brushHint" class="hint" style="display:none; margin:-4px 0 8px"></div>
+      <div class="row" style="margin-top:5px"><button id="btnPaintOn" class="primary" style="flex:1" title="Turn painting on or off (B). Off, a click in 3D picks parts and orbits and a drag in 2D pans; on, both views paint with the tool above. Only the tools that can write to the layer you have selected are offered.">Painting: off</button></div>
+      <div class="row" id="rowColor"><label>Color</label><input type="color" id="brushColor" value="#8a9a5b">
+        <span class="hint" style="margin:0 0 0 4px" id="pickHint">Alt-click picks</span></div>
+      <div class="row" id="rowClone" style="display:none"><label title="Shift each copy to the tone under the brush — the mean of the destination replaces the mean of the source, so a rivet taken from a sunlit panel lands the right grey on a shaded one. Off, the copy is exact."><input type="checkbox" id="brushHeal"> Match tone</label>
+        <span class="hint" style="margin:0 0 0 4px" id="cloneHint">Alt-click sets the source</span></div>
+      <div class="row" id="rowValue" style="display:none"><label>Value</label><input type="range" id="brushValue" min="0" max="255" value="128"><span class="val" id="brushValueVal">128</span></div>
+      <div class="row"><label>Size</label><input type="range" id="brushSize" min="2" max="400" value="48" title="Brush diameter in texture pixels — [ and ] or Ctrl+wheel"><span class="val" id="brushSizeVal">48</span></div>
+      <div class="row"><label>Opacity</label><input type="range" id="brushOpacity" min="1" max="100" value="100" title="The most one stroke lays down, however often it crosses itself — unless Build up is on"><span class="val" id="brushOpacityVal">100</span></div>
+      <!-- ROADMAP 4.50 (4) + 6.4: Opacity is the ceiling on a whole stroke, Flow what each dab lays
+           down (editor/pen.js). Both remembered per tool. -->
+      <div class="row" id="rowFlow"><label>Flow</label><input type="range" id="brushFlow" min="1" max="100" value="100" title="How much each dab lays down. Below 100 a stroke builds up where it passes over itself, like a spray — up to Opacity, or past it with Build up"><span class="val" id="brushFlowVal">100</span></div>
+      <div class="row" id="rowBuild"><label title="Off (a wash): a stroke never goes past Opacity, however often it crosses itself. On: every dab adds, so a stroke keeps darkening past Opacity where it passes over itself — an airbrush or a marker"><input type="checkbox" id="brushBuild"> Build up past Opacity</label></div>
+      <div class="row" id="rowHard"><label>Hardness</label><input type="range" id="brushHardness" min="0" max="100" value="70" title="Edge softness — 100 is a hard edge, 0 a wide fade"><span class="val" id="brushHardnessVal">70</span></div>
+      <!-- ROADMAP 4.50 (10): the shape each dab is laid in (editor/tips.js), remembered per tool. The
+           loaded tips are listed after the four built in, by BrushPanel.tipOptions. -->
+      <div class="row" id="rowTip"><label title="The shape each dab is laid in. A tip is coverage: where its picture is darker, more paint lands — so a rivet's highlight lays less. Each tool keeps its own tip">Tip</label>
+        <canvas id="tipPreview" width="22" height="22" title="The tip as it lays paint: solid is full paint, clear is none" style="border:1px solid var(--border);border-radius:3px;flex:none"></canvas>
+        <select id="brushTip" style="flex:1;min-width:0" title="Round is the brush as it always was. Square, Rivet and Chip are made at the brush's size; tips you load are listed after them">
+          <option value="round" selected>Round</option><option value="square">Square</option><option value="rivet">Rivet</option><option value="chip">Chip</option></select>
+        <button id="btnTipLoad" style="padding:1px 6px" title="Load an image as a tip: a shape on a transparent background, dark on light, or light on dark. It is kept in this browser beside the decal library, and travels with a settings export">Load…</button>
+        <button id="btnTipDel" style="padding:1px 5px" aria-label="Remove this tip" title="Remove this tip from the library — the tools that used it go back to Round" disabled><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
+        <input type="file" id="tipPick" accept="image/*" style="display:none"></div>
+      <div class="row"><label>Spacing</label><input type="range" id="brushSpacing" min="5" max="100" value="35" title="How far apart stamps sit along a stroke, as a percentage of the brush size. Below about 40% a stroke looks solid; above it the edge starts to scallop, and at 100% the stamps barely touch."><span class="val" id="brushSpacingVal">35</span></div>
+      <div class="row"><label>Smoothing</label><input type="range" id="brushLazy" min="0" max="100" value="0" title="A lazy mouse: the brush trails the pointer on a string this many screen pixels long, so a shaky hand draws a steady line and a corner comes out rounded. Off at 0"><span class="val" id="brushLazyVal">off</span></div>
+      <div class="row wrap" id="rowPen"><label title="What a pen's pressure changes, for this tool. Only a pen or stylus reports pressure — a mouse always paints at the full size and flow. The curve is under More brush options">Pressure</label>
+        <label title="Pressing harder makes each dab bigger, up to Size"><input type="checkbox" id="penSize" checked> size</label>
+        <label title="Pressing harder makes each dab lay down more, up to Flow"><input type="checkbox" id="penFlow"> flow</label></div>
+      <!-- ROADMAP 4.50 (10): how a dab varies from the one before it (Pen.dab), remembered per tool.
+           Hidden for Panel line, whose bump is a height field and takes neither a tip nor these. -->
+      <details class="adv" id="brushDyn">
+        <summary title="Size, flow, position and angle varying from dab to dab — for chips, splatter and dust, and rivets that follow a curve">Tip dynamics</summary>
+        <div class="row"><label title="Each dab comes out up to this many percent smaller, at random">Size jitter</label><input type="range" id="brushSizeJit" min="0" max="100" value="0"><span class="val" id="brushSizeJitVal">0</span></div>
+        <div class="row"><label title="Each dab lays up to this many percent less, at random — the per-dab opacity jitter. The stroke is still capped at Opacity, unless Build up is on">Flow jitter</label><input type="range" id="brushFlowJit" min="0" max="100" value="0"><span class="val" id="brushFlowJitVal">0</span></div>
+        <div class="row"><label title="Each dab lands up to this many percent of its own size away from the stroke, in any direction">Scatter</label><input type="range" id="brushScatter" min="0" max="300" value="0"><span class="val" id="brushScatterVal">0</span></div>
+        <div class="row" id="rowAngle"><label title="Turns the tip, in degrees, clockwise on the sheet">Angle</label><input type="range" id="brushAngle" min="0" max="359" value="0"><span class="val" id="brushAngleVal">0</span></div>
+        <div class="row" id="rowAngleJit"><label title="Each dab is turned at random by up to this share of half a turn — at 100 any angle at all">Angle jitter</label><input type="range" id="brushAngleJit" min="0" max="100" value="0"><span class="val" id="brushAngleJitVal">0</span></div>
+        <div class="row" id="rowFollow"><label title="Turn each dab to face the way the stroke is going, plus Angle — rivets and stitching that follow a curve, with the shape tool's Stamp along as well"><input type="checkbox" id="brushFollow"> Angle follows the stroke</label></div>
+      </details>
+      <div class="row"><label title="Mirror every stroke across the vehicle's centreline so both sides match — in the 3-D view, and on the sheet as well (the first sheet stroke needs a moment to read where each texel sits on the vehicle)"><input type="checkbox" id="symOn"> Symmetry</label>
+        <select id="symAxis" title="Which plane to mirror across — Auto detects it from the model"><option value="auto">Auto axis</option><option value="x">X plane</option><option value="y">Y plane</option><option value="z">Z plane</option></select></div>
+      <div class="row"><label title="Turn every stroke into a ring of copies about an axis — a bolt circle on a road wheel, the rivets round a hatch, the blades of a spinner. Set the centre by clicking the hub; the axis is that surface's own normal unless you name one.">Radial</label>
+        <input type="range" id="radialN" min="1" max="24" value="1" title="How many copies, counting the stroke itself. 1 is off."><span class="val" id="radialNVal">off</span></div>
+      <div class="row wrap" id="radialRow2" style="display:none"><label title="Which way the axis points. Auto takes the normal of the surface you click — the axle of a wheel face, the up of a turret ring. Name one when the face you can reach is slanted.">About</label>
+        <select id="radialAxis" title="The axis the copies turn about"><option value="auto">Auto (picked surface)</option><option value="x">X axis</option><option value="y">Y axis</option><option value="z">Z axis</option></select>
+        <button id="btnRadialCentre" title="Then click the model: that point is the centre the copies turn about" style="padding:1px 6px;font-size:11px">Set centre…</button></div>
+      <div class="row"><label title="When to show the translucent quad that marks the mirror plane. It tints whatever is behind it, so keep it hidden while you paint.">Mirror plane</label>
+        <select id="symPlaneVis" title="Show the mirror plane: while you are adjusting symmetry (it fades after a moment), always, or never"><option value="adjust" selected>While adjusting</option><option value="always">Always</option><option value="off">Never</option></select></div>
+      <div id="palette" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px"></div>
+      <details class="adv">
+        <summary>More brush options</summary>
+        <div class="row"><label>Axis offset</label><input type="range" id="symOff" min="-100" max="100" value="0" step="1" title="Nudge the mirror plane if the model isn't centred"><span class="val" id="symOffVal">0</span></div>
+        <div class="row"><label title="How hard a pen has to press. Soft: a light touch already paints most of the size and flow. Firm: the full amount takes a firm press. One curve for every tool">Pressure curve</label>
+          <select id="penCurve" style="flex:1"><option value="0.5">Soft</option><option value="1" selected>Linear</option><option value="2">Firm</option></select></div>
+      </details>
+      <div class="hint">Panel line: a value below 128 carves a groove, above 128 raises a ridge. Mask: paint hides, Alt-paint reveals.</div>
+    </div>
+    <div class="section" id="pathSection">
+      <h3>Shape</h3>
+      <!-- ROADMAP 6.1. A camouflage blotch is a closed path; a run of rivets is the same path with
+           the brush walked along it. Both verbs are here for that reason. -->
+      <div class="row wrap"><label title="Draw a path on the 2-D sheet or on the model in 3-D: click to place points, drag as you click to curve, click the first point to close it. Then fill it, or walk the brush along it. On the model, clicks off it still orbit, and the path is aimed the way the view faced at its first point.">Shape tool</label>
+        <button id="btnPathTool" title="Click points on the 2-D view or on the model. Drag a point to move it, drag its handle to curve, Ctrl+drag a point to pull a handle out, Alt+click to remove one, Backspace drops the last, Esc starts over. A path stays in the view it was started in.">Shape: off</button>
+        <span class="val" id="pathInfo">no points yet</span></div>
+      <div class="row" id="pathRow2" style="display:none">
+        <button id="btnPathFill" title="Fill the closed path on the layer you are painting, in the brush's colour and opacity — one fill, so the edge is clean. A path on the model is projected along the view direction at its first point, so it crosses UV seams, and stops at the first surface and near the depth its points were placed at.">Fill</button>
+        <button id="btnPathStamp" title="Walk the current brush along the path at its own Spacing — rivets, a panel line that follows a curve, on any channel. On the model each stamp lands on the surface under the path, with Symmetry and radial copies as for a stroke.">Stamp along</button>
+        <button id="btnPathSel" title="Turn the closed path into a selection: the brush, Fill, Clear, Crop and Copy then follow its shape. Shift+click adds it to what is selected, Alt+click takes it away. A path on the model is projected onto the sheet the way Fill projects it.">→ selection</button>
+        <button id="btnPathClear" title="Throw the path away (Esc)">Clear</button></div>
+      <div class="hint">Click the sheet or the model to add points, drag to curve · click the first to close · <b>Ctrl+drag</b> reshapes · Alt+click removes · Backspace drops the last · Esc clears</div>
+    </div>
+    <div class="section" id="selSection">
+      <h3>Selection</h3>
+      <!-- ROADMAP 3.30, the selection half (option B, decided 2026-09-20 — see the item). Two grains,
+           one row each: the PARTS picked on the model and the AREA marked on the sheet, with the bridge
+           from each to the other on its own row. Under them one row of All / None / Invert acting on
+           whichever grain is live — the area while the Select tool is on, the parts otherwise — and the
+           label in that row says which. The exact rectangle and the mask bridges fold under Advanced. -->
+      <div class="row wrap"><label title="The parts picked on the model. Ctrl+click a part in 3-D (Shift+Ctrl adds, Ctrl+right-click shuts it out of painting), or click names in the Parts tab — Alt+click there removes one. The brush paints only the selected parts.">Parts</label>
+        <span class="hint" id="selPartInfo" style="flex:1;margin:0"></span>
+        <button id="btnSelFromParts" title="Select every UV island the selected parts use, so Fill, Clear, Crop and Copy can work on them. Islands shared with other parts come too; the status line says how many.">→ islands</button></div>
+      <div class="row wrap"><label title="The area marked on the sheet: a rectangle, whole UV islands, a lasso's outline, a colour taken with the wand, or a closed shape-tool path. Shift adds to it and Alt takes away, whichever of them made it. It belongs to this texture only and confines the brush in both views.">Area</label>
+        <button id="btnSelMode" title="Rectangle selection (M). While on, dragging in the 2D view draws a rectangle instead of painting; Shift+drag adds a rectangle to the selection, Alt+drag takes one away. Turning it off keeps the selection.">Select: off</button>
+        <button id="btnSelIsland" title="Select whole UV islands (K). A click takes the island under the pointer (2D view, or Ctrl+click on the model); Shift+click adds, Alt+click removes — to and from any selection, not only islands. A mirrored island covers both sides of the vehicle.">Islands: off</button>
+        <button id="btnSelLasso" title="Lasso (L). Drag round an area for a freehand outline, closed when you let go — or click corner by corner and close on the first corner, a double-click or Enter. Shift at the first press adds, Alt takes away; Backspace takes a corner back, Esc drops the outline.">Lasso: off</button>
+        <button id="btnSelWand" title="Magic wand (W). Click a colour on the sheet, or Ctrl+click it on the model, to select everything within Tolerance of it — only the patch you clicked with Contiguous on, that colour anywhere on the sheet with it off. It reads the sheet the 2-D view shows. Shift+click adds, Alt+click takes away.">Wand: off</button>
+        <button id="btnSelToParts" title="The other direction: select every model part the chosen UV islands touch, replacing the current part selection. Use it to widen an island pick back out to whole parts, or to see on the model which parts a shell belongs to.">→ parts</button></div>
+      <div class="row" id="selWandRow" style="display:none"><label title="How far a texel's colour may be from the one you click and still be selected: the largest difference in any one channel, 0–255. 0 takes exactly that colour.">Tolerance</label><input type="range" id="selTol" min="0" max="255" value="32" title="How far a colour may be from the one you click and still be selected — 0 is that exact colour, 255 is everything"><span class="val" id="selTolVal">32</span>
+        <label title="On: only the patch you click, connected edge to edge (two patches touching at a corner stay two). Off: every texel of that colour anywhere on the sheet — Photoshop's Colour Range."><input type="checkbox" id="selContig" checked> Contiguous</label></div>
+      <div class="hint" id="selInfo"></div>
+      <div class="row"><span class="hint" id="selGrainLabel" style="flex:1;margin:0" title="Which grain these three act on: the area while Select is on, the parts otherwise"></span>
+        <button id="btnSelAll" title="Select everything of the live grain — the whole sheet while Select is on (Ctrl+A), every part otherwise">All</button>
+        <button id="btnSelNone" title="Drop the live grain's selection — the area (Esc) while Select is on, the parts otherwise">None</button>
+        <button id="btnSelInvert" title="Select every part that is not selected. Parts only — a rectangle's outside is not a rectangle.">Invert</button></div>
+      <div class="row"><button id="btnSelFill" title="Fill the selection on the active layer with the brush's colour and opacity. Respects part limits and protected parts like the brush does, and adds a layer if there isn't one.">Fill</button> <button id="btnSelClear" title="Erase the active layer's pixels inside the selection.">Clear</button> <button id="btnSelCrop" title="Erase everything OUTSIDE the selection from the active layer. One undo step, and it costs only the pixels it actually clears rather than a copy of the whole sheet.">Crop</button> <button id="btnSelCopy" title="Copy the selected texels into a new image layer, in place — from the active paint layer if one is selected, otherwise from the flattened sheet. Then drag it in 2D, or project it onto the model.">Copy</button></div>
+      <details class="adv">
+        <summary>Exact rectangle, masks</summary>
+        <div class="row"><label>X</label><input type="number" id="selX" min="0" step="1" title="Left edge, in whole texture pixels">
+          <label>Y</label><input type="number" id="selY" min="0" step="1" title="Top edge, in whole texture pixels"></div>
+        <div class="row"><label>W</label><input type="number" id="selW" min="1" step="1" title="Width, in whole texture pixels. A selection is always whole texels — a half-texel rectangle would resample the whole layer for nothing.">
+          <label>H</label><input type="number" id="selH" min="1" step="1" title="Height, in whole texture pixels"></div>
+        <div class="row"><label title="Keep the shape while you resize. A brand-new drag comes out square; dragging a handle keeps the shape the selection has now."><input type="checkbox" id="selAspect"> Lock aspect</label></div>
+        <div class="row"><button id="btnSelToMask" title="Turn the whole selection — rectangle, islands and parts — into the active layer's mask. The selection stays.">→ layer mask</button> <button id="btnSelFromMask" title="The other direction: select what the active layer's mask shows. Light areas become the selection, so a mask you painted, imported or softened becomes a shape that Fill, Clear, Crop and Copy can work with.">← from mask</button></div>
+      </details>
+      <div class="hint">Fill, Clear, Crop and Copy work on the active layer, inside the selection. An island selection follows the island's shape, not a box.</div>
+    </div>
+    <div class="section" id="projSection" style="display:none">
+      <h3>Projected image</h3>
+      <div class="row"><button id="btnProjMove" class="primary" style="flex:1" title="Drag the decal around on the model (G). The projection follows the surface — it stays wrapped and keeps crossing UV seams. The label says whether the mode is on. With painting off it can also be dragged on the sheet in the 2-D view.">Moving: off</button></div>
+      <div class="row"><label>Size</label><input type="range" id="projScale" min="5" max="400" value="100" title="Re-projects the image at this size — or drag one of its corner handles, in either view"><span class="val" id="projScaleVal">100</span></div>
+      <div class="row"><label>Rotate</label><input type="range" id="projRot" min="-180" max="180" value="0" step="0.5" title="Re-projects the image at this angle — or drag the round knob above it, in either view. , and . turn it 5°; Shift snaps both to 15°, Alt steps the keys 0.5° — or type the angle in the box."><input type="number" class="val" id="projRotVal" value="0" step="0.1" min="-180" max="180" title="The angle, in degrees — type one"></div>
+      <div class="row"><button id="btnProjSquare" style="width:100%" title="Turn the decal so its edges follow the texel rows under its centre — no jagged edges on a slightly tilted marking.">Square to the texture</button></div>
+      <div class="row"><label title="How far through the vehicle the projection reaches. Too deep and a marking on one side also lands on the far side — lower it until only the surface you want is covered.">Depth</label><input type="range" id="projDepth" data-k="0.01" min="20" max="1200" value="300"><span class="val" id="projDepthVal">3.0×</span></div>
+      <div class="row"><label title="How far around curvature the image survives before it fades out. 100% carries it right to the silhouette; lower values keep it on surfaces facing the projector. The fade is per-pixel, so the edge stays smooth however the model is triangulated.">Wrap</label><input type="range" id="projWrap" min="0" max="100" value="85"><span class="val" id="projWrapVal">85%</span></div>
+      <div class="row"><button id="btnReproject" style="flex:1" title="Aim the projector at the current camera view without moving where the decal sits — use it when the original angle was wrong">Re-aim from this view</button><button id="btnProjFlip" title="Mirror the image itself, left to right. Not the same as the mirrored copy below.">Flip ↔</button><button id="btnProjFlipY" title="Mirror the image top to bottom — the left-right mirror and a half turn together, as one step.">Flip ↕</button></div>
+      <div class="row"><label title="Put a matching copy of this decal on the other side of the vehicle. This belongs to THIS decal: the brush panel's Symmetry checkbox only decided what it started as, and unticking that one never removed a copy already placed."><input type="checkbox" id="projSym2"> Mirrored copy</label><span class="val" id="projSymInfo"></span></div>
+      <div class="row" id="rowSymRead"><label title="A mirrored copy is a true reflection, so text on it reads backwards. Tick to keep the copy's lettering readable; leave it off for shapes like shark mouths and arrows."><input type="checkbox" id="projSym2Read"> Keep the copy's lettering readable</label></div>
+      <!-- ROADMAP 4.2: the image a projection was made from is editable after the fact. Bound in
+           ui/panels/layer-props.js; the swap itself is ProjSource in editor/projection.js. -->
+      <div class="row"><button id="btnProjEdit" style="flex:1" title="Edit the image this decal was projected from: remove its background, crop, adjust, turn or flip it. Use this decal re-projects it where it is, at the same size — Ctrl+Z puts the old image back.">Open decal editor…</button></div>
+      <div class="row"><label title="How the surface under this projected decal responds — gloss, metal and a raised edge. It is written as derived channels of the decal's own layer, on every texture the projection landed on, and it is rebuilt whenever the decal moves.">Look</label>
+        <select id="projSurf" style="flex:1" title="Sets the decal's own smoothness, metalness and normal on every sheet it covers. The slot's _n map is not touched, and Ctrl+Z undoes it."></select></div>
+      <div class="row"><label title="Where the raised / carved shape comes from for this projected decal — the same three choices the floating one has. The Look's Emboss number is the strength.">Relief</label>
+        <select id="projRelief" style="flex:1" title="From the edge — the outline is raised.&#10;Bevelled body — a rounded, thick edge from the outline.&#10;Depth or normal map — relief from an image; it wraps round the model with the decal."></select></div>
+      <div class="row"><label title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse.">Gloss</label>
+        <select id="projGloss" style="flex:1" title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse."><option value="cover" selected>Evenly over the marking</option><option value="light">Follows the light parts</option><option value="dark">Follows the dark parts</option></select></div>
+      <div class="row"><button id="btnProjDelete" style="flex:1;color:var(--danger)" title="Remove this projected decal from every texture it landed on">Delete projected decal</button></div>
+      <div class="hint" id="projInfo" style="display:none"></div>
+      <div class="hint">Drag on the model · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (15°), <kbd>Alt</kbd> for fine (0.5°).</div>
+    </div>
+    <div class="section" id="decalSection" style="display:none">
+      <h3>Decal</h3>
+      <div class="row"><button id="btnProject3d" class="primary" style="flex:1" title="Bake the decal as a true projection onto the surface — wraps correctly across UV seams">Project onto model</button></div>
+      <div class="row"><button id="btnPlace3d" style="flex:1" title="Move this floating decal to the clicked spot (UV placement)">Move to clicked spot</button></div>
+      <div class="row"><button id="btnDecFlip" title="Flip the image left to right. This turns the picture round; it does not put a copy on the other side of the vehicle — that is Symmetry, in the brush panel.">Flip ↔</button><button id="btnDecFlipY" title="Flip the image top to bottom — a left-right flip and a half turn in one step.">Flip ↕</button><button id="btnDecSymClear" title="Remove the copy Symmetry put on the other side of the vehicle. The image itself is untouched.">Remove mirrored copy</button></div>
+      <div class="row"><label>Scale</label><input type="range" id="decScale" data-k="0.01" min="1" max="300" value="100"><span class="val" id="decScaleVal">1.0</span></div>
+      <div class="row"><label>Rotate</label><input type="range" id="decRot" min="-180" max="180" value="0" step="0.5" title="Turn the decal on the sheet — or type the angle in the box"><input type="number" class="val" id="decRotVal" value="0" step="0.1" min="-180" max="180" title="The angle, in degrees — type one"></div>
+      <div class="row"><button id="btnDecSquare" style="width:100%" title="Turn the decal to the nearest right angle, so its edges sit on the texel grid">Square to the texel grid</button></div>
+      <div class="hint">Drag in 2D · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (90°), <kbd>Alt</kbd> for fine. With Symmetry on, a mirrored copy comes too (dashed outline).</div>
+      <h3 style="margin-top:10px">Decal edit</h3>
+      <div class="row"><button id="btnDecalEditor" class="primary" style="flex:1" title="Open the decal editor: remove the background, crop, adjust, preview and save it to your decal library">Open decal editor…</button></div>
+      <div class="row"><label>Key</label><select id="bgMode"><option value="tl">Corner px</option><option value="white">White</option><option value="black">Black</option></select>
+        <input type="range" id="bgTol" min="0" max="100" value="25" style="flex:1"><span class="val" id="bgTolVal">25</span></div>
+      <div class="row"><button id="btnBgApply" style="flex:1">Remove background</button><button id="btnDecReset">Reset</button></div>
+      <div class="row"><label>Brightness</label><input type="range" id="dB" min="20" max="250" value="100"><span class="val" id="dBVal">100%</span></div>
+      <div class="row"><label>Contrast</label><input type="range" id="dC" min="20" max="250" value="100"><span class="val" id="dCVal">100%</span></div>
+      <div class="row"><label>Saturation</label><input type="range" id="dS" min="0" max="250" value="100"><span class="val" id="dSVal">100%</span></div>
+      <div class="row"><button id="btnDecBake" style="flex:1" title="Bake these three into the decal's pixels, then set them back to 100%">Apply adjust</button></div>
+      <h3 style="margin-top:10px">Surface under decal</h3>
+      <!-- Options are filled from SURF_PRESETS at load (editor/decals.js): the same four Looks the
+           decal editor offers, written once. This select used to spell them out again, in different
+           words and without "None". -->
+      <div class="row"><select id="surfPreset" style="flex:1" title="The look the Bake button below will apply. Choosing one moves the sliders; the Bake button is what writes it."></select></div>
+      <div class="row"><label title="Where the raised / carved shape comes from. The Look's Emboss number above is the STRENGTH; this is the shape.">Relief</label>
+        <select id="reliefMode" style="flex:1" title="From the edge — raises the outline; right for a vinyl sticker.&#10;Bevelled body — a rounded, thick edge from the outline. No extra file.&#10;Depth or normal map — detail inside the marking: rivets, welds, tread.">
+          <option value="edge" selected>From the edge (sticker rim)</option>
+          <option value="bevel">Bevelled body (no file needed)</option>
+          <option value="map">Depth or normal map…</option>
+        </select></div>
+      <div class="row"><label title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse.">Gloss</label>
+        <select id="reliefGloss" style="flex:1" title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse."><option value="cover" selected>Evenly over the marking</option><option value="light">Follows the light parts</option><option value="dark">Follows the dark parts</option></select></div>
+      <div class="row" id="rowBevel" style="display:none"><label title="How far in from the outline the bevel runs, in texture pixels.">Bevel</label>
+        <input type="range" id="reliefBevel" min="1" max="64" value="6"><span class="val" id="reliefBevelVal">6</span></div>
+      <div id="rowDepth" style="display:none">
+        <div class="row"><button id="btnDepthLoad" style="flex:1" title="Load a greyscale height map (from a depth-estimation tool, say) or a normal map, which is turned into height. It is stretched onto the decal, so match its shape. PNG, JPG or WEBP.">Load depth or normal map…</button>
+          <button id="btnDepthClear" title="Forget the map and go back to the outline">✕</button></div>
+        <div class="row"><label title="What the loaded file is. It is worked out when the file is loaded — a normal map by its colours, and which way its green channel points by which reading makes a consistent surface — and can be changed here if that got it wrong.">File is</label>
+          <select id="depthKind" style="flex:1" title="Depth map — greyscale, light is high.&#10;Normal map, DirectX — green points down (War Thunder's own _n maps).&#10;Normal map, OpenGL — green points up (Blender, many online tools).&#10;If the relief looks inverted along one direction only, pick the other normal-map type."><option value="depth">a depth map (light is high)</option><option value="normal-dx">a normal map, DirectX (green down)</option><option value="normal-gl">a normal map, OpenGL (green up)</option></select></div>
+        <div class="row"><label style="font-size:11.5px" title="Depth tools disagree about which end is near. This expects light = near; if ridges come out as grooves, tick it."><input type="checkbox" id="reliefInvert"> Invert (dark = high)</label>
+          <span class="val" id="depthInfo" style="overflow:hidden;text-overflow:ellipsis"></span></div>
+        <div class="row" title="Darkens the decal's colour in the hollows of its depth map — grooves, recesses, round rivets — so relief reads under flat light. Baked into the exported colour. 0 is off."><label>Cavity</label>
+          <input type="range" id="reliefCavity" min="0" max="100" value="0"><span class="val" id="reliefCavityVal">0</span></div>
+      </div>
+      <input type="file" id="depthPick" accept="image/*" style="display:none">
+
+      <div id="surfCustom" style="display:none">
+        <div class="row"><label>Smooth Δ</label><input type="range" id="scSm" min="-100" max="100" value="30"><span class="val" id="scSmVal">30</span></div>
+        <div class="row"><label>Metal Δ</label><input type="range" id="scMt" min="-100" max="100" value="0"><span class="val" id="scMtVal">0</span></div>
+        <div class="row"><label>Emboss</label><input type="range" id="scEm" min="0" max="20" value="4"><span class="val" id="scEmVal">4</span></div>
+        <div class="row" title="How much paint this decal adds to the albedo's alpha — what the game's condition slider wears away. Positive: paint that stays when worn. Negative: stripped to bare metal, like a scorch mark."><label>Paint Δ</label><input type="range" id="scWr" min="-100" max="100" value="0"><span class="val" id="scWrVal">0</span></div>
+      </div>
+      <div class="row"><button id="btnSurfApply" class="primary" style="width:100%" title="Give this decal its surface response as CHANNELS of its own layer: one per channel the look writes to. They move with it, and are hidden, faded, masked or deleted with it — nothing is written into the slot's own _n sheets.">Apply to the decal</button></div>
+      <div class="row"><button id="btnSurfBake" style="width:100%" title="The old way: writes the chosen look straight into this slot's _n map, under the decal where it sits now. Destructive and it does not follow the decal — “Apply to the decal” is what you want unless you specifically need it flattened.">Bake into _n (destructive)</button></div>
+      <div class="hint" id="surfHint"><b>Apply to the decal</b> puts this look on the decal's own surface channels, so it moves with the decal. A <b>projected</b> decal sets its Look in the panel above.</div>
+    </div>
+    <div class="section" id="styleSection" style="display:none">
+      <h3>Outline &amp; shadow</h3>
+      <!-- Layer styles for a decal (ROADMAP 4.44's sixth candidate). Both are part of the decal's Look
+           and are rendered in the decal's own image space (editor/decal-style.js), so they follow it
+           through the projector; the handlers are ui/panels/decal-style.js. Widths are a percentage of
+           the decal's shorter side, so a Look reads the same on a small marking and a large one. -->
+      <div class="row"><label title="A contrasting border round the marking — the standard way a serial or a code letter is made to read against any camouflage. Width is a percentage of the decal's shorter side; 0 is off.">Outline</label>
+        <input type="range" id="stOl" min="0" max="15" step="0.5" value="0" style="flex:1"><span class="val" id="stOlVal">off</span>
+        <input type="color" id="stOlC" value="#ffffff" style="width:34px;padding:0" title="Outline colour"></div>
+      <div class="row"><label title="A soft copy of the marking's shape, offset behind it — the drop shadow that lifts a marking off the surface, or a hard offset copy for a printed-twice look. This is its opacity; 0 is off.">Shadow</label>
+        <input type="range" id="stSh" min="0" max="100" value="0" style="flex:1"><span class="val" id="stShVal">off</span>
+        <input type="color" id="stShC" value="#000000" style="width:34px;padding:0" title="Shadow colour"></div>
+      <div class="row" id="rowShadow" style="display:none"><label title="Where the shadow falls: right and down are positive, as a percentage of the decal's shorter side.">Offset</label>
+        <input type="range" id="stShx" min="-25" max="25" value="4" title="Sideways: negative is left, positive is right"><span class="val" id="stShxVal">4</span>
+        <input type="range" id="stShy" min="-25" max="25" value="4" title="Up and down: negative is up, positive is down"><span class="val" id="stShyVal">4</span></div>
+      <div class="row" id="rowShadowBlur" style="display:none"><label title="How soft the shadow's edge is. 0 is a hard copy of the shape.">Blur</label>
+        <input type="range" id="stShb" min="0" max="15" step="0.5" value="3" style="flex:1"><span class="val" id="stShbVal">3</span></div>
+      <div class="hint">Live and undoable. An outline is part of the marking — it gets the Look's gloss and raised edge; a shadow does not.</div>
+    </div>
+    <div class="section" id="secExport">
+      <h3>Skin &amp; export <span class="mini"><button class="prefreset" data-sec="export" title="Put the export settings back to the defaults this build ships">Reset</button></span></h3>
+      <div class="row"><label title="Which real in-game vehicles this skin will be installed for. War Thunder picks a skin up by the unit name of the .blk file, which is usually NOT the 3D model's name.">Applies to</label>
+        <span class="val" id="unitCount" style="margin-left:auto">—</span></div>
+      <div id="unitList" class="hint">Load a vehicle to see which in-game vehicles this skin covers.</div>
+      <div class="row" style="margin-top:6px"><label title="Ground vehicles must use set_tex so in-game decals and the camouflage-condition wear still work. Aircraft use replace_tex.">Mode</label>
+        <select id="expMode" style="flex:1">
+          <option value="auto">Auto (follows vehicle type)</option>
+          <option value="set_tex">set_tex — ground, keeps decals</option>
+          <option value="replace_tex">replace_tex — aircraft</option>
+        </select></div>
+      <div class="hint pvnote" id="expModeNote"></div>
+      <div class="row"><label title="What goes into the exported albedo's alpha. Ground skins (set_tex): fully opaque, as every published skin ships. Aircraft (replace_tex): the sheet's real paint mask, kept.">Alpha</label>
+        <select id="expAlpha" style="flex:1">
+          <option value="auto">Auto — opaque for ground, kept for aircraft</option>
+          <option value="keep">Keep the source / painted mask</option>
+          <option value="opaque">Fully opaque (255)</option>
+        </select></div>
+      <div class="hint pvnote" id="expAlphaNote"></div>
+      <div class="row" id="rowCamoBase" style="display:none"><label title="Ground and naval vehicles show the player's camouflage wherever your alpha isn't fully opaque. Pin one so everyone sees the same colours. “Vehicle's own” ships a copy of the stock camo.">Camo under skin</label>
+        <select id="expCamoBase" style="flex:1">
+          <option value="stock">Vehicle's own camo (looks stock)</option>
+          <option value="color">Solid colour…</option>
+          <option value="white">Flat white (colours as painted)</option>
+          <option value="grey">Flat mid grey</option>
+          <option value="tile">My own pattern… (a tile)</option>
+          <option value="keep">Leave it (player's camo tints the skin)</option>
+        </select>
+        <input type="color" id="expCamoColor" value="#5a6b3c" title="The solid base colour the whole vehicle is painted, under your coverage mask" style="width:34px;padding:0;display:none"></div>
+      <div class="row" id="rowCamoTile" style="display:none"><label title="Your pattern repeats over the whole vehicle, the way the game lays a scalable camouflage. The player scales and turns it in the hangar — these two only preview that and are not exported.">Preview</label>
+        <input type="range" id="camoTileScale" min="20" max="200" step="2" value="100" title="Camouflage scale as the hangar slider sets it, 20 %–200 % — preview only, the player owns it"><span class="val" id="camoTileScaleVal">100%</span>
+        <input type="range" id="camoTileRot" min="-180" max="180" step="1" value="0" title="Camouflage rotation as the hangar slider sets it, ±180° — preview only, the player owns it"><span class="val" id="camoTileRotVal">0°</span>
+        <button id="btnCamoTileEdit" title="Open the tile in the 2-D view — it is drawn 3 × 3 there, and every stroke wraps at its edges">Edit tile</button></div>
+      <div id="camoPinInfo" class="hint" style="display:none"></div>
+      <div class="row"><label>Preset</label><select id="expPreset" style="flex:1" title="Game = BC3 albedo, uncompressed normal. WT Live = smaller. Lossless = biggest.">
+        <option value="game">Game (quality)</option>
+        <option value="live">WT Live (small)</option>
+        <option value="lossless">Lossless</option>
+        <option value="tga">TGA (edit elsewhere)</option>
+        <option value="custom">Custom</option>
+      </select></div>
+      <div id="expWarn" class="hint" style="display:none"></div>
+      <div class="row" style="margin-top:6px"><label title="Every changed texture is exported. Each can have its own resolution and format, or be left out — to stay under War Thunder's size limit, for example.">Textures out</label>
+        <button id="expAllNone" style="padding:1px 7px;font-size:11px;margin-left:auto;display:none" title="Tick or untick every texture at once">None</button>
+        <span class="val" id="expCount" style="margin-left:6px">—</span></div>
+      <div id="expList" class="hint">Nothing edited yet.</div>
+      <details id="expValidate" class="vchk" style="display:none">
+        <summary id="expValidateSum"></summary>
+        <div id="expValidateList"></div>
+      </details>
+      <details class="adv">
+        <summary>Advanced export</summary>
+        <div class="row"><label>Albedo</label><select id="expAlbFmt" disabled><option value="bc3">DDS BC3</option><option value="rgba8">DDS RGBA8</option><option value="tga">TGA</option></select></div>
+        <div class="row"><label>Normal</label><select id="expNrmFmt" disabled><option value="rgba8">DDS RGBA8</option><option value="bc3">DDS BC3</option><option value="tga">TGA</option></select></div>
+        <div class="row"><label><input type="checkbox" id="optMips" checked title="Smaller copies of the texture for distant views; they reduce shimmer. Optional — the game accepts a skin without them.&#10;&#10;Turn OFF if you play with the older-video-card support option: it makes mipmapped angled surfaces look blurry."> Mipmaps</label>
+          <label style="margin-left:10px"><input type="checkbox" id="optPad" checked title="Bleed colour a few pixels past each UV island so seams don't show a dark edge in game."> Seam padding</label></div>
+        <div class="row"><label style="font-size:11.5px"><input type="checkbox" id="optInvRough" checked title="Since the “Wind of Change” update War Thunder stores inverted roughness in the _n red channel instead of plain smoothness. Required for anything made after 2022 — the Live market has a matching checkbox.">Inverted roughness (post-2022)</label></div>
+        <div class="hint pvnote" id="expRoughNote"></div>
+      </details>
+    </div>
+    <div class="section" id="secView">
+      <h3>View &amp; scene <span class="mini"><button class="prefreset" data-sec="view" title="Put this section back to the defaults this build ships">Reset</button></span></h3>
+      <div class="row"><label title="Preview brightness. Raise it if the model looks too dark to judge a colour, lower it if highlights are blown out. Preview only — it never touches the exported skin.">Exposure</label><input type="range" id="optLight" data-k="0.01" min="20" max="250" value="100"><span class="val" id="optLightVal">1.0</span></div>
+      <div class="row"><button id="btnAutoExposure" style="flex:1" title="Meter what is on screen and set the exposure so the model sits at a neutral mid-grey">Auto exposure</button><button id="btnResetExposure" title="Back to 1.0">1.0</button></div>
+      <div class="row"><label>Background</label><select id="optBg" title="Preview backdrop — light grey is closest to the in-game hangar">
+        <option value="#16181d">Dark</option><option value="#0a0a0c">Black</option><option value="#2a2d33">Charcoal</option>
+        <option value="grad">Studio gradient</option><option value="#5c6675" selected>Grey</option><option value="#c8ccd2">Light grey</option>
+        <option value="#ffffff">White</option><option value="#87a8c9">Sky</option><option value="#custom">Custom…</option></select>
+        <input type="color" id="optBgCustom" value="#16181d" title="Custom background colour" style="width:34px;padding:0"></div>
+      <div class="row"><label title="Preview the flat paint colours the game lays over ground and naval vehicles. Off shows the raw, rusty-brown albedo. Preview only — never exported."><input type="checkbox" id="optPaintTint" checked> Stock camo preview</label></div>
+      <div class="row"><label>Camo mix</label><input type="range" id="optPaintStrength" min="0" max="100" value="100" title="How far the preview goes from the raw detail sheet to the game's paint colour"><span class="val" id="optPaintStrengthVal">100</span></div>
+      <div class="row"><label style="font-size:11.5px" title="Blend over the camouflage using the albedo's alpha, as the game does — so the Wear mask brush shows live. Turn it off to judge colours flat."><input type="checkbox" id="optCoverage" checked> Use coverage mask (albedo alpha)</label></div>
+      <div class="row"><label title="How often the track texture repeats along the generated track. War Thunder builds tracks at runtime, so the preview picks an aspect-correct default — nudge it if the links look too long or too short.">Track tiling</label><input type="range" id="optTrackTiling" data-k="0.01" min="25" max="400" value="100"><span class="val" id="optTrackTilingVal">1.0×</span></div>
+      <div class="row"><label style="font-size:11.5px" title="The model's own jet-exhaust plume, muzzle-flash and flare billboards. They are drawn unlit and additive, so on a static model they read as dark rectangles on the wing root or tailpipe, and they have no paintable texture of their own. Off by default."><input type="checkbox" id="optShowEffects"> Jet flames &amp; gun flashes</label></div>
+      <div class="row"><label style="font-size:11.5px" title="The suspended armament of the loadout picked in the Weapons tab — bombs, rockets, tanks and missiles. Off until you pick a loadout, which turns it on."><input type="checkbox" id="optShowWeapons"> Suspended armament</label></div>
+      <div class="row"><label style="font-size:11.5px" title="Pylons, racks and built-in pods that are part of the vehicle's model. Off until you pick a loadout that uses them, so a vehicle arrives as a bare airframe."><input type="checkbox" id="optShowPylons"> Pylons, racks &amp; built-in pods</label></div>
+      <details class="adv">
+        <summary>Advanced</summary>
+        <div class="row"><label title="Turn the light round the model">Light direction</label><input type="range" id="lightAz" min="0" max="360" value="40"><span class="val" id="lightAzVal">40°</span></div>
+        <div class="row"><label title="Raise or lower the light — negative lights from below">Light height</label><input type="range" id="lightEl" min="-80" max="88" value="52"><span class="val" id="lightElVal">52°</span></div>
+        <div class="row"><label><input type="checkbox" id="lightFollow" title="Light always shines from the camera, like a headlamp. Off by default — a fixed light shows form better."> Light follows camera</label></div>
+        <div class="row"><label title="Camo nets, tarpaulins and cables are skinned cloth this app can't pose, so they show as stretched slabs. Hidden by default; their textures are still editable in 2D."><input type="checkbox" id="optShowUnposed"> Show unposed parts (camo nets)</label></div>
+        <div class="row"><label title="Only turn this on if a skin appears upside-down on the model. Off by default — every model the app extracts itself is already the right way up."><input type="checkbox" id="optFlipV"> Flip V (skin looks upside-down)</label></div>
+        <div class="row"><label title="How far, in texels, a part-limited stroke or fill may spill past the edge of its UV island. A little bleed prevents dark seams in game; 0 turns it off.">Paint bleed</label><input type="range" id="optMaskGrow" min="0" max="6" value="2"><span class="val" id="optMaskGrowVal">2 px</span></div>
+        <div class="row"><button id="btnRecord" style="flex:1" title="Record what the app is doing while you paint — frame drops, and how much work each stroke was. Written to a .json on your machine when you stop; nothing is sent anywhere.">Record a session</button></div>
+        <div class="hint" id="recHint">While recording, press <b>F9</b> the moment something feels wrong — it marks the moment for your bug report.</div>
+      </details>
+    </div>
+    <div class="section collapsed" id="posePanel" style="display:none">
+      <h3>Moving parts</h3>
+      <div id="poseList"></div>
+      <div class="hint">Preview only — nothing here changes the exported skin. Dimmed rows have no animation in the game files, so their hinge and range are estimated.</div>
+    </div>
+    <div class="section collapsed">
+      <h3>Surface (_n) tools</h3>
+      <div class="row"><button id="btnResetSurface" style="width:100%" title="Put this slot's BASE _n back to the game's original — the way back from a baked decal look, a raw-channel edit or a replaced _n file, none of which is a layer. Smoothness, metal and normal LAYERS are not touched; delete those in the layer list.">Reset base _n to original</button></div>
+    </div>
+    <div class="section" id="secSettings">
+      <h3>Settings</h3>
+      <div class="hint">Every control's default is whatever this build ships — reset reads it off the page, so it can never drift from the markup.</div>
+      <div class="row" style="margin-top:6px"><button id="btnPrefsResetUI" class="prefreset" data-sec="layout" title="Put the panels back where this build has them: both sidebar widths, the share between the vehicle list and your skins, and the 3D / 2D split. Nothing else is touched — no brush, view or export setting.">Reset layout</button><button id="btnPrefsReset" style="margin-left:auto" title="Put every setting back to this build's defaults. Does not touch the indexed game folder, your decal library or the open project.">Reset all settings</button></div>
+      <div class="row"><button id="btnPrefsExport" style="flex:1" title="Save every setting to a file you can carry to another machine. Nothing is uploaded.">Export…</button><button id="btnPrefsImport" style="flex:1" title="Read settings back from a file written by Export">Import…</button></div>
+      <input type="file" id="prefsPick" accept="application/json,.json" style="display:none">
+      <div class="hint" id="prefsChanged"></div>
+      <div class="row" style="margin-top:8px"><label title="How much memory undo may use. It is counted in bytes, not steps — one change to a large texture costs far more than a small edit. Raise it if undo runs out on large sheets.">Undo memory</label>
+        <select id="optUndoBudget" title="Ceiling for the undo history. The oldest steps are dropped when it is reached.">
+          <option value="128">128 MB</option><option value="256">256 MB</option><option value="384" selected>384 MB</option>
+          <option value="768">768 MB</option><option value="1536">1.5 GB</option><option value="3072">3 GB</option></select></div>
+      <div class="hint" id="undoUsage"></div>
+      <div class="hint">The _n texture packs four things — <b>R</b> smoothness · <b>G</b>/<b>A</b> normal · <b>B</b> metalness. They are edited separately and repacked on export.</div>
+    </div>
+  </div></div>
+</div>
+<!-- The status line: a bar along the bottom of the window (ROADMAP 3.36), click it for Messages. -->
+<div id="statusbar"><div id="status">Open your War Thunder folder to begin — or drop in an .obj / .dds / .wtproj</div></div>
+<!-- ROADMAP 3.29. Three windows under the top bar, non-modal: the sections they hold are the same
+     elements the right sidebar used to carry, MOVED here at load by ui/panels/topwin.js, so every id
+     and every handler is untouched. Export gets a second column, the preview of what each setting
+     does (ui/panels/export-preview.js), and a foot with the three ways out. View can be docked back. -->
+<div class="topwin" id="winExport" style="display:none" data-for="btnExport">
+  <div class="twbody"><div class="twcol" id="winExportSettings"></div><div class="twcol pv" id="expPreview"></div></div>
+  <div class="twfoot" id="winExportFoot"></div>
+</div>
+<div class="topwin" id="winView" style="display:none" data-for="btnViewWin"></div>
+<div class="topwin" id="winSettings" style="display:none" data-for="btnSettingsWin"></div>
+<!-- ROADMAP 4.50 (15). The History window: the undo stack as a list (ui/panels/history.js). Its one
+     section lives here rather than in the sidebar — it was never a sidebar panel. -->
+<div class="topwin" id="winHistory" style="display:none" data-for="btnHistoryWin">
+  <div class="section" id="secHistory">
+    <h3>History</h3>
+    <div class="row"><input type="text" id="histMarkName" maxlength="60" placeholder="Name this state, e.g. before weathering" style="flex:1; min-width:0" title="A name for the state the image is in now. Enter or Checkpoint keeps it; naming a state again renames it."><button id="btnHistMark" title="Name the state the image is in now, so it can be found and gone back to from this list">Checkpoint</button></div>
+    <div class="hint" id="histHint"></div>
+    <div id="histMarks"></div>
+    <div class="histlist" id="histList"></div>
+  </div>
+</div>
+<!-- The Controls & guide screen (`?`). Above the top-bar windows (120) and under a dialog (150): `?`
+     pressed with the Export window up used to open it BEHIND the window, at 100. Its handlers —
+     Escape, the ✕, a click on the backdrop — are bound in ui/keys.js (CLAUDE.md §4: no inline
+     event attributes in markup; 2026-10-10 docs review). -->
+<div id="helpOverlay" style="display:none; position:fixed; inset:0; z-index:140; background:rgba(10,12,16,.82); overflow:auto">
+  <div style="max-width:900px; margin:40px auto; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:24px 28px">
+    <h2 style="margin-bottom:14px">Controls &amp; guide <button id="btnHelpClose" style="float:right" title="Close (Esc)">✕</button></h2>
+    <div class="keymap" style="margin-bottom:22px">
+      <div>
+        <h4>3D view</h4>
+        <dl>
+          <dt><kbd>Left-drag</kbd></dt><dd>Orbit around the point you grabbed</dd>
+          <dt><kbd>Right-drag</kbd></dt><dd>Pan</dd>
+          <dt><kbd>Wheel</kbd></dt><dd>Zoom (fly speed in fly mode)</dd>
+          <dt><kbd>Click</kbd></dt><dd>With Painting off: switch to that part's texture slot, or grab the decal under the cursor. With Painting on, a click paints</dd>
+          <dt><kbd>S</kbd>+<kbd>click</kbd></dt><dd>Switch to that part's texture slot — painting or not</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>click</kbd></dt><dd>Select that part — every material piece of it, on every texture; again to drop it, <kbd>Shift</kbd> to only ever add. The cursor becomes a hand while <kbd>Ctrl</kbd> is down over the model</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>right-click</kbd></dt><dd>The inverse: deselect it, or — with nothing selected — shut just that one part out of painting</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>wheel</kbd></dt><dd>Widen / narrow the selection one level at a time: the part, its shape, its sub-group, the group above, the whole category, the model</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Alt</kbd></dt><dd>Add every part whose geometry is identical to the last one you clicked</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>H</kbd></dt><dd>Show only the selected parts (again to bring the rest back)</dd>
+          <dt><kbd>Alt</kbd>+<kbd>click</kbd></dt><dd>Pick colour from the model</dd>
+          <dt><kbd>F</kbd></dt><dd>Fly camera — <kbd>WASD</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> down/up, <kbd>Shift</kbd> faster</dd>
+          <dt><kbd>`</kbd> hold</dt><dd>Compare against the original</dd>
+        </dl>
+      </div>
+      <div>
+        <h4>Painting</h4>
+        <dl>
+          <dt><kbd>B</kbd></dt><dd>Painting on / off — one switch for both views</dd>
+          <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Brush size (also <kbd>Alt</kbd>+wheel)</dd>
+          <dt>click a number</dt><dd>Type any slider's value — or <kbd>Enter</kbd> on the slider; <kbd>Esc</kbd> cancels</dd>
+          <dt><kbd>Shift</kbd>+<kbd>click</kbd></dt><dd>Straight line from the last point</dd>
+          <dt><kbd>Alt</kbd>+paint</dt><dd>Reveal instead of hide (mask brush)</dd>
+          <dt><kbd>X</kbd>+<kbd>click</kbd></dt><dd>Hold <kbd>X</kbd> and click a part to protect it from painting; again to unprotect — painting or not</dd>
+          <dt><kbd>Space</kbd>-drag</dt><dd>Pan the 2D view</dd>
+        </dl>
+        <h4 style="margin-top:12px">Selection</h4>
+        <dl>
+          <dt><kbd>M</kbd></dt><dd>Rectangular selection on / off — then drag in 2D to make one, or drag a handle to adjust it. Shift+drag adds a rectangle to the selection, Alt+drag takes one away</dd>
+          <dt><kbd>K</kbd></dt><dd>UV island selection on / off — then click a shell in 2D, or <kbd>Ctrl</kbd>+click it on the model. Shift adds, Alt removes. Fill, Clear, Crop, Copy and the brush all follow the island's shape, not its box</dd>
+          <dt><kbd>L</kbd></dt><dd>Lasso on / off — drag round an area in 2D, or click corner by corner and close on the first corner (double-click or <kbd>Enter</kbd> closes too; <kbd>Backspace</kbd> takes a corner back, <kbd>Esc</kbd> drops the outline). Shift at the first press adds, Alt takes away</dd>
+          <dt><kbd>W</kbd></dt><dd>Magic wand on / off — click a colour in 2D, or <kbd>Ctrl</kbd>+click it on the model, to select everything within Tolerance of it (Contiguous: only that patch). Shift adds, Alt takes away</dd>
+          <dt><kbd>V</kbd></dt><dd>Show the UV island outlines over the sheet — the shells <kbd>K</kbd> picks, drawn</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select the whole sheet</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
+          <dt>Drag inside</dt><dd>Move the rectangle; the eight handles resize it</dd>
+          <dt>While it exists</dt><dd>The brush is confined to it, in both views. Fill, Clear, Crop and Copy are in the Selection panel.</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>'</kbd></dt><dd>Pixel grid in 2D — every texel edge, from 600 % zoom</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>;</kbd></dt><dd>Rulers and guides in 2D — drag out of a ruler for a guide, back onto one to remove it. The selection, the shape tool and flat decals snap to guides; hold <kbd>Ctrl</kbd> to place freely</dd>
+        </dl>
+      </div>
+      <div>
+        <h4>Decals</h4>
+        <dl>
+          <dt>Click it in 3D</dt><dd>Grab that decal for moving</dd>
+          <dt><kbd>G</kbd></dt><dd>Move on model on / off — then drag the decal over the surface</dd>
+          <dt>Drag in 3D</dt><dd>Slide a projected decal over the surface</dd>
+          <dt>Drag in 2D</dt><dd>Move a flat decal (grabs where you click)</dd>
+          <dt><kbd>←↑→↓</kbd></dt><dd>Nudge (<kbd>Shift</kbd> = bigger step)</dd>
+          <dt><kbd>,</kbd> <kbd>.</kbd></dt><dd>Rotate (<kbd>Shift</kbd> = snap)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>V</kbd></dt><dd>Paste an image as a decal</dd>
+          <dt><kbd>T</kbd></dt><dd>Add text — lettering in any font, editable as text after it is placed or projected</dd>
+        </dl>
+        <h4 style="margin-top:12px">Layers &amp; project</h4>
+        <dl>
+          <dt>Drag a layer</dt><dd>Reorder the stack</dd>
+          <dt>Right-click</dt><dd>Layer menu · double-click renames</dd>
+          <dt><kbd>Alt</kbd>+eye</dt><dd>Show only that layer</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Del</kbd></dt><dd>Duplicate · delete layer</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Y</kbd></dt><dd>Undo / redo</dd>
+          <dt>History</dt><dd>In the top bar: every step and what it costs — click one to go back to it, and name a checkpoint to come back to</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Save project</dd>
+          <dt><kbd>?</kbd></dt><dd>This screen — <kbd>Esc</kbd>, its ✕ or a click outside closes it</dd>
+          <dt><kbd>F9</kbd></dt><dd>Mark this moment in a session recording (View &amp; scene ▸ Advanced ▸ Record a session)</dd>
+        </dl>
+      </div>
+    </div>
+    <div style="color:var(--muted); line-height:1.7; font-size:12.5px">
+      <b style="color:var(--text)">Workflow</b><br>
+      1. On the welcome screen pick "Open War Thunder folder" — Chrome or Edge can open a folder, remember it and write into it; an install under Program Files is opened with "Open it another way…" — then search a vehicle in the sidebar and click it: its model and textures load straight from the game. Or start empty and drop in an .obj / .dds / .wtproj. 2. Pick a texture slot and add layers — <b>+ Layer</b>, <b>Img</b>, <b>Text</b> or <b>Group</b> at the top of the Layers panel. 3. Paint in 2D or press <kbd>B</kbd> and paint on the model. 4. <b>Export as… ▸ To War Thunder</b> → in-game "Update custom camouflage list". Where the browser cannot write into UserSkins — an install under Program Files — it offers <b>Download .zip</b> instead, which works everywhere.<br><br>
+      <b style="color:var(--text)">Where your files go</b><br>
+      Inside your War Thunder folder the app writes only <code>UserSkins/&lt;name&gt;/</code>, and only when you press <b>To War Thunder</b>. Everything else — a .wtproj, a .zip, an OBJ, an exported layer, your settings, a session recording — goes wherever the browser saves downloads; reopen a .wtproj with <b>Add files…</b> or by dragging it onto the window. The recovery copy and the index of your install stay in the browser's own storage on this machine. The .zip holds one folder, <code>&lt;name&gt;/</code>: extract it <i>into</i> UserSkins, so that <code>UserSkins/&lt;name&gt;/</code> holds the .blk — Windows' Extract All proposes a folder named after the zip and nests it one level too deep — and under Program Files, Windows asks for administrator approval to write there. On a later visit a remembered War Thunder folder may need one click on <b>Reopen War Thunder folder</b>.<br><br>
+      <b style="color:var(--text)">Reporting a bug</b><br>
+      Say which version (on the welcome card), which browser and which vehicle, and what you did. <kbd>F12</kbd> ▸ Console shows any error in red — copy it. For something slow or jumpy, <b>View &amp; scene ▸ Advanced ▸ Record a session</b>, press <kbd>F9</kbd> the moment it goes wrong, then stop and attach the .json it saves. The app sends nothing anywhere, so a report holds exactly what you put in it.<br><br>
+      <b style="color:var(--text)">Which in-game vehicle your skin lands on</b><br>
+      War Thunder finds a skin by the <b>unit name</b> of the .blk file, and that is usually <i>not</i> the 3D model's name — the F-4E's model is <code>f_4e</code> but the file must be <code>f-4e.blk</code>, and the M1A2 SEPv3's model is <code>m1a2_sep3</code> while the file must be <code>us_m1a2_sep3_abrams.blk</code>. The app reads the real unit list out of your install and writes the right names for you. When several vehicles share one model (every F-16A, both Leopard 2A4s) it lists them all under <b>Skin &amp; export ▸ Applies to</b> so you can tick exactly the ones you want.<br><br>
+      <b style="color:var(--text)">Ground vehicles vs aircraft</b><br>
+      Ground and naval vehicles are exported with <code>set_tex</code> + <code>param:t="camo_skin_tex"</code>, which is what the CDK requires for a fixed camouflage and what keeps in-game decals working; aircraft use <code>replace_tex</code> and can only be fixed skins.<br><br>
+      <b style="color:var(--text)">The albedo's alpha is the coverage mask — this is the one that catches everybody</b><br>
+      A ground or naval skin is not painted on its own: the game blends it over the player's <i>scalable camouflage</i> using your sheet's <b>alpha channel</b>. The CDK puts it plainly — a black alpha means the texture is completely transparent and does not affect the camouflage, a white alpha means it covers the camouflage completely, and greys give a semi-transparent overlay. The app keeps that mask as a channel of its own, so painting colour — even flooding a hull with one opaque colour — never touches it. What the export writes into it is <b>Skin &amp; export ▸ Alpha</b>. On a ground or naval skin (<code>set_tex</code>), <i>Auto — opaque for ground</i> ships it fully opaque (255), as every published ground skin does: the game keeps the vehicle's own texture beside your sheet, and the worn edges, scratches and bare metal come from that texture's alpha, scaled by the in-game condition slider — not from yours. Your sheet's mask ships only when you paint one with the <b>Wear mask</b> brush, or set Alpha to <i>Keep the source / painted mask</i>, which keeps the mask the vehicle's texture came with. On an aircraft (<code>replace_tex</code>) the sheet is the albedo, and Auto keeps its mask. The viewport blends with the same setting — what you see is what the exported .dds contains.<br><br>
+      <b style="color:var(--text)">Why a stock tank or ship looks rusty-brown</b><br>
+      Because that is what its albedo really is. War Thunder paints ground and naval vehicles from a <i>second</i> texture — the camo slot — and the texture you edit is only the dark, detailed base underneath it: <code>camo_hellgrau_50</code> is light grey, <code>camo_brown_wood</code> is a wooden deck, <code>ger_camo_bronzegruen</code> is Bundeswehr green. One model uses several of them, which is why a ship's hull, deck and waterline are three different colours over the same sheet. <b>View &amp; scene ▸ Stock camo preview</b> reproduces that in the viewport (preview only — never exported), weighted by the coverage mask above, so painting an opaque colour hides it exactly where the game would.<br><br>
+      <b style="color:var(--text)">Layers, and limiting one to a few parts</b><br>
+      The stack is per texture. Drag layers to reorder, right-click for the layer menu (rename, duplicate, clear, mask, delete), double-click a name to rename, <kbd>Alt</kbd>-click an eye to show only that layer, <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicates and <kbd>Del</kbd> deletes.<br>
+      Any layer can be <b>limited to a set of model parts</b>: select the parts (Parts tab, or <kbd>Ctrl</kbd>+click in 3D) and use the layer's <b>Limit ▸ ← selection</b> — or just add the layer while a selection is live and it inherits it. The limit is non-destructive (clear it any time), it names itself after the part group when it matches one, and the brush respects it, so paint cannot escape onto the neighbouring panel. This is the fast way to do "green turret, grey hull" without masking anything by hand.<br><br>
+      <b style="color:var(--text)">Painting, and the brush tools</b><br>
+      One switch turns painting on and off for both views — the <b>Painting</b> button under the brush, the button over either view, or <kbd>B</kbd>. Off, a click in 3D picks parts and orbits and a drag in 2D pans; on, both views paint with the selected tool, and picking up a tool switches painting on by itself. While it is on, a circle is projected on the surface under the cursor showing the brush's real footprint — brush size is set in texture pixels, which covers half a drop tank and a hand's width of fuselage at the same number, so the ring is worked out from the triangle's own texels-per-metre. The inner circle is where a soft brush stops being opaque.<br>
+      Color/Eraser work on paint layers. Smoothness/Metal/Flatten normal/Panel line edit the _n surface map with correct WT channel packing. Wear mask paints the albedo's alpha — where your paint covers the player's camouflage — on ground and naval vehicles. Mask paints the active layer's mask (paint hides, Alt or value≥128 reveals). Tools that need something you haven't loaded are greyed out with the reason; a tool that writes a channel the selected layer does not carry yet adds that channel to the layer with its first stroke — and only the options a tool actually uses are shown, so a value slider never appears for the colour brush and a colour picker never appears for a metalness layer.<br>
+      <kbd>Shift</kbd>+click draws a straight line from where the last stroke ended, however far away that is. Painting <b>across a UV island border</b> is handled from the geometry rather than guessed at from the texture: each triangle's own texels-per-metre says how far a stamp should have moved on the sheet, so a real seam crossing is recognised and never bridged with a streak through unrelated islands, and the pointer's travel is walked in small steps that are each raycast for their own surface point, so the gap on both sides of the seam is filled instead of skipped.<br><br>
+      <b style="color:var(--text)">Layer masks</b><br>
+      Any paint, image or fill layer can carry a <b>mask</b>: a sheet whose brightness decides how much of the layer shows — white shows, black hides, grey partly shows — and nothing is deleted, so removing the mask brings the layer back whole. Add one white (then hide where you paint) or black (then reveal where you paint), take one <b>from the parts you have selected</b>, or load an <b>image as the mask</b> — a stencil, a grunge map, a hand-drawn shape. Once it exists you can paint on it with the Mask brush, <b>invert</b> it, <b>soften</b> it into a fade, fill it to show or hide everything, or replace it from another image, all undoable. The mask appears as its own thumbnail beside the layer's content in the stack; click it to start painting on it. A mask works on every channel, not just colour.<br><br>
+      <b style="color:var(--text)">Decals &amp; images</b><br>
+      Every image you add opens in the <b>decal editor</b> first, showing it exactly as it is: remove its background if you want to (<b>Key</b> starts on "Keep as-is" — corner colour, white/black, or click the colour you mean), crop to content, adjust brightness/contrast/saturation, rotate/mirror, and pick the surface look. The editor generates the matching normal sub-texture, and <b>Save to library</b> keeps the finished decal — image, generated _n and surface look — for any later project (the Img button opens the library once you have one). Drop a file, or copy an image anywhere and press <kbd>Ctrl</kbd>+<kbd>V</kbd>.<br>
+      Placing: a new image goes straight into <b>projection</b> mode. Line the camera up the way you want the image to read and click the model — it projects from that view, wraps around curvature and crosses UV seams. A marking over a wing root covers two textures at once; it needs a layer in each, but it stays <b>one decal</b>: move it, resize it, hide it or delete it and every texture it spans follows. The layer list marks it "×2 tex".<br>
+      Moving one afterwards: <b>drag it around on the model</b> (the <b>Moving</b> button, <kbd>G</kbd>, or just click the decal in 3D to grab it), nudge with <kbd>←↑→↓</kbd>, rotate with <kbd>,</kbd> <kbd>.</kbd>. It re-projects onto whatever surface it lands on, so it never smears. Size and Rotate re-project from the original image rather than stretching baked pixels, and <b>Re-aim from this view</b> fixes a decal that was projected from the wrong angle. Its pixels are regenerated on every move, so the brush won't touch a projected layer — duplicate it (⧉) first, which frees the pixels for painting. "Move to clicked spot" is flat UV placement, useful for flat panels. Symmetry mirrors the projection across the vehicle centreline.<br><br>
+      <b style="color:var(--text)">Parts, groups &amp; selection</b><br>
+      The model's own mesh names (elevator, airbrake_l, gear_c…) become individual parts, and the grouping follows the vehicle type: aircraft get wings / engines &amp; nozzles / propellers / landing gear / pylons, tanks get hull / turret / running gear / applique armour &amp; ERA / stowage / optics, ships get main and secondary battery / directors &amp; radar / masts / boats / propulsion. (The rules come from a survey of the naming conventions across WW2 and modern models of every class.) Groups fold (click the arrow) and can be reorganised: select parts, then "→ group…" moves them into any group or a new custom one. There are two ways to limit where paint goes — <b>select</b> the handful of parts you want to paint, or switch the Parts tab to <b>protect</b> mode and click the one or two parts that must stay untouched (much faster than selecting the other 200). Protected parts show a shield and are skipped by painting and projection. Solo isolates parts/groups.<br><br>
+      <b style="color:var(--text)">Game files</b><br>
+      Filter the vehicle list by <b>type, nation and rank</b>, and all three are multi-select: click Germany and Italy, ranks V and VI, aircraft and helicopters, and you get exactly that set in one gesture. On a window less than about 810 px tall the nation and rank chips fold behind one chip at the end of the type row, showing a flag and <b>Rank</b>: click it, or press Enter or Space on it, to show or hide them; while they are hidden, a nation or rank you picked shows on that chip, lit. Nation and rank come from the game's own files (shop.blk's research tree and wpcost.blk), so a Hungarian Leopard is listed under Italy and an Australian Abrams under Britain, exactly as in game; with nothing typed the list is ordered the way the trees are, by nation then rank then name. The results share the tab's height with your skins: drag the line between the two sections to give one list more (double-click it to put it back), and the share is remembered. On a short window the vehicle list keeps five rows (fewer only on the very shortest pages), and where there is no room for everything the tab scrolls under the search box instead. Opening the folder also lists every skin already in your <b>UserSkins</b> directory: click one to load it onto the right model. Loading a skin resets the previous one first, and keeps the skin's own resolution (an 8K skin stays 8K rather than being squeezed into the stock texture's size).<br>
+      "Open War Thunder folder" indexes every texture in the game's .dxp.bin packs (read-only). All formats decode — including Oodle-compressed and BC7 — and each texture automatically resolves to the largest quality tier your install has ($hq/$uhq variants; pick Base in the quality dropdown for smaller loads). Search a vehicle name to load its geometry + correct textures directly (the download arrow at a row's right end downloads it as OBJ + MTL + textures in a .zip instead). For single textures use "add" (auto-bind by name) or "→slot" (apply as the active slot's base — that's how you load any stock camo). "Fill missing slots" completes every empty slot in one click.<br><br>
+      <b style="color:var(--text)">Limits</b><br>
+      <b>A fill on selected parts used to leave pale lines and unpainted patches.</b> Two separate causes, both fixed.
+      A part stencil is a filled triangle mesh, and a filled shape is antialiased, so every pixel an island only
+      half-covered came out at half strength; unioning two neighbouring parts made it worse rather than better
+      (half over half is three quarters, not one). Stencils are now rasterised as a single path for the whole
+      selection and driven to fully opaque, then grown a couple of texels into the padding around each island —
+      without that last step the renderer samples into unpainted bleed and every island gets a dark rim
+      (<b>View &amp; scene ▸ Advanced ▸ Paint bleed</b> if you ever need to change it).
+      The unpainted <i>patches</i> were a different thing: one mesh node often uses several materials, and those
+      usually live on <i>different textures</i>, so a fill made in one slot could not reach the rest. The Parts tab
+      now lists the node, selecting it takes all of its pieces, and a fill / adjustment / paint layer made from a
+      selection is created on every texture that selection covers and stays linked — moving, hiding, recolouring or
+      deleting it reaches all of them at once.<br><br>
+      <b>Layers work on every channel, not just colour.</b> <b>+ Layer</b> adds a layer on the channel the brush is
+      in, and the selected layer carries a <b>channel strip</b>: five chips — Colour, Smoothness, Metalness, Normal,
+      Paint mask — saying which channels it holds and what is in each. A <b>+</b> chip gives the layer that channel;
+      a chip's ▾ converts, moves or removes it. Blend mode, opacity, masks, part limits and
+      the cross-texture link work the same on all of them, so surface work is no longer a destructive brush on the
+      imported <code>_n</code>. The 3D view's channel dropdown shows any one map flat and unlit, and the
+      <b>Channels</b> switches under the slot list turn a channel off in the shaded view to see what it contributes.<br><br>
+      <b>Suspended armament.</b> The <b>Weapons</b> tab reads the vehicle's own file out of
+      <code>aces.vromfs.bin</code>, so it lists the real thing: every hardpoint, with the presets it accepts and
+      the modification each one needs, in a row laid out the way the game's loadout screen lays it — seen from
+      the front, so the right wing is on the left. <b>The hardpoint row is the loadout.</b> Click a hardpoint
+      to see what it can carry — under the game's own headings, each line the store's name with its ammo and
+      mass — pick one, and it hangs on the aircraft there and then, that station alone: no Apply step, the way
+      the game's loadout screen works. The dropdown at the top fills the stations from one of the game's own
+      purchasable loadouts — or from one you saved — and the moment you change a station it is marked
+      <i>edited</i> and becomes yours. Give it a name and it is kept between sessions, and the loadout a skin
+      was painted against is saved inside the <code>.wtproj</code> and hung again when the project is reopened.
+      The line above the row totals what the build weighs, out of the store definitions themselves, against
+      the vehicle's own maximum load. Hanging a station loads
+      each store's exact model — the rack from its container definition, the missile or bomb from the store
+      definition — and hangs it on the actual model node the game hangs it from, so a MER's three bombs sit on its
+      canted shoulder stations rather than being stacked under the nearest pylon-shaped part. The pylons the game
+      shows for that loadout are shown and the rest hidden, exactly as in game. Nothing here is name-matched any
+      more; the fuzzy search is only for the box you type into. A weapon can also be opened on its own to paint and
+      export, and a saved weapon project can be merged into a vehicle project.<br>
+      <b>A vehicle loads as a bare airframe.</b> There is no question about what to bring with it, because both
+      answers loaded exactly the same geometry and only differed in what was made visible — so it is a display
+      option. No stores are hung, and the vehicle's own pylons, racks and <i>built-in pods</i> are hidden; switch
+      them back on under View &amp; scene. Which nodes count as mounting hardware comes from the
+      game's own WeaponSlots — the emitter node of each station plus the ShowNodes / HideNodes it switches per
+      loadout — rather than from their names, which is why an A-4E now arrives without the gun pods under its belly.
+      The <b>jet-exhaust, muzzle-flash and flare billboards</b> are off by default too (View &amp; scene): they are
+      drawn unlit and additive, so on a static model they read as dark rectangles, and they have no paintable
+      texture of their own.<br><br>
+      Only LOD 0 and rigid (non-skinned) meshes are extracted. <b>Moving parts are posable</b> from the vehicle's own baked animation (<code>&lt;model&gt;_anim</code>), so the gear, flaps, slats, airbrake, control surfaces, arrestor hook, swing wings and even the individual exhaust-nozzle petals move exactly as they do in game rather than about a guessed hinge — sliders run 0 (retracted/closed) to 100 (extended/open), which are the game's own frame numbers, and each rests at the frame the model is drawn in. Vehicles the install ships no clip for, and imported <code>.obj</code> files, fall back to a hinge inferred from the shape of the part (dimmed labels in the Moving parts panel); tank turrets, guns and hatches always do, because a tank's clip carries only track roll. <b>Camo nets and tarpaulins</b> are bone-driven cloth: the file stores them in bind-pose bone space, so without skinning they render as a stretched slab — they are hidden by default and listed with a · in the Parts tab (View &amp; scene ▸ Advanced ▸ Show unposed parts brings them back; their textures are editable in 2D regardless). <b>Tank tracks are not in the model file</b>: War Thunder builds the ribbon at runtime from the suspension nodes, so the preview generates one from the wheels (marked "generated") to carry the track texture, and the track material gets its own 2D-only slot that still exports with the skin. Under <b>Skin &amp; export ▸ Textures out</b> each edited texture can be given its own export resolution and format — that is how you keep one 8K albedo while everything else drops to 1K to fit the archive limit. Projects (.wtproj) embed the model + textures, so one file restores everything.
+    </div>
+  </div>
+</div>
+<div id="keyHint"></div>
+<div id="carryGhost"><canvas></canvas><div class="cap"></div></div>
+<div id="modalHost"></div>
+<input type="file" id="filePick" multiple accept=".obj,.dds,.tga,.png,.jpg,.jpeg,.webp,.wtproj,.wtstack,.ora,.psd,.psb" style="display:none">
+<input type="file" id="decalPick" accept=".png,.jpg,.jpeg,.webp,.dds" style="display:none">
+<input type="file" id="replacePick" accept=".dds,.tga,.png,.jpg,.jpeg,.webp" style="display:none">
+<input type="file" id="pasteTexPick" accept=".dds,.tga,.png,.jpg,.jpeg,.webp" style="display:none">
+<input type="file" id="skinZipPick" accept=".zip,.wtskin" style="display:none">
+<input type="file" id="gameDirPick" webkitdirectory style="display:none">
+<!-- Load order IS the dependency order: these are classic scripts sharing one global scope, so a
+     file may only use what the files above it declared (CLAUDE.md §2). Bottom layers first —
+     codecs/ are pure byte transforms, formats/ parse containers on top of them, game/ joins the
+     result; then editor/ owns pixels, view3d/ owns the scene, export/ turns the document into
+     files, and ui/ is the only layer allowed to touch the DOM.
+
+     The list below is FLAT on purpose. Every module was cut out of the old app blocks at a line
+     boundary the file already had, in place, so the built page is the same text it always was —
+     which is the only reason a change this wide could be checked by reading a diff. Two
+     consequences are visible here and are not mistakes: a handful of modules sit out of layer
+     order (codecs/oodle.js loads among game/, core/idb.js after export/), because moving them is
+     a REORDER and a reorder cannot be proved by concatenation; and ui/ modules are interleaved
+     with the layers they draw, because that is where their code was. Both are for ROADMAP 2.3,
+     which replaces load order with real imports. -->
+<!-- codecs / formats / game — bottom layers, split out 2026-08-05 -->
+<script src="./codecs/dds.js"></script>
+<script src="./codecs/bcn-decode.js"></script>
+<script src="./codecs/bcn-encode.js"></script>
+<script src="./formats/obj.js"></script>
+<script src="./codecs/zstd.js"></script>
+<script src="./formats/blk.js"></script>
+<script src="./formats/vromfs.js"></script>
+<script src="./game/registry.js"></script>
+<script src="./game/aces.js"></script>
+<script src="./formats/model.js"></script>
+<script src="./formats/a2d.js"></script>
+<script src="./formats/ora.js"></script>
+<script src="./formats/psd.js"></script>
+<script src="./codecs/tga.js"></script>
+<!-- what was app/2-editor.js: the editor document model, the 3-D view, and their panels -->
+<script src="./ui/dom.js"></script>
+<script src="./ui/gate.js"></script>
+<script src="./workers/pool.js"></script>
+<script src="./ui/chrome.js"></script>
+<script src="./core/state.js"></script>
+<script src="./core/uvtri.js"></script>
+<script src="./core/errors.js"></script>
+<script src="./core/recorder.js"></script>
+<!-- The one module that had to MOVE rather than just be cut out. It sat 3 000 lines below the
+     first top-level `bindUndoRange(...)` call and worked only because hoisting is per SCRIPT, and
+     the page used to be one script. It runs three statements at load — `App.redoStack = []` and
+     two button handlers — so it is safe this early, and core/ belongs above editor/ anyway. -->
+<script src="./core/undo.js"></script>
+<script src="./editor/tree.js"></script>
+<script src="./editor/node.js"></script>
+<script src="./editor/slots.js"></script>
+<script src="./editor/camo-tile.js"></script>
+<script src="./editor/compositor.js"></script>
+<script src="./editor/channels.js"></script>
+<script src="./editor/tools.js"></script>
+<script src="./view3d/scene.js"></script>
+<script src="./view3d/symmetry.js"></script>
+<script src="./editor/radial.js"></script>
+<script src="./editor/path.js"></script>
+<script src="./editor/guides.js"></script>
+<script src="./view3d/meshes.js"></script>
+<script src="./view3d/materials.js"></script>
+<script src="./view3d/parts.js"></script>
+<script src="./ui/panels/parts.js"></script>
+<script src="./editor/slot-ops.js"></script>
+<script src="./ui/panels/slots.js"></script>
+<script src="./editor/layers.js"></script>
+<script src="./editor/masks.js"></script>
+<script src="./ui/panels/layer-props.js"></script>
+<script src="./ui/panels/chan-strip.js"></script>
+<!-- decal-surface before decals: decals.js binds the Look sliders from SURF_DELTA_CHAN at load, and
+     a `const` is in the temporal dead zone until its own script has run (CLAUDE.md §2 — hoisting is
+     per script). decal-surface.js is declarations only, so it has nothing to run early. -->
+<script src="./editor/decal-surface.js"></script>
+<script src="./editor/decal-style.js"></script>
+<script src="./ui/panels/decal-style.js"></script>
+<script src="./editor/decals.js"></script>
+<script src="./editor/decal-lib.js"></script>
+<script src="./ui/panels/decal-library.js"></script>
+<!-- The text tool (ROADMAP 4.50 (3)): a decal whose image is drawn from a record. Declarations plus
+     one handler binding, so where it loads is free; beside the decal editor whose text mode it is. -->
+<script src="./editor/text.js"></script>
+<script src="./ui/panels/text.js"></script>
+<!-- clone.js above brushes.js: `paintTarget` asks Clone.source, `stampAt` asks Clone.stamp, and the
+     module itself needs nothing below channels.js — its state travels in the argument. -->
+<script src="./editor/clone.js"></script>
+<!-- pen.js above strokes.js for the same reason: `stampAt` asks Pen for every dab, and the module
+     is arithmetic on plain objects that needs nothing at all (ROADMAP 4.50 (4) + 6.4). -->
+<script src="./editor/pen.js"></script>
+<!-- tips.js above brushes.js: `brushStamp` asks Tips for the tip's stamp and `stampAt` for how to
+     lay it. Its IndexedDB half calls core/idb.js, far below — only when called, never at load
+     (main.js reads the library once boot is done). ROADMAP 4.50 (10). -->
+<script src="./editor/tips.js"></script>
+<script src="./editor/brushes.js"></script>
+<script src="./editor/scope.js"></script>
+<script src="./editor/islands.js"></script>
+<script src="./editor/strokes.js"></script>
+<script src="./editor/selshape.js"></script>
+<script src="./editor/marquee.js"></script>
+<script src="./view3d/sel-overlay.js"></script>
+<script src="./ui/view2d.js"></script>
+<script src="./ui/panels/select.js"></script>
+<script src="./ui/panels/path.js"></script>
+<script src="./ui/panels/path3d.js"></script>
+<script src="./ui/panels/guides.js"></script>
+<script src="./view3d/pointer.js"></script>
+<script src="./view3d/shot.js"></script>
+<script src="./editor/paint3d.js"></script>
+<script src="./editor/projector-gl.js"></script>
+<script src="./editor/projection.js"></script>
+<script src="./editor/proj-grip.js"></script>
+<script src="./view3d/proj-handles.js"></script>
+<script src="./view3d/path-overlay.js"></script>
+<script src="./ui/panels/brush.js"></script>
+<script src="./ui/scrollbox.js"></script>
+<script src="./ui/keys.js"></script>
+<!-- what was app/3-export.js: export, the game-file extractor, armament and posing, prefs, boot -->
+<script src="./export/collect.js"></script>
+<script src="./export/units.js"></script>
+<script src="./export/validate.js"></script>
+<script src="./export/plan.js"></script>
+<script src="./ui/panels/export.js"></script>
+<script src="./export/uvmask.js"></script>
+<script src="./export/encode.js"></script>
+<script src="./editor/bake.js"></script>
+<script src="./editor/transfer.js"></script>
+<script src="./editor/gradient.js"></script>
+<script src="./editor/procedural.js"></script>
+<script src="./ui/panels/gradient.js"></script>
+<script src="./editor/effects.js"></script>
+<script src="./ui/panels/effects.js"></script>
+<script src="./editor/mirror.js"></script>
+<script src="./ui/panels/mask-bake.js"></script>
+<script src="./export/blk-write.js"></script>
+<script src="./export/pipeline.js"></script>
+<script src="./editor/replace-tex.js"></script>
+<script src="./editor/paste-tex.js"></script>
+<script src="./game/packs.js"></script>
+<script src="./codecs/wtlz.js"></script>
+<script src="./codecs/oodle.js"></script>
+<script src="./core/idb.js"></script>
+<script src="./game/units.js"></script>
+<script src="./core/match.js"></script>
+<script src="./ui/panels/filters.js"></script>
+<script src="./ui/panels/finder.js"></script>
+<script src="./game/scan.js"></script>
+<script src="./game/decode.js"></script>
+<script src="./ui/panels/game-list.js"></script>
+<script src="./game/vehicle-textures.js"></script>
+<script src="./game/weapons.js"></script>
+<script src="./game/weapon-search.js"></script>
+<script src="./game/loadout.js"></script>
+<script src="./game/place.js"></script>
+<script src="./game/skeleton.js"></script>
+<script src="./game/turret.js"></script>
+<script src="./game/pose.js"></script>
+<script src="./game/stores.js"></script>
+<script src="./view3d/visibility.js"></script>
+<script src="./game/weapon-skin.js"></script>
+<script src="./ui/panels/weapons.js"></script>
+<script src="./game/model.js"></script>
+<script src="./game/tracks.js"></script>
+<script src="./export/obj.js"></script>
+<script src="./game/vehicle.js"></script>
+<script src="./game/cockpit.js"></script>
+<script src="./game/skins.js"></script>
+<script src="./game/userskins.js"></script>
+<script src="./ui/panels/skin-list.js"></script>
+<script src="./core/project.js"></script>
+<script src="./core/autosave.js"></script>
+<script src="./editor/stack.js"></script>
+<script src="./editor/interchange.js"></script>
+<script src="./ui/panels/view.js"></script>
+<script src="./ui/welcome.js"></script>
+<script src="./ui/recovery.js"></script>
+<script src="./ui/drop.js"></script>
+<script src="./core/prefs.js"></script>
+<script src="./ui/panels/export-preview.js"></script>
+<script src="./ui/panels/history.js"></script>
+<script src="./ui/panels/topwin.js"></script>
+<script src="./core/version.js"></script>
+<script src="./main.js"></script>
+<script src="./vendor/zstd-b64.js"></script>
+<script src="./vendor/oodle-b64.js"></script>
+</body>
+</html>
