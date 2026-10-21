@@ -1,6 +1,6 @@
-# WT Skin Studio — user guide (1.0.0-beta.1)
+# WT Skin Studio — user guide (1.0.0-beta.2)
 
-This guide describes the build whose welcome card reads `v1.0.0-beta.1`. What each earlier, internal
+This guide describes the build whose welcome card reads `v1.0.0-beta.2`. What each earlier, internal
 build added is kept at the end, under *History*.
 
 ## Quick start
@@ -455,7 +455,7 @@ freely. Hiding the guides turns snapping off.
 
 Every decal carries a **Look** — *Painted on*, *Vinyl sticker*, *Matte stencil* or *None* — chosen in
 the decal editor and changeable afterwards: in the sidebar with **Apply to the decal** for a decal
-placed flat, and in the *Projected image* panel for a projected one. It is the surface the marking
+placed flat, and in the decal's panel for a projected one. It is the surface the marking
 sits on: gloss, metal and a raised edge, written into the maps War Thunder packs into `_n`.
 
 It arrives **on the decal's own layer** — never as a bake, and never as extra layers beside it. Each
@@ -467,7 +467,7 @@ Look every time the decal moves, so painting on one by hand is refused rather th
 move — duplicate the layer (⧉) for a copy that stays put.
 
 **A decal projected onto the model carries its Look too**, on its layer in every texture the
-projection lands on. The *Projected image* panel has its own **Look** control for changing it
+projection lands on. The decal's panel has its own **Look** control for changing it
 afterwards; the response is re-derived whenever the decal moves, and `Ctrl+Z` reaches the change like
 any other. While a decal is being dragged its response is hidden, and it is rebuilt when the drag
 *ends*, not on every frame of it.
@@ -545,18 +545,19 @@ sessions.
 Add one by dropping an image file, dragging one out of a web page, or `Ctrl+V` — or letter one with
 **Text** (`T`): see *Text — serials, codes and names* below.
 
-- **Project onto model** — the core tool: click the model and the decal is baked as a true planar projection, wrapping correctly across UV seams and panel gaps (rasterized per-triangle into a paint layer). Selection, protected and hidden parts are respected; symmetry projects the mirrored copy too. Depth-limited so it won't print through to the far side. The floating decal is consumed by the projection — it was its source, not a second copy.
+- **A new decal lands on the model.** When you add or paste an image (or *Use* one from the library), it goes straight onto the model, projected from the current view onto whatever is in the middle of it, and is selected with its frame and handles showing — nothing waits on the cursor. So line the camera up the way you want it to read first. It is a true planar projection, wrapping correctly across UV seams and panel gaps; selection, protected and hidden parts are respected; symmetry projects the mirrored copy too; it is depth-limited so it won't print through to the far side. Adding it is one `Ctrl+Z`. With no model loaded, or nothing of it in the middle of the view, it lands flat in the middle of the texture instead and the status line says so.
+- **One decal, two placements: On the model / On the texture.** The switch at the top of the decal's panel converts it in place, either way, at the same size and turn — *On the texture* lays it flat on one texture, the way that texture is unwrapped (right for a flat panel, or for exact work in 2-D); *On the model* wraps it round the surface again. Its Look, depth map, text and mirrored copy go with it, and each switch is one `Ctrl+Z`. A decal that covered several textures keeps only the one under its middle when it goes flat, and the status line says so. On a texture whose unwrap is stretched unevenly a flat decal cannot follow the stretch, so it comes out at the nearest size and angle.
 - **One decal even across several textures.** A marking over a wing root needs a layer in each sheet it covers, but it stays one object: moving, resizing, rotating, hiding, renaming and deleting all act on the whole group, and the layer list marks it `×2 tex`.
-- **Moving a projected decal** — drag it around on the model (the `Moving: on/off` button, `G`, or click the decal in 3D to grab it), `←↑→↓` nudge, `,` `.` rotate — in the projector's own axes. It re-projects onto whatever surface it lands on, so it never smears, and it picks up textures it moves onto. With painting off it can be **dragged on the sheet** in the 2-D view as well: it holds the point you grabbed and lands on the part of the vehicle under that texel. It keeps its aim while it moves, in either view, so a decal dragged onto a panel facing another way projects onto nothing until you press *Re-aim from this view*.
+- **Moving a decal** — with painting off, just drag it: on the model or on the texture, whichever placement it has, and a press anywhere else still orbits. There is no mode to switch on first. `←↑→↓` nudge, `,` `.` rotate — on the model in the projector's own axes. Grab a decal on the model anywhere inside its blue frame; it holds the point you grabbed, so it does not jump. It re-projects onto whatever surface it lands on, so it never smears, and it picks up textures it moves onto. With painting off it can be **dragged on the sheet** in the 2-D view as well: it holds the point you grabbed and lands on the part of the vehicle under that texel. It keeps its aim while it moves, in either view, so a decal dragged onto a panel facing another way projects onto nothing until you press *Re-aim from this view*.
 - **Size / Rotate re-project** from the original image rather than stretching baked pixels — and so do its corner handles and turn knob, which are the same two controls in your hand. **Re-aim from this view** points the projector at the current camera without moving where the decal sits — the fix for one placed from the wrong angle. Because the pixels are regenerated on every move, the brush won't touch a projected layer; duplicate it (⧉) to paint on the copy.
-- **Edit a projected decal's image afterwards.** **Open decal editor…** in the *Projected image* panel opens the image the decal was projected from, as it is on the model now: remove its background, crop it, adjust it, turn or flip it. **Use this decal** re-projects it where it is — same place, same angle, and the marking keeps its size even when a crop or a turn changes the image's shape; cropping away a margin that was wider on one side does not move it (a mirrored copy with *Keep the copy's lettering readable* then moves to sit exactly opposite it — the uneven margin had held it off — and the status line says so). A depth or normal map used for its relief is cropped and turned with it, and an outline or shadow keeps its width. It is one step, so `Ctrl+Z` puts the old image back. The Look stays as it was unless you pick another in the dialog. The name box there names the copy **Save** puts in your library; rename the decal itself in the layer list. If an undo or a redo changes the decal while the editor is open, **Use** does nothing and the status line says so — open the editor again.
-- **Move to clicked spot** — flat UV-space placement, for flat panels. Dragging a flat decal in 2D holds the point you grabbed.
-- **Surface response.** The editor's **Look** — painted, vinyl, stencil, or none — is not just the colour: placing the decal also gives **its own layer** gloss, metal and emboss channels, so a vinyl sticker really is glossier and slightly raised on the model. They are part of the decal, not layers beside it: they follow it when you move it and are hidden, faded, masked or deleted with it, and your `_n` texture itself is never written to. A decal **projected** onto the model carries its Look the same way, set in the *Projected image* panel — see *The Look under a decal*. (`Bake into _n (destructive)` is still there if you specifically want it flattened.)
+- **Edit a projected decal's image afterwards.** **Open decal editor…** in the decal's panel opens the image the decal was projected from, as it is on the model now: remove its background, crop it, adjust it, turn or flip it. **Use this decal** re-projects it where it is — same place, same angle, and the marking keeps its size even when a crop or a turn changes the image's shape; cropping away a margin that was wider on one side does not move it (a mirrored copy with *Keep the copy's lettering readable* then moves to sit exactly opposite it — the uneven margin had held it off — and the status line says so). A depth or normal map used for its relief is cropped and turned with it, and an outline or shadow keeps its width. It is one step, so `Ctrl+Z` puts the old image back. The Look stays as it was unless you pick another in the dialog. The name box there names the copy **Save** puts in your library; rename the decal itself in the layer list. If an undo or a redo changes the decal while the editor is open, **Use** does nothing and the status line says so — open the editor again.
+- **A flat decal** (On the texture) drags in either view too, holding the point you grabbed — on the model it moves while the pointer is over its own texture.
+- **Surface response.** The editor's **Look** — painted, vinyl, stencil, or none — is not just the colour: placing the decal also gives **its own layer** gloss, metal and emboss channels, so a vinyl sticker really is glossier and slightly raised on the model. They are part of the decal, not layers beside it: they follow it when you move it and are hidden, faded, masked or deleted with it, and your `_n` texture itself is never written to. A decal **projected** onto the model carries its Look the same way, set in the decal's panel — see *The Look under a decal*. (`Bake into _n (destructive)` is still there if you specifically want it flattened.)
 - Edit before applying: background removal (corner/white/black key + tolerance), brightness/contrast/saturation, reset to original. The editor **opens on "Keep as-is"** and changes nothing until you ask it to — keying the corner colour is right on a marking with a white box round it and destructive on a camouflage tile or a photo texture, so it is one click rather than the default. Reopening a decal that is already placed keeps its Look — including an Emboss a depth map gave it — unless you pick a different one. The **Look** list shows the preset the decal's numbers match, or **Custom (this decal's own)** when they match none, with its own numbers in the note underneath; choosing any preset applies it. A decal with no Look opens on **None** and stays that way.
 - Surface under decal: bake Painted-on / Vinyl sticker / Matte stencil / Custom (smoothness, metal, emboss) into the `_n` map — applies to the mirrored copy as well.
-- **A picked decal stays on the cursor** until you put it down: a small preview follows the pointer
-  and the cursor changes, so you can orbit, pick a slot or switch tabs and still see what is in
-  hand. It ends when the decal lands, or when you leave placement mode.
+- **A decal picked with no texture open stays on the cursor**: a small preview follows the pointer,
+  so you can load a vehicle or pick a slot and still see what is in hand. It lands the moment there
+  is a texture to put it on.
 
 ### Text — serials, codes and names
 
@@ -611,8 +612,7 @@ you do to *prepare* for a skin, so the decal editor opens on anything and saving
 texture. If you pick a decal with nothing open yet, it waits on the cursor and drops on as soon as
 you choose a texture slot.
 
-- **Click selects, and then Use or Edit.** A click marks the decal; **Use** puts it on the cursor to
-  place, **Edit…** opens it in the decal editor first — text opens as text. Double-clicking a card is
+- **Click selects, and then Use or Edit.** A click marks the decal; **Use** puts it on the model, **Edit…** opens it in the decal editor first — text opens as text. Double-clicking a card is
   the shortcut for Use. **New text…** opens the text editor over the library, and its Save files the
   lettering in the folder you are in.
 - **Three ways to save an edit of a saved decal**, asked at the moment you save it: *overwrite it*,

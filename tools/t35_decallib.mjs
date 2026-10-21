@@ -193,8 +193,9 @@ const BODY = `async function(){
   DecalCarry.clear();
   out.ghostGone = ghost.style.display === "none" && !document.body.classList.contains("carrying");
   // setPlacing is the single choke point that must end a carry — check it really does
+  // (Since 2026-10-17 no placing mode waits for a carried decal: one with a slot lands on the model
+  // at once, so any mode set or cleared ends a carry.)
   DecalCarry.set(await blobToCanvas((await DecalLib.get(starId)).png), "star");
-  setPlacing("proj");
   out.carryKeptWhileWaiting = document.body.classList.contains("carrying");
   setPlacing(false);
   out.carryEndedWithPlacing = !document.body.classList.contains("carrying");
@@ -323,8 +324,8 @@ eq(r.ghostLabel, "star", "and names the decal in hand");
 R.is(r.ghostHasPixels, "with the decal actually drawn in it");
 R.is(r.heldForLater, "the decal is held, not thrown away with an error");
 R.is(r.ghostGone, "putting it down clears the ghost and the cursor state");
-R.is(r.carryKeptWhileWaiting, 'a "proj" placing mode keeps the carry — that is what it is waiting for');
-R.is(r.carryEndedWithPlacing, "and leaving placing mode ends it, so nothing can strand the ghost");
+R.is(r.carryKeptWhileWaiting, "an image picked with no texture open is carried — the ghost is on the cursor");
+R.is(r.carryEndedWithPlacing, "and setting or clearing any mode ends it, so nothing can strand the ghost");
 
 console.log("\n=== names are data, never markup ===");
 R.is(!r.gridHasScript, "the grid contains no script or inline handler");

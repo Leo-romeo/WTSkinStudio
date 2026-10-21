@@ -335,7 +335,7 @@ const BODY = `async function(){
     reset(); App.activeLayer = PL; draw2DNow(); needsRender(); await frames(3);
     var el = kind === "body2" ? cnv2el : cnv3el, a, b;
     if (kind === "body2") { a = cl(grab); b = cl({ x: grab.x + 15, y: grab.y + 10 }); }
-    else if (kind === "body3") { setPlacing("movproj"); a = worldToScreen(V3(0, 0, 0)); b = worldToScreen(V3(.5, .3, 0)); }
+    else if (kind === "body3") { setPlacing(false); a = worldToScreen(V3(0, 0, 0)); b = worldToScreen(V3(.5, .3, 0)); }
     else { a = worldToScreen(V3(.4, .2, 0)); b = worldToScreen(V3(.6, .3, 0)); }
     var r = { before: nProj() };
     el.dispatchEvent(pe("pointermove", a.x, a.y));
@@ -384,6 +384,91 @@ const BODY = `async function(){
     deleteProjGroup(P3);
   }
   App.undoStack.length = 0; App.redoStack.length = 0; App.activeLayer = PL; setPlacing(false);
+
+  // =============== (e) the body in 3-D: held where it was grabbed, inside its frame ===============
+  // Reported 2026-10-17: a press on the decal put its CENTRE under the pointer, so a grab anywhere but
+  // the middle threw it; a press inside the frame where the image painted nothing orbited instead;
+  // and a press on its texels where they show elsewhere on the model (one island, two places) grabbed
+  // it from there. Grabbed at (0.3, 0.1) and dragged by (0.5, 0.4), the centre must go from the origin
+  // to (0.5, 0.4), and the press alone must move nothing.
+  var body3 = async function(from, to, bare){
+    reset(); App.activeLayer = PL; setPlacing(false);
+    if (bare) ctx2d(PL.canvas).clearRect(0, 0, PL.canvas.width, PL.canvas.height);   // nothing painted under the frame
+    needsRender(); await frames(3);
+    var a = worldToScreen(from), b = to ? worldToScreen(to) : a, r = {};
+    cnv3el.dispatchEvent(pe("pointermove", a.x, a.y));
+    cnv3el.dispatchEvent(pe("pointerdown", a.x, a.y));
+    r.press = P.frame.p.slice(); r.dragging = !!App.projDragging;
+    if (to) { cnv3el.dispatchEvent(pe("pointermove", (a.x + b.x) / 2, (a.y + b.y) / 2)); cnv3el.dispatchEvent(pe("pointermove", b.x, b.y)); }
+    cnv3el.dispatchEvent(pe("pointerup", b.x, b.y));
+    await frames(2);
+    r.drop = P.frame.p.slice(); r.steps = steps();
+    return r;
+  };
+  out.hold = { off: await body3(V3(.3, .1, 0), V3(.8, .5, 0)), click: await body3(V3(.3, .1, 0), null),
+               bare: await body3(V3(.3, .1, 0), V3(.8, .5, 0), true), outside: await body3(V3(1.5, 1.5, 0), V3(1.7, 1.7, 0)) };
+  App.undoStack.length = 0; App.redoStack.length = 0; setPlacing(false);
+
+  // =============== (f) one decal, two placements ===============
+  // 2026-10-17: "decal and projected image should not be two completely separate things". A new image
+  // lands on the model at the middle of the view — no image on the cursor, no stand-in on the sheet —
+  // in one undo step; On the texture lays it flat where it was and On the model puts it back, each
+  // one step, both read here as the PIXELS on the sheet (how many, and where their middle is), on a
+  // plate whose UVs are mirrored, turned and unevenly stretched, so a lost turn, flip or size shows.
+  // The plate's UVs evenly scaled for this section (still mirrored and turned 30°): a flat decal can
+  // only turn and scale, so on the 1.4 : 1 stretch the rest of this test uses it cannot match a
+  // projection texel for texel whatever it does — real unwraps are close to even — and a wrong turn or
+  // flip has to show as a clear loss of shared texels, not hide inside the stretch.
+  var restretch = function(b){ B = b; idx.forEach(function(ci, k){ var t = uvOf(cs[ci][0], cs[ci][1]); uv[k * 2] = t[0]; uv[k * 2 + 1] = t[1]; });
+    geo.attributes.uv.needsUpdate = true; delete s._projFind; ProjGrip._tri = null; projGLFree(); };
+  restretch(A);
+  reset(); PL.visible = false; App.activeLayer = PL; compositeSlot(s);
+  var stats = function(){ compositeSlot(s); var d = ctx2d(s.composite).getImageData(0, 0, N, N).data, n = 0, sx = 0, sy = 0;
+    var m = new Uint8Array(N * N);
+    for (var i = 0; i < N * N; i++) if (d[i * 4 + 1] > 180 && d[i * 4] < 90) { n++; sx += i % N; sy += (i / N) | 0; m[i] = 1; }
+    return { n: n, x: n ? Math.round(sx / n * 10) / 10 : -1, y: n ? Math.round(sy / n * 10) / 10 : -1, m: m }; };
+  // how much two drawings are the same texels: |A ∩ B| / |A ∪ B|
+  var iou = function(A, B){ var i = 0, u = 0; for (var k = 0; k < N * N; k++) { if (A.m[k] && B.m[k]) i++; if (A.m[k] || B.m[k]) u++; } return u ? Math.round(i / u * 1000) / 1000 : 0; };
+  var bare = function(q){ return { n: q.n, x: q.x, y: q.y }; };
+  var nL0 = layerLeaves(s.layers).length;
+  var bmpC = mkCanvas(40, 20), gC = ctx2d(bmpC); gC.fillStyle = "#20e020"; gC.fillRect(0, 0, 40, 8); gC.fillRect(0, 0, 10, 20);
+  // straight down at the plate's middle again — (b) aimed the camera elsewhere
+  cam.fly = false; cam.target.set(0, 0, 0); cam.theta = Math.PI / 2; cam.phi = Math.PI / 2; cam.dist = 5; syncCamera();
+  needsRender(); await frames(2);
+  addDecalLayer(bmpC, "landed.png");
+  var LL = activeLayerObj(), fc = {}, pxLand = stats();
+  fc.land = { proj: !!(LL && LL.proj), p: LL && LL.proj ? LL.proj.frame.p.map(r3) : null, placing: App.placing, carry: !!App.carry,
+              steps: steps().length, px: bare(pxLand) };
+  var sw = function(sec, where){ var b = document.querySelector("#" + sec + ' .placeSw[data-place="' + where + '"]'); if (b) b.click(); return !!b; };
+  fc.flat = { clicked: sw("projSection", "sheet") };
+  var FL = activeLayerObj();
+  var pxFlat = stats();
+  Object.assign(fc.flat, { type: FL && FL.type, proj: !!(FL && FL.proj), left: LL && LL.proj ? projSiblings(LL.proj.id).length : -1,
+                           px: bare(pxFlat), iou: iou(pxFlat, pxLand), steps: steps().length });
+  // the flat one dragged on the model: grabbed off its centre, moved by (0.5, 0.4)
+  needsRender(); await frames(2);
+  var c0 = LL && LL.proj ? V3(LL.proj.frame.p[0], LL.proj.frame.p[1], LL.proj.frame.p[2]) : V3(0, 0, 0);
+  var fa = worldToScreen(c0.clone().add(V3(.1, .05, 0))), fb = worldToScreen(c0.clone().add(V3(.6, .45, 0)));
+  fc.c0 = c0.toArray().map(r3);
+  cnv3el.dispatchEvent(pe("pointermove", fa.x, fa.y));
+  cnv3el.dispatchEvent(pe("pointerdown", fa.x, fa.y));
+  cnv3el.dispatchEvent(pe("pointermove", (fa.x + fb.x) / 2, (fa.y + fb.y) / 2));
+  cnv3el.dispatchEvent(pe("pointermove", fb.x, fb.y));
+  cnv3el.dispatchEvent(pe("pointerup", fb.x, fb.y));
+  await frames(2);
+  var on = FL ? ProjGrip.surfaceAt(s, FL.x * N, FL.y * N, null) : null;
+  fc.drag = { p: on ? on.point.toArray().map(r3) : null, steps: steps().length };
+  doUndo();
+  fc.back = { clicked: sw("decalSection", "model") };
+  var ML = activeLayerObj();
+  var pxBack = stats();
+  Object.assign(fc.back, { proj: !!(ML && ML.proj), p: ML && ML.proj ? ML.proj.frame.p.map(r3) : null, px: bare(pxBack), iou: iou(pxBack, pxLand) });
+  doUndo(); var q1 = stats(); fc.undoBack = { flat: !!(FL && nodeOwner(s.layers, FL)), iou: iou(q1, pxFlat) };
+  doUndo(); var q2 = stats(); fc.undoFlat = { proj: !!(LL && nodeOwner(s.layers, LL)), iou: iou(q2, pxLand) };
+  doUndo(); fc.undoAdd = { n: stats().n, layers: layerLeaves(s.layers).length === nL0 };
+  restretch(.14); reset();
+  PL.visible = true; App.undoStack.length = 0; App.redoStack.length = 0; App.activeLayer = PL; setPlacing(false); compositeSlot(s);
+  out.place = fc;
 
   // =============== (c) the slider gate ===============
   reset();
@@ -447,8 +532,8 @@ const near = (a, b, eps) => Math.abs(a - b) <= eps;
 const ptNear = (a, b, eps) => a && b && a.length === b.length && a.every((v, i) => near(v, b[i], eps));
 
 console.log(`=== setup: ProjGrip ${o.has.grip}, ProjHandles ${o.has.handles}, ProjLive ${o.has.live} ===`);
-R.is(o.baked && o.baked.proj && ptNear(o.baked.n, [0, 0, 1], 1e-3) && o.baked.placing === "movproj",
-  `the decal is projected straight down −z onto the plate (n ${JSON.stringify(o.baked && o.baked.n)}), with Moving on`);
+R.is(o.baked && o.baked.proj && ptNear(o.baked.n, [0, 0, 1], 1e-3) && !o.baked.placing,
+  `the decal is projected straight down −z onto the plate (n ${JSON.stringify(o.baked && o.baked.n)}), with no mode left armed (${o.baked && o.baked.placing})`);
 
 console.log("\n=== (a) handles in 3-D ===");
 const H = o.h3;
@@ -532,6 +617,35 @@ for (const [k, what] of Object.entries(GONE)) {
        g.undone === 1 && g.undone2 === 1 && g.look && !g.held,
     `Delete while holding ${what}: the drop leaves it deleted (${g.dropped} layers, steps ${JSON.stringify(g.steps)}), one undo brings back exactly one layer (${g.undone}, then ${g.undone2}) with its Look showing`);
 }
+const HO = o.hold || {};
+R.is(HO.off && ptNear(HO.off.press, [0, 0, 0], 1e-9) && HO.off.dragging && ptNear(HO.off.drop, [.5, .4, 0], .01) && HO.off.steps.length === 1,
+  `Moving: a decal grabbed 0.3 m off its centre and dragged 0.5, 0.4 keeps the point it was grabbed at — the press moves nothing (${JSON.stringify(HO.off && HO.off.press)}), the drop puts the centre at 0.5, 0.4 (${JSON.stringify(HO.off && HO.off.drop)}), one step (${JSON.stringify(HO.off && HO.off.steps)})`);
+R.is(HO.click && ptNear(HO.click.drop, [0, 0, 0], 1e-9) && HO.click.steps.length === 0,
+  `Moving: a click on the decal that never moves changes nothing and is no undo step (${JSON.stringify(HO.click && HO.click.drop)}, ${JSON.stringify(HO.click && HO.click.steps)})`);
+R.is(HO.bare && HO.bare.dragging && ptNear(HO.bare.drop, [.5, .4, 0], .01),
+  `Moving: a press inside the frame where the image painted nothing still takes the decal (${JSON.stringify(HO.bare && HO.bare.drop)})`);
+R.is(HO.outside && !HO.outside.dragging && ptNear(HO.outside.drop, [0, 0, 0], 1e-9) && HO.outside.steps.length === 0,
+  `Moving: a press on the model outside the frame orbits and leaves the decal where it is (${JSON.stringify(HO.outside && HO.outside.drop)})`);
+const PF = o.place || {}, pl = PF.land || {}, pf = PF.flat || {}, pb = PF.back || {};
+const samePx = (q, r, tol) => q && r && r.n > 0 && Math.abs(q.n - r.n) / r.n <= tol && Math.hypot(q.x - r.x, q.y - r.y) <= 1.5;
+const LAND = [128, 128];   // the plate's middle on the sheet; the L's own middle sits off it, so compare with the drawing, not with this
+console.log(`
+=== (f) one decal, two placements ===
+   landed ${JSON.stringify(pl)}
+   flat ${JSON.stringify(pf)}
+   dragged ${JSON.stringify(PF.drag)}
+   back ${JSON.stringify(pb)}`);
+R.is(pl.proj && ptNear(pl.p, [0, 0, 0], .02) && !pl.placing && !pl.carry && pl.steps === 1 && pl.px && pl.px.n > 50 && Math.hypot(pl.px.x - LAND[0], pl.px.y - LAND[1]) <= 30,
+  `a new image lands on the model at the middle of the view (${JSON.stringify(pl.p)}), drawn there (${JSON.stringify(pl.px)}), nothing on the cursor and no mode armed, in one undo step (${pl.steps})`);
+R.is(pf.clicked && pf.type === "decal" && !pf.proj && pf.left === 0 && samePx(pf.px, pl.px, .1) && pf.iou >= .9 && pf.steps === 2,
+  `On the texture lays it flat where it was, at its size, turn and handedness — an L-shaped image, ${pf.iou} of the texels shared with the projection (≥ 0.9), their middle within 1.5 px (${JSON.stringify(pf.px)} vs ${JSON.stringify(pl.px)}) — leaving no projected layer, one more step`);
+R.is(PF.drag && PF.c0 && ptNear(PF.drag.p, [PF.c0[0] + .5, PF.c0[1] + .4, 0], .02) && PF.drag.steps === 3,
+  `a flat decal dragged on the model keeps the point it was grabbed at: its centre goes 0.5, 0.4 from ${JSON.stringify(PF.c0)} (${JSON.stringify(PF.drag && PF.drag.p)}), one step`);
+R.is(pb.clicked && pb.proj && ptNear(pb.p, [0, 0, 0], .02) && samePx(pb.px, pl.px, .1) && pb.iou >= .95,
+  `On the model puts it back on the surface where it was: ${pb.iou} of the texels shared with where it first landed (${JSON.stringify(pb.px)})`);
+R.is(PF.undoBack && PF.undoBack.flat && PF.undoBack.iou === 1 && PF.undoFlat && PF.undoFlat.proj && PF.undoFlat.iou === 1
+  && PF.undoAdd && PF.undoAdd.n === 0 && PF.undoAdd.layers,
+  `each switch is one undo step back to exactly what it was, and one more takes the image away (${JSON.stringify([PF.undoBack, PF.undoFlat, PF.undoAdd])})`);
 const UN = o.undone;
 console.log(`   undone away: ${UN.before} (steps ${JSON.stringify(UN.steps0)}) → Ctrl+Z ${UN.undone} → drop ${UN.dropped} · steps ${JSON.stringify(UN.steps)}, redo ${UN.redo} · redone ${UN.redone}`);
 R.is(UN.before === 1 && UN.undone === 0 && UN.dropped === 0 && UN.steps && UN.steps.length === 0 && UN.redo === 1 && UN.redone === 1,

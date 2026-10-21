@@ -1,6 +1,6 @@
 {
   "name": "wt-skin-studio",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "private": true,
   "description": "Browser-based editor for War Thunder user skins. Source is src/; the product is the single self-contained wt_skin_studio.html it builds into. No dependencies — every script here runs on a bare Node.",
   "type": "module",

@@ -44,8 +44,9 @@ function refreshViewCursor(){
   // A projected decal's handle, held or under the pointer (ROADMAP 4.2): the arrow for that drag.
   const grip = c3drag && c3drag.grip && ProjGrip.g ? ProjGrip.g.handle : ProjHandles.target() ? ProjHandles.hover : null;
   if (grip) c = ProjHandles.cursor(grip);
-  else if (App.placing === "movproj") c = App.projDragging ? "grabbing" : App.projHover ? "grab" : "all-scroll";
-  else if (App.placing) c = "crosshair";                     // "uv" / "proj": click to put it down
+  else if (App.placing) c = "crosshair";                     // an armed click: the radial centre
+  // a decal held, or under the pointer and ready to be (2026-10-17: no Moving mode to arm first)
+  else if (!App.paint3d && (App.projDragging || App.projHover)) c = App.projDragging ? "grabbing" : "grab";
   // Ctrl held over the model is the pick (ROADMAP 3.30): a hand for a part, a cell for an island
   // — the gesture that used to be invisible is on the cursor before the click.
   else if (App.ctrlHeld && App.over3d && modelGroup && !cam.fly) c = SelectUI.picksClick() ? "cell" : "pointer";

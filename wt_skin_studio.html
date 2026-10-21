@@ -96,7 +96,7 @@ button{background:var(--panel2); color:var(--text); border:1px solid var(--borde
 button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent2); border-color:var(--accent)}
 /* `.active` used to declare the same two properties with the same two values as `.primary`, so a
-   button that was BOTH — #btnProjMove, #btnProject3d — changed by literally nothing when its mode
+   button that was BOTH — the old Moving and Project buttons — changed by literally nothing when its mode
    came on. Measured 2026-08-23 and again 2026-08-25: rgb(44,92,176) background / rgb(79,143,247)
    border, before and after adding the class. A mode has to be visible on the control that sets it
    (ROADMAP 3.14), so "on" is now the FILLED accent with dark text — an inverted chip that reads as
@@ -1227,8 +1227,10 @@ body.carrying canvas{cursor:copy !important}
       <div class="hint">Fill, Clear, Crop and Copy work on the active layer, inside the selection. An island selection follows the island's shape, not a box.</div>
     </div>
     <div class="section" id="projSection" style="display:none">
-      <h3>Projected image</h3>
-      <div class="row"><button id="btnProjMove" class="primary" style="flex:1" title="Drag the decal around on the model (G). The projection follows the surface — it stays wrapped and keeps crossing UV seams. The label says whether the mode is on. With painting off it can also be dragged on the sheet in the 2-D view.">Moving: off</button></div>
+      <h3>Decal</h3>
+      <!-- One decal, two placements (2026-10-17): this switch converts it in place, either way, one undo
+           step (ProjSource.fromFlat / toFlat). Bound in editor/decals.js. -->
+      <div class="row"><button class="placeSw active" data-place="model" style="flex:1" title="Wrap the decal round the model: projected onto the surface, across UV seams and onto every texture it reaches. It stays where it is and the size it is.">On the model</button><button class="placeSw" data-place="sheet" style="flex:1" title="Lay the decal flat on one texture, the way the texture is unwrapped. It stays where it is and the size it is; what it covered on other textures goes.">On the texture</button></div>
       <div class="row"><label>Size</label><input type="range" id="projScale" min="5" max="400" value="100" title="Re-projects the image at this size — or drag one of its corner handles, in either view"><span class="val" id="projScaleVal">100</span></div>
       <div class="row"><label>Rotate</label><input type="range" id="projRot" min="-180" max="180" value="0" step="0.5" title="Re-projects the image at this angle — or drag the round knob above it, in either view. , and . turn it 5°; Shift snaps both to 15°, Alt steps the keys 0.5° — or type the angle in the box."><input type="number" class="val" id="projRotVal" value="0" step="0.1" min="-180" max="180" title="The angle, in degrees — type one"></div>
       <div class="row"><button id="btnProjSquare" style="width:100%" title="Turn the decal so its edges follow the texel rows under its centre — no jagged edges on a slightly tilted marking.">Square to the texture</button></div>
@@ -1246,19 +1248,20 @@ body.carrying canvas{cursor:copy !important}
         <select id="projRelief" style="flex:1" title="From the edge — the outline is raised.&#10;Bevelled body — a rounded, thick edge from the outline.&#10;Depth or normal map — relief from an image; it wraps round the model with the decal."></select></div>
       <div class="row"><label title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse.">Gloss</label>
         <select id="projGloss" style="flex:1" title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse."><option value="cover" selected>Evenly over the marking</option><option value="light">Follows the light parts</option><option value="dark">Follows the dark parts</option></select></div>
-      <div class="row"><button id="btnProjDelete" style="flex:1;color:var(--danger)" title="Remove this projected decal from every texture it landed on">Delete projected decal</button></div>
+      <div class="row"><button id="btnProjDelete" style="flex:1;color:var(--danger)" title="Remove this decal from every texture it landed on">Delete decal</button></div>
       <div class="hint" id="projInfo" style="display:none"></div>
-      <div class="hint">Drag on the model · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (15°), <kbd>Alt</kbd> for fine (0.5°).</div>
+      <div class="hint">Drag it in either view · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (15°), <kbd>Alt</kbd> for fine (0.5°).</div>
     </div>
     <div class="section" id="decalSection" style="display:none">
       <h3>Decal</h3>
-      <div class="row"><button id="btnProject3d" class="primary" style="flex:1" title="Bake the decal as a true projection onto the surface — wraps correctly across UV seams">Project onto model</button></div>
-      <div class="row"><button id="btnPlace3d" style="flex:1" title="Move this floating decal to the clicked spot (UV placement)">Move to clicked spot</button></div>
+      <!-- One decal, two placements (2026-10-17): this switch converts it in place, either way, one undo
+           step (ProjSource.fromFlat / toFlat). Bound in editor/decals.js. -->
+      <div class="row"><button class="placeSw" data-place="model" style="flex:1" title="Wrap the decal round the model: projected onto the surface, across UV seams and onto every texture it reaches. It stays where it is and the size it is.">On the model</button><button class="placeSw active" data-place="sheet" style="flex:1" title="Lay the decal flat on one texture, the way the texture is unwrapped. It stays where it is and the size it is; what it covered on other textures goes.">On the texture</button></div>
       <div class="row"><button id="btnDecFlip" title="Flip the image left to right. This turns the picture round; it does not put a copy on the other side of the vehicle — that is Symmetry, in the brush panel.">Flip ↔</button><button id="btnDecFlipY" title="Flip the image top to bottom — a left-right flip and a half turn in one step.">Flip ↕</button><button id="btnDecSymClear" title="Remove the copy Symmetry put on the other side of the vehicle. The image itself is untouched.">Remove mirrored copy</button></div>
       <div class="row"><label>Scale</label><input type="range" id="decScale" data-k="0.01" min="1" max="300" value="100"><span class="val" id="decScaleVal">1.0</span></div>
       <div class="row"><label>Rotate</label><input type="range" id="decRot" min="-180" max="180" value="0" step="0.5" title="Turn the decal on the sheet — or type the angle in the box"><input type="number" class="val" id="decRotVal" value="0" step="0.1" min="-180" max="180" title="The angle, in degrees — type one"></div>
       <div class="row"><button id="btnDecSquare" style="width:100%" title="Turn the decal to the nearest right angle, so its edges sit on the texel grid">Square to the texel grid</button></div>
-      <div class="hint">Drag in 2D · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (90°), <kbd>Alt</kbd> for fine. With Symmetry on, a mirrored copy comes too (dashed outline).</div>
+      <div class="hint">Drag it in either view · <kbd>←↑→↓</kbd> nudge · <kbd>,</kbd> <kbd>.</kbd> rotate · <kbd>-</kbd> <kbd>=</kbd> resize. <kbd>Shift</kbd> for coarse steps (90°), <kbd>Alt</kbd> for fine. With Symmetry on, a mirrored copy comes too (dashed outline).</div>
       <h3 style="margin-top:10px">Decal edit</h3>
       <div class="row"><button id="btnDecalEditor" class="primary" style="flex:1" title="Open the decal editor: remove the background, crop, adjust, preview and save it to your decal library">Open decal editor…</button></div>
       <div class="row"><label>Key</label><select id="bgMode"><option value="tl">Corner px</option><option value="white">White</option><option value="black">Black</option></select>
@@ -1516,7 +1519,6 @@ body.carrying canvas{cursor:copy !important}
         <h4>Decals</h4>
         <dl>
           <dt>Click it in 3D</dt><dd>Grab that decal for moving</dd>
-          <dt><kbd>G</kbd></dt><dd>Move on model on / off — then drag the decal over the surface</dd>
           <dt>Drag in 3D</dt><dd>Slide a projected decal over the surface</dd>
           <dt>Drag in 2D</dt><dd>Move a flat decal (grabs where you click)</dd>
           <dt><kbd>←↑→↓</kbd></dt><dd>Nudge (<kbd>Shift</kbd> = bigger step)</dd>
@@ -1564,8 +1566,8 @@ body.carrying canvas{cursor:copy !important}
       Any paint, image or fill layer can carry a <b>mask</b>: a sheet whose brightness decides how much of the layer shows — white shows, black hides, grey partly shows — and nothing is deleted, so removing the mask brings the layer back whole. Add one white (then hide where you paint) or black (then reveal where you paint), take one <b>from the parts you have selected</b>, or load an <b>image as the mask</b> — a stencil, a grunge map, a hand-drawn shape. Once it exists you can paint on it with the Mask brush, <b>invert</b> it, <b>soften</b> it into a fade, fill it to show or hide everything, or replace it from another image, all undoable. The mask appears as its own thumbnail beside the layer's content in the stack; click it to start painting on it. A mask works on every channel, not just colour.<br><br>
       <b style="color:var(--text)">Decals &amp; images</b><br>
       Every image you add opens in the <b>decal editor</b> first, showing it exactly as it is: remove its background if you want to (<b>Key</b> starts on "Keep as-is" — corner colour, white/black, or click the colour you mean), crop to content, adjust brightness/contrast/saturation, rotate/mirror, and pick the surface look. The editor generates the matching normal sub-texture, and <b>Save to library</b> keeps the finished decal — image, generated _n and surface look — for any later project (the Img button opens the library once you have one). Drop a file, or copy an image anywhere and press <kbd>Ctrl</kbd>+<kbd>V</kbd>.<br>
-      Placing: a new image goes straight into <b>projection</b> mode. Line the camera up the way you want the image to read and click the model — it projects from that view, wraps around curvature and crosses UV seams. A marking over a wing root covers two textures at once; it needs a layer in each, but it stays <b>one decal</b>: move it, resize it, hide it or delete it and every texture it spans follows. The layer list marks it "×2 tex".<br>
-      Moving one afterwards: <b>drag it around on the model</b> (the <b>Moving</b> button, <kbd>G</kbd>, or just click the decal in 3D to grab it), nudge with <kbd>←↑→↓</kbd>, rotate with <kbd>,</kbd> <kbd>.</kbd>. It re-projects onto whatever surface it lands on, so it never smears. Size and Rotate re-project from the original image rather than stretching baked pixels, and <b>Re-aim from this view</b> fixes a decal that was projected from the wrong angle. Its pixels are regenerated on every move, so the brush won't touch a projected layer — duplicate it (⧉) first, which frees the pixels for painting. "Move to clicked spot" is flat UV placement, useful for flat panels. Symmetry mirrors the projection across the vehicle centreline.<br><br>
+      Placing: a new image lands <b>on the model</b> straight away, projected from the current view onto whatever is in the middle of it — so line the camera up the way you want it to read first. It wraps around curvature and crosses UV seams. The switch at the top of its panel, <b>On the model / On the texture</b>, lays it flat on one texture instead (the way the texture is unwrapped) or puts it back on the surface — in place, at the same size, one Ctrl+Z either way. A marking over a wing root covers two textures at once; it needs a layer in each, but it stays <b>one decal</b>: move it, resize it, hide it or delete it and every texture it spans follows. The layer list marks it "×2 tex".<br>
+      Moving one afterwards: <b>drag it</b> — on the model or on the texture, whichever placement it has; grab it anywhere inside its frame — nudge with <kbd>←↑→↓</kbd>, rotate with <kbd>,</kbd> <kbd>.</kbd>. It re-projects onto whatever surface it lands on, so it never smears. Size and Rotate re-project from the original image rather than stretching baked pixels, and <b>Re-aim from this view</b> fixes a decal that was projected from the wrong angle. Its pixels are regenerated on every move, so the brush won't touch a projected layer — duplicate it (⧉) first, which frees the pixels for painting. "Move to clicked spot" is flat UV placement, useful for flat panels. Symmetry mirrors the projection across the vehicle centreline.<br><br>
       <b style="color:var(--text)">Parts, groups &amp; selection</b><br>
       The model's own mesh names (elevator, airbrake_l, gear_c…) become individual parts, and the grouping follows the vehicle type: aircraft get wings / engines &amp; nozzles / propellers / landing gear / pylons, tanks get hull / turret / running gear / applique armour &amp; ERA / stowage / optics, ships get main and secondary battery / directors &amp; radar / masts / boats / propulsion. (The rules come from a survey of the naming conventions across WW2 and modern models of every class.) Groups fold (click the arrow) and can be reorganised: select parts, then "→ group…" moves them into any group or a new custom one. There are two ways to limit where paint goes — <b>select</b> the handful of parts you want to paint, or switch the Parts tab to <b>protect</b> mode and click the one or two parts that must stay untouched (much faster than selecting the other 200). Protected parts show a shield and are skipped by painting and projection. Solo isolates parts/groups.<br><br>
       <b style="color:var(--text)">Game files</b><br>
@@ -12562,7 +12564,7 @@ function layerMenu(ev, s, L){
     L.mask ? { label: "Delete mask", run: () => setLayerMask(s, L, null, "delete mask") }
            : { label: "Add mask (white)", run: () => addMaskTo(s, L, "white") },
     { sep: true },
-    { label: grouped ? "Delete group and its layers" : L.proj ? "Delete projected decal (all textures)" :
+    { label: grouped ? "Delete group and its layers" : L.proj ? "Delete decal (all textures)" :
         L.link ? "Delete layer (all linked textures)" : "Delete layer", danger: true,
       run: () => deleteLayerObject(s, L) },
   ]);
@@ -14907,6 +14909,8 @@ StyleUI.bind();
 const DecalCarry = {
   // Show / hide the ghost. `set(null)` is the only way it goes away, and setPlacing is the single
   // caller that ends a carry, so no path can strand it on the cursor.
+  // Only an image chosen before any texture is open is ever carried (2026-10-17): with a slot, a new
+  // decal lands on the model at once (ProjSource.landAtView).
   set(bmp, label){
     const el = $("carryGhost");
     App.carry = bmp ? { label: label || "decal" } : null;
@@ -14923,33 +14927,17 @@ const DecalCarry = {
     el.style.display = "block";
   },
   clear(){ this.set(null); },
-  // The one way a finished image becomes a decal on the skin. With a slot it lands as a layer and
-  // arms placement; without one it stays in hand instead of being thrown away with an error,
+  // The one way a finished image becomes a decal on the skin. With a slot it lands on the model
+  // (or flat, with no model); without one it stays in hand instead of being thrown away with an error,
   // because the user has already done the work of choosing and editing it.
   place(canvas, meta, name){
     const nm = (meta && meta.name) || name || "decal";
     const surf = meta && meta.surf;
     const s = App.activeSlot;
     if (s && s.composite) {
-      addDecalLayer(canvas, nm);
+      addDecalLayer(canvas, nm, meta);
       const L = activeLayerObj();
-      // The Look is REMEMBERED here and applied when the decal is put down — not now. Applying it
-      // at this moment was the 4.8 bug reported 2026-08-26: `addDecalLayer` puts the app straight
-      // into projection mode with the decal floating at the sheet centre, so there is nowhere yet
-      // for a surface response to be derived from — and building the group here also moved the
-      // selection onto the group, which broke every path that asks `activeLayerObj().type ===
-      // "decal"`: clicking the model to place or project it, and G.
-      if (L && L.type === "decal" && surf) { L.surf = surf; applyDecalSurfUI(L); }
-      // The depth image travels with the Look that names it (ROADMAP 4.19). A relief mode of "map"
-      // with no map is a mode that cannot do what it says, so `refreshDecalSurface` falls back to
-      // the outline — which is honest, and also exactly what used to happen to every decal that came
-      // back out of the library.
-      if (L && L.type === "decal" && meta && meta.height) { L.heightMap = meta.height; L.heightName = meta.heightName || null; }
-      // Text stays text (4.50 (3)): the record the image was drawn from goes on with it, so the
-      // decal can be edited AS text — here, once projected, and out of the library. Its name is
-      // the lettering as typed; `addDecalLayer` strips what looks like a file extension, which
-      // would take "SGT. PEPPER" down to "SGT".
-      if (L && L.type === "decal" && meta && meta.text) { L.text = { ...meta.text }; L.name = nm; refreshLayerList(); }
+      if (L && L.type === "decal" && L.surf) applyDecalSurfUI(L);
       return true;
     }
     pendingDecal = { bmp: canvas, name: nm, surf, edited: true, text: (meta && meta.text) || null,
@@ -15015,18 +15003,39 @@ $("btnDecalEditor").onclick = () => {
     refreshLayerList();
   }, { look: L.surf, height: L.heightMap || null, heightName: L.heightName || null });
 };
-function addDecalLayer(bmp, name){
+// `meta` is what the decal editor handed over — Look, depth image, text — and it is on the layer
+// BEFORE it lands, so the projection is made with it. Added afterwards (as until 2026-10-17) it
+// went onto a flat decal that a projection had already consumed.
+function addDecalLayer(bmp, name, meta){
   const s = App.activeSlot; if (!s || !s.composite) { setStatus("Select a slot first", "err"); return; }
   const scale = Math.min(1, (s.size * .3) / Math.max(bmp.width, bmp.height));
-  addLayer(LayerNode.of({ type: "decal", name: name.replace(/\.[^.]+$/, ""), bmp, visible: true, opacity: 1, blend: "normal", x: .5, y: .5, scale, rot: 0, flip: false }));
+  // Text keeps its lettering as its name (4.50 (3)); stripping a "file extension" would take
+  // "SGT. PEPPER" down to "SGT".
+  const nm = meta && meta.text ? name : name.replace(/\.[^.]+$/, "");
+  const extra = {};
+  if (meta && meta.surf) extra.surf = meta.surf;
+  // The depth image travels with the Look that names it (ROADMAP 4.19). A relief mode of "map"
+  // with no map is a mode that cannot do what it says, so `refreshDecalSurface` falls back to the
+  // outline — which is honest, and also what used to happen to every decal out of the library.
+  if (meta && meta.height) { extra.heightMap = meta.height; extra.heightName = meta.heightName || null; }
+  if (meta && meta.text) extra.text = { ...meta.text };
+  // Straight onto the model, from this view (ProjSource.landAtView): dropping an image into UV space
+  // is what makes it look smeared across the model, because the UV atlas is not the shape of the
+  // aircraft. Adding and placing are one undo step. It used to wait on the cursor for a click while
+  // a stand-in sat flat at the sheet's centre — two half-placed copies of one decal (2026-10-17).
+  let landed = false;
+  withUndoBatch("add decal “" + nm + "”", () => {
+    addLayer(LayerNode.of({ type: "decal", name: nm, bmp, visible: true, opacity: 1, blend: "normal", x: .5, y: .5, scale, rot: 0, flip: false }));
+    const L = activeLayerObj();
+    if (L) Object.assign(L, extra);                    // through the layer's own accessors, as before
+    landed = ProjSource.landAtView(L);
+  });
+  refreshLayerList();
   syncDecalUI();
-  // Straight into projection: dropping an image into UV space is what makes it look smeared
-  // across the model, because the UV atlas is not the shape of the aircraft.
-  setPlacing(App.geomData ? "proj" : "uv");
-  DecalCarry.set(bmp, name);                   // after setPlacing — that call clears any earlier carry
+  if (landed) return;
   setStatus(App.geomData
-    ? "Image added — click it onto the model from the angle you want it seen; it wraps around the surface. (Move to clicked spot places it in UV space instead.)"
-    : "Image added — drag it in 2D, nudge with arrow keys ( , / . rotate)", "ok");
+    ? "Image added flat, at the middle of the texture — nothing of the model is under the middle of the view. Turn the model towards you and press On the model, or drag it in 2D"
+    : "Image added — drag it in 2D, nudge with arrow keys ( , / . rotate)", App.geomData ? "err" : "ok");
 }
 // Nudge / rotate the active decal (arrow keys + , . keys), coalescing a key-hold into one undo.
 function nudgeDecal(dx, dy){
@@ -15321,28 +15330,6 @@ $("projSym2").onchange = () => {
     " — set the axis and offset in the brush panel if it lands wrong"
     : "The mirrored copy landed on nothing — check the symmetry axis in the brush panel", res.drawn ? "ok" : "err");
 };
-// The "select a projected decal layer first" message belongs HERE, where the user has just asked
-// for the mode and can act on it — not on every later click on the model, which is where it used to
-// come out once the mode outlived its layer.
-$("btnProjMove").onclick = () => {
-  if (App.placing === "movproj") { setPlacing(false); return; }
-  const L = decalOfSelection();
-  // Three different situations used to give one answer. "Select a projected decal layer first" is
-  // right when nothing decal-ish is selected; it is a poor answer when a decal IS selected and has
-  // simply not been projected yet, which is the state G was pressed in (reported 2026-08-26).
-  if (!L) { setStatus("Select a decal layer first — G moves a decal that has been projected onto the model", "err"); return; }
-  if (!L.proj) {
-    // "Click it onto the model first" was the answer here until 2026-09-02, and it was wrong in the
-    // one state a user reaches by following the panel: "Move to clicked spot" DOES click it onto
-    // the model, in UV, and G then told them to do what they had just done ("error keeps saying it
-    // floats in uv"). UV placement and projection are two different things and this is the only
-    // message that has to tell them apart, so it names the button that makes the difference.
-    setStatus("“" + (L.name || "This decal") + "” is placed in UV space, not projected — “Project onto model” is what puts it on the " +
-      "surface, and G moves it once it is there. Where it is now, drag it in the 2-D view or nudge it with the arrow keys.", "err");
-    return;
-  }
-  setPlacing("movproj");
-};
 // Re-aim the projector at the current camera without moving where it sits on the vehicle —
 // the fix for "I projected it from the wrong angle".
 $("btnReproject").onclick = () => {
@@ -15413,8 +15400,15 @@ $("btnDecFlipY").onclick = () => {
   apply(now);
   setStatus("Flipped top to bottom — a vertical mirror is the horizontal one plus a half turn, so that is what this did, in one step", "ok");
 };
-$("btnPlace3d").onclick = () => setPlacing(App.placing === "uv" ? false : "uv");
-$("btnProject3d").onclick = () => setPlacing(App.placing === "proj" ? false : "proj");
+// One decal, two placements (2026-10-17): the switch at the top of its panel. Each section shows one
+// placement, so its own button is the lit one and the other is the conversion (ProjSource.fromFlat
+// / toFlat), in place and one undo step either way.
+for (const b of document.querySelectorAll(".placeSw")) b.onclick = () => {
+  const L = decalOfSelection();
+  if (!L) return;
+  if (b.dataset.place === "model" && !L.proj) ProjSource.fromFlat(L);
+  else if (b.dataset.place === "sheet" && L.proj) ProjSource.toFlat(L.proj);
+};
 $("btnDecSymClear").onclick = () => {
   const L = activeLayerObj(); if (!L || L.type !== "decal" || !L.sym) return;
   const s = App.activeSlot, old = L.sym;
@@ -23349,8 +23343,9 @@ function refreshViewCursor(){
   // A projected decal's handle, held or under the pointer (ROADMAP 4.2): the arrow for that drag.
   const grip = c3drag && c3drag.grip && ProjGrip.g ? ProjGrip.g.handle : ProjHandles.target() ? ProjHandles.hover : null;
   if (grip) c = ProjHandles.cursor(grip);
-  else if (App.placing === "movproj") c = App.projDragging ? "grabbing" : App.projHover ? "grab" : "all-scroll";
-  else if (App.placing) c = "crosshair";                     // "uv" / "proj": click to put it down
+  else if (App.placing) c = "crosshair";                     // an armed click: the radial centre
+  // a decal held, or under the pointer and ready to be (2026-10-17: no Moving mode to arm first)
+  else if (!App.paint3d && (App.projDragging || App.projHover)) c = App.projDragging ? "grabbing" : "grab";
   // Ctrl held over the model is the pick (ROADMAP 3.30): a hand for a part, a cell for an island
   // — the gesture that used to be invisible is on the cursor before the click.
   else if (App.ctrlHeld && App.over3d && modelGroup && !cam.fly) c = SelectUI.picksClick() ? "cell" : "pointer";
@@ -24046,38 +24041,6 @@ cnv3.addEventListener("pointerdown", e => {
   // every right or middle drag, falls through to orbit and pan so the view stays navigable. Ahead of
   // the placing modes and of painting, which it is exclusive with (PathUI.set).
   if (e.button === 0 && !cam.fly && modelGroup && PathUI.down3d(e)) { c3drag = { path: true }; return; }
-  // Dragging a projected decal around the model. Only a drag that starts ON the decal moves it —
-  // anywhere else still orbits the camera, so being in move mode doesn't cost you the view.
-  if (App.placing === "movproj" && e.button === 0 && !e.altKey && !e.ctrlKey) {
-    const L = activeLayerObj();
-    if (L && L.proj) {
-      const found = projUnderPointer(e);
-      const hit = found && found.hit, slot = found && found.slot;
-      const grabbed = found ? found.L : null;           // clicking a different projected decal grabs that one
-      if (grabbed) {
-        if (grabbed.proj !== L.proj) {
-          if (slot !== App.activeSlot) selectSlot(slot.id);
-          App.activeLayer = grabbed;
-          refreshLayerList();
-        }
-        const P = grabbed.proj;
-        App._projEdit = App._projEdit && App._projEdit.P === P ? App._projEdit : { P, from: projParamsClone(P) };
-        moveProjTo(P, hit.point, true);
-        c3drag = { projDrag: P };
-        App.projDragging = true; App.projHover = true; refreshViewCursor();
-        return;
-      }
-    } else {
-      // The mode belongs to a layer, so it ends with the layer. It used to outlive it: clicking a
-      // projected decal on the model arms "movproj" automatically, and picking any other layer
-      // afterwards left the mode on with nothing to move — so every later click on the model
-      // answered "Select a projected decal layer first" and then fell through and painted anyway.
-      // Shift+click made it loudest, because a shift-drawn line is a click you repeat. Dropping the
-      // mode here lets the click carry on as whatever it actually was, silently: the Move button
-      // un-highlighting is the feedback, and an error the user cannot act on is not one.
-      setPlacing(false);
-    }
-  }
   // The radial centre is PICKED, not inferred (ROADMAP 4.44's eighth candidate) — an armed click
   // the way a decal's placement is, so the button says what it is waiting for.
   if (App.placing === "radial" && e.button === 0) {
@@ -24090,30 +24053,6 @@ cnv3.addEventListener("pointerdown", e => {
         ($("radialAxis").value === "auto" ? "that surface's normal" : $("radialAxis").value.toUpperCase()), "ok");
     } else if (!hit) setStatus("Click on the model — the point you click is the centre the copies turn about", "err");
     return;
-  }
-  if ((App.placing === "uv" || App.placing === "proj") && e.button === 0) {
-    const L = activeLayerObj();
-    if (L && L.type === "decal") {
-      const hit = ray3d(e, App.placing === "proj");   // a projection may cross into other slots
-      if (hit && hit.uv) {
-        const s = App.activeSlot;
-        // bakeProjection picks the mode that follows (move-on-model on success, retry on failure)
-        if (App.placing === "proj") { bakeProjection(L, hit); return; }
-        const from = { x: L.x, y: L.y, sym: L.sym };
-        let sym = L.sym;
-        if (symEnabled()) { const mh = mirrorHit(); sym = mh && mh.uv ? { x: mh.uv.x, y: 1 - mh.uv.y } : null; }
-        const to = { x: hit.uv.x, y: 1 - hit.uv.y, sym };
-        // ensureDecalSurface, not refresh: "Move to clicked spot" is the other way a decal is put
-        // down, and a Look chosen in the editor becomes real at exactly this moment (ROADMAP 4.8).
-        const apply = v => { L.x = v.x; L.y = v.y; L.sym = v.sym; ensureDecalSurface(s, L); scheduleComposite(s); draw2D(); };
-        pushAction("place decal", () => apply(from), () => apply(to));
-        apply(to);
-        setPlacing(false);
-        return;
-      }
-      setStatus(App.placing === "proj" ? "Click on the model where the image should land" : "Click on a part that belongs to the active slot", "err");
-      return;
-    }
   }
   // S = jump to that part's texture slot, X = protect it — both work while painting,
   // which is when you actually need them.
@@ -24128,6 +24067,42 @@ cnv3.addEventListener("pointerdown", e => {
       }
     }
     return;
+  }
+  // A decal is handled directly (2026-10-17): with painting off and no click armed, a press on a
+  // decal drags it — on the model or on the texture, the selected one or another — and a press
+  // anywhere else orbits. There is no Moving mode to switch on first (it was the "movproj" placing
+  // mode, armed by a button or G) and no click-to-place mode for a flat decal.
+  if (!App.paint3d && !App.placing && e.button === 0 && !e.altKey && !e.ctrlKey && !cam.fly && modelGroup) {
+    const found = decalUnderPointer(e), G = found.L;
+    if (G) {
+      if (G !== activeLayerObj()) {
+        // another decal is only ever found on the sheet under the pointer, so that is its slot
+        if (found.slot && found.slot !== App.activeSlot) selectSlot(found.slot.id);
+        App.activeLayer = G; refreshLayerList();
+        setStatus("Decal “" + (G.proj ? G.proj.name || "image" : G.name || "decal") + "” — drag it to move it, in either view; its corners resize it and the knob turns it", "ok");
+      }
+      if (G.proj) {
+        const P = G.proj;
+        App._projEdit = App._projEdit && App._projEdit.P === P ? App._projEdit : { P, from: projParamsClone(P) };
+        // The decal keeps the point it was grabbed at, as the sheet's drag does (ProjGrip.grabSheet):
+        // the CENTRE follows the pointer at the screen offset the press found it at, and lands on the
+        // surface under that spot. The press itself moves nothing. It used to put the centre under
+        // the pointer at once, so grabbing a decal anywhere but its middle threw it half its own
+        // width, out from under its frame (reported 2026-10-17).
+        const r = cnv3.getBoundingClientRect(), c = frameFromArrays(P.frame).p.project(camera);
+        const off = { x: r.left + (c.x * .5 + .5) * r.width - e.clientX, y: r.top + (-c.y * .5 + .5) * r.height - e.clientY };
+        c3drag = { projDrag: P, off, moved: false };
+      } else {
+        // A flat decal on the model: its centre keeps the texel offset it was grabbed at, on its own
+        // sheet — the 2-D drag's rule — and moves only while the pointer is over that sheet.
+        const s = found.slot, hit = found.hit;
+        c3drag = { flatDrag: G, slot: s, from: { x: G.x, y: G.y, sym: G.sym }, moved: false,
+                   off: { x: G.x - hit.uv.x, y: G.y - (1 - hit.uv.y) } };
+        SurfDrag.hold(G, x => x === G);                          // its Look waits for the drop, as in 2-D
+      }
+      App.projDragging = true; App.projHover = true; refreshViewCursor();
+      return;
+    }
   }
   if (App.paint3d && e.button === 0 && !e.altKey && App.brush.tool !== "none") {
     const hit = ray3d(e);
@@ -24196,9 +24171,10 @@ cnv3.addEventListener("pointermove", e => {
     else ProjHandles.hover = hv;
     // Is the pointer over a decal it could pick up? One raycast per move, and only in this mode —
     // the brush ring already costs the same when painting, so this adds nothing anywhere else.
-    if (App.placing === "movproj" && !hv) {
+    // Only while a decal is selected, so the raycast costs nothing the rest of the time.
+    if (!App.paint3d && !App.placing && !hv) {
       const L0 = activeLayerObj();
-      const over = !!(L0 && L0.proj && projUnderPointer(e).L);
+      const over = !!(L0 && (L0.proj || L0.type === "decal") && decalUnderPointer(e).L);
       if (over !== App.projHover) { App.projHover = over; refreshViewCursor(); }
     }
     if (PathUI.on) PathUI.hover3d(e);
@@ -24214,9 +24190,26 @@ cnv3.addEventListener("pointermove", e => {
     return;
   }
   if (c3drag.grip) { ProjGrip.drag3d(e); return; }
+  if (c3drag.flatDrag) {
+    const hit = ray3d(e, true), g = c3drag, L = g.flatDrag;
+    const stem = hit && App.matSlot.get(hit.object.userData.mat);
+    if (!hit || !hit.uv || stem !== g.slot.id) return;           // off its sheet: it waits where it was
+    L.x = Math.max(0, Math.min(1, hit.uv.x + g.off.x)); L.y = Math.max(0, Math.min(1, 1 - hit.uv.y + g.off.y));
+    // its mirrored copy stays the mirror image of where the decal now is on the vehicle
+    if (L.sym) {
+      const W = g.slot.composite.width, H = g.slot.composite.height;
+      const on = ProjGrip.surfaceAt(g.slot, L.x * W, L.y * H, hit.point);
+      const m = on && ProjGrip.uvAt(g.slot, mirrorPoint(on.point), null);
+      if (m) L.sym = m;
+    }
+    g.moved = true;
+    scheduleComposite(g.slot); draw2D();
+    return;
+  }
   if (c3drag.projDrag) {
-    const hit = ray3d(e, true);
-    if (hit) moveProjTo(c3drag.projDrag, hit.point, true);
+    // Off the model the centre waits where it was, as it does over the sheet's gutter.
+    const hit = ray3d({ clientX: e.clientX + c3drag.off.x, clientY: e.clientY + c3drag.off.y }, true);
+    if (hit) { moveProjTo(c3drag.projDrag, hit.point, true); c3drag.moved = true; }
     return;
   }
   const dx = e.clientX - c3drag.x, dy = e.clientY - c3drag.y;
@@ -24248,6 +24241,26 @@ const end3 = e => {
     ProjGrip.end();
     c3drag = null;
     refreshViewCursor();
+    return;
+  }
+  if (c3drag && c3drag.projDrag && !c3drag.moved) {
+    // A press that never moved the decal changed nothing, so there is nothing to settle — and an
+    // edit the keyboard has open stays open for its own step.
+    c3drag = null;
+    App.projDragging = false; refreshViewCursor();
+    return;
+  }
+  if (c3drag && c3drag.flatDrag) {
+    const g = c3drag, L = g.flatDrag, s = g.slot, to = { x: L.x, y: L.y, sym: L.sym };
+    c3drag = null;
+    App.projDragging = false; refreshViewCursor();
+    SurfDrag.release();
+    if (!g.moved) return;
+    // the 2-D drag's step (view2d.js endAll), with the copy: the Look is rebuilt where it now sits
+    const place = v => { L.x = v.x; L.y = v.y; L.sym = v.sym; ensureDecalSurface(s, L); scheduleComposite(s); draw2D(); };
+    pushAction("move decal", () => place(g.from), () => place(to));
+    place(to);
+    setStatus("Moved — drag it again, or switch it On the model to wrap it round the surface", "ok");
     return;
   }
   if (c3drag && c3drag.projDrag) {
@@ -24287,7 +24300,7 @@ const end3 = e => {
         // Ctrl+click is handled on pointerdown now (part picker), so it never reaches here.
         const stem = App.matSlot.get(hit.object.userData.mat);
         const slot = stem && App.slots.get(stem);
-        // click on a decal → select its layer and enter the matching move mode
+        // click on a decal → select its layer
         let di = null, pi = null;
         if (slot && slot.composite && hit.uv) {
           const px = hit.uv.x * slot.composite.width, py = (1 - hit.uv.y) * slot.composite.height;
@@ -24296,12 +24309,12 @@ const end3 = e => {
         }
         if (di) {
           if (slot !== App.activeSlot) selectSlot(stem);
-          App.activeLayer = di; refreshLayerList(); syncDecalUI(); setPlacing("uv");
-          setStatus("Decal “" + (di.name || "decal") + "” — click model to reposition, drag in 2D, arrow keys nudge, , / . rotate", "ok");
+          App.activeLayer = di; refreshLayerList(); syncDecalUI();
+          setStatus("Decal “" + (di.name || "decal") + "” — drag it to move it, in either view; arrow keys nudge, , / . rotate", "ok");
         } else if (pi) {
           if (slot !== App.activeSlot) selectSlot(stem);
-          App.activeLayer = pi; refreshLayerList(); setPlacing("movproj");
-          setStatus("Projected decal “" + (pi.proj.name || "image") + "” — drag it on the model or the sheet, its corners resize it, " +
+          App.activeLayer = pi; refreshLayerList();
+          setStatus("Decal “" + (pi.proj.name || "image") + "” — drag it to move it, in either view; its corners resize it, " +
             "the knob above it turns it; arrow keys nudge", "ok");
         } else {
           if (stem && App.slots.get(stem) !== App.activeSlot) { selectSlot(stem); setStatus("Selected slot: " + stem + " (" + hit.object.name + ")", "ok"); }
@@ -24332,12 +24345,21 @@ cnv3.addEventListener("contextmenu", e => e.preventDefault());
 // Which projected decal, if any, is under the pointer. Shared by the drag (which grabs it) and by
 // the hover (which only wants to know, so the cursor can say so) — one hit-test, one definition of
 // "over the decal", so the cursor can never promise a grab the click will not deliver.
-function projUnderPointer(e){
+// "Over" means inside that decal's beam (ProjGrip.reaches): its pixels count only where it points,
+// and the selected decal counts anywhere inside its frame, painted there or not.
+// A flat decal is found by its own footprint on the sheet under the pointer (`decalAtUV`), ahead of
+// a projected one, the way a click selects them.
+function decalUnderPointer(e){
   const hit = ray3d(e, true);
   const stem = hit && App.matSlot.get(hit.object.userData.mat);
   const slot = stem && App.slots.get(stem);
-  const L = (hit && hit.uv && slot && slot.composite)
-    ? projAtUV(slot, hit.uv.x * slot.composite.width, (1 - hit.uv.y) * slot.composite.height) : null;
+  let L = null;
+  if (hit && hit.uv && slot && slot.composite) {
+    const px = hit.uv.x * slot.composite.width, py = (1 - hit.uv.y) * slot.composite.height;
+    L = decalAtUV(slot, px, py) || projAtUV(slot, px, py);
+    if (L && L.proj && !ProjGrip.reaches(L.proj, hit.point)) L = null;
+  }
+  if (!L && hit) { const A = activeLayerObj(); if (A && A.proj && ProjGrip.reaches(A.proj, hit.point)) L = A; }
   return { hit, slot, L };
 }
 function setPlacing(mode){
@@ -24347,36 +24369,14 @@ function setPlacing(mode){
   // asked for — pressing B is enough (reported 2026-08-23).
   if (mode && App.paint3d) setPaint3d(false);
   App.placing = mode || false;
-  // Carrying ends when the waiting ends. "uv" and "proj" are the two modes that are waiting for a
-  // click to put a decal down; everything else — including "movproj", which is only reachable once
-  // the decal IS down — means it landed or the user backed out. One choke point, so the ghost
+  // A decal no longer has placing modes of its own (2026-10-17): it lands on the model when added,
+  // a press on it drags it, and its placement is a switch in its panel. What is still carried — an
+  // image picked before any texture was open — goes when any mode is set or cleared, so the ghost
   // cannot be left stuck on the cursor by a path that forgot about it.
-  if (mode !== "uv" && mode !== "proj") DecalCarry.clear();
-  $("btnPlace3d").classList.toggle("active", mode === "uv");
-  $("btnProject3d").classList.toggle("active", mode === "proj");
-  // …and they say what they are waiting for, not only what they do. Reported 2026-09-02: "clicking
-  // button does not seem to do anything by itself" — which is exactly what happens, because both
-  // arm a click on the MODEL and neither changed anything but a background tint. That is the same
-  // complaint ROADMAP 3.14 answered for `Moving`, and it gets the same answer here; these two are
-  // armed actions rather than sustained modes, so the label states the pending click instead of an
-  // on/off state.
+  DecalCarry.clear();
+  // An armed click says what it is waiting for, not only what it does (reported 2026-09-02).
   $("btnRadialCentre").classList.toggle("active", mode === "radial");
   $("btnRadialCentre").textContent = mode === "radial" ? "Click the centre…" : (App.radial && App.radial.c ? "Move centre…" : "Set centre…");
-  $("btnPlace3d").textContent = mode === "uv" ? "Click where it goes…" : "Move to clicked spot";
-  $("btnProject3d").textContent = mode === "proj" ? "Click to project…" : "Project onto model";
-  // Move-on-model is the one SUSTAINED mode of the three — the other two are armed actions that
-  // end with the click that puts the decal down — so it is the one that can be left on without
-  // being noticed, and it says so in its own label the way Painting does (ROADMAP 3.14). This is
-  // the only place any of the three is written: `setPlacing` is the only writer of `App.placing`,
-  // so a second sync elsewhere could only ever agree with this one or be wrong.
-  $("btnProjMove").classList.toggle("active", mode === "movproj");
-  $("btnProjMove").textContent = "Moving: " + (mode === "movproj" ? "on" : "off");
-  if (mode === "uv") setStatus("Click the model where the decal should go" + ($("symOn").checked ? " (+ mirrored copy)" : ""));
-  if (mode === "proj") setStatus("Line the camera up the way you want the image to read, then click the model" +
-    ($("symOn").checked ? " (+ mirrored projection)" : "") + " — it projects from this view and wraps across seams and textures");
-  if (mode === "movproj") setStatus("Drag the decal itself to slide it over the model — it re-projects onto whatever surface it lands on. " +
-    "Dragging anywhere else still orbits. Its corners resize it and the knob above it turns it; arrow keys nudge, , / . rotate. " +
-    "Esc or turning painting on leaves this mode.");
   App.projHover = false;
   refreshViewCursor();
 }
@@ -25374,6 +25374,101 @@ const ProjSource = {
     if (!t) ProjSource.ids.set(img, t = ++ProjSource.seq);
     return t;
   },
+
+  // ---- one decal, two placements (2026-10-17) ----
+  // "Decal and projected image should not be two completely separate things and should work
+  // seamlessly, with nothing weird seen by the user." Underneath they still are two — a flat stamp
+  // on one sheet, and a projector rasterised onto every sheet it reaches — because each is right for
+  // something; what the user sees is one decal with a placement, switched in place (ProjGrip.flatOf
+  // / frameOfFlat hold the maths).
+  //
+  // A new image goes straight onto the model, projected from this view at the middle of it, and is
+  // selected with its frame and handles up — there is no image waiting on the cursor and no stand-in
+  // drawn flat at the sheet's centre meanwhile (reported 2026-10-17: that stand-in showed smeared on
+  // whatever part owns the middle of the sheet). Adding it and putting it there are one undo step.
+  // Off the model — nothing under the middle of the view, or no model — it stays flat, at the
+  // texture's centre, and says so.
+  landAtView(L){
+    if (!L || L.type !== "decal" || !App.geomData || !modelGroup) return false;
+    const r = cnv3.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return false;
+    // the middle first, then outwards in rings: the first hit nearest the middle wins
+    let hit = null;
+    for (let ring = 0; ring <= 4 && !hit; ring++) {
+      const n = ring ? 8 * ring : 1;
+      for (let i = 0; i < n && !hit; i++) {
+        const a = i / n * Math.PI * 2, d = ring * .08;
+        const h = ray3d({ clientX: r.left + r.width * (.5 + d * Math.cos(a)), clientY: r.top + r.height * (.5 + d * Math.sin(a)) }, true);
+        if (h && h.uv) hit = h;
+      }
+    }
+    return hit ? bakeProjection(L, hit) : false;
+  },
+  // On the texture → On the model: projected from straight above where it is drawn, at the size
+  // and turn it is drawn at, its Look, relief map, text and mirrored copy with it. One undo step.
+  fromFlat(L){
+    if (!L || L.type !== "decal" || L.proj) return false;
+    if (!App.geomData) { setStatus("Load the vehicle's model first — On the model projects the decal onto it", "err"); return false; }
+    const slot = slotOfLayer(L), at = slot && ProjGrip.frameOfFlat(L, slot);
+    if (!at) {
+      setStatus("“" + (L.name || "This decal") + "” is not over any part of the model — its centre is in the gap between UV islands. Drag it onto a part first", "err");
+      return false;
+    }
+    at.sym2 = !!L.sym;
+    return bakeProjection(L, null, at);
+  },
+  // On the model → On the texture: one flat decal, on the sheet holding the decal's centre (the
+  // active one when it is among them), drawn where the projection put it and at its size — its Look,
+  // relief map, text, layer settings and mirrored copy carried across, every sheet's projected layer
+  // taken away. One undo step, and undoing it puts the projection back exactly.
+  toFlat(P){
+    const sibs = projSiblings(P.id);
+    if (!sibs.length) return false;
+    const order = sibs.slice().sort((a, b) => (b.slot === App.activeSlot) - (a.slot === App.activeSlot));
+    let at = null, home = null;
+    for (const e of order) { at = ProjGrip.flatOf(P, e.slot); if (at) { home = e; break; } }
+    if (!at) {
+      setStatus("The decal's centre is not on any texture it covers — move it so its middle is on the model, then switch", "err");
+      return false;
+    }
+    const scale = Math.max(.01, Math.min(3, at.scale));
+    const F = ProjGrip.frame(P);
+    let sym = null;
+    if (P.sym2) { const m = mirrorBasis({ p: F.p, n: F.n, t1: F.t1, t2: F.t2 }, false); sym = ProjGrip.uvAt(home.slot, m.p, m.n); }
+    const src = home.L;
+    const L = LayerNode.of({ type: "decal", name: P.name || src.name, bmp: P.bmp, visible: src.visible !== false,
+      opacity: src.opacity == null ? 1 : src.opacity, blend: src.blend || "normal",
+      x: at.x, y: at.y, scale, rot: at.rot, flip: at.flip, sym, surf: P.surf || null,
+      text: P.text ? { ...P.text } : null });
+    if (P.heightMap) { L.heightMap = P.heightMap; L.heightName = P.heightName || null; }
+    const slot = home.slot, placed = sibs.map(e => ({ slot: e.slot, L: e.L, idx: e.slot.layers.indexOf(e.L) }));
+    const idx = Math.max(0, placed.find(q => q.slot === slot).idx);
+    const put = () => {
+      for (const q of placed) { const o = nodeOwner(q.slot.layers, q.L); if (o) { o.list.splice(o.i, 1); scheduleComposite(q.slot); } }
+      if (!nodeOwner(slot.layers, L)) slot.layers.splice(Math.min(idx, slot.layers.length), 0, L);
+      ensureDecalSurface(slot, L);
+      scheduleComposite(slot);
+      if (slot !== App.activeSlot) selectSlot(slot.id);
+      App.activeLayer = L;
+      refreshLayerList(); refreshSlotList(); draw2D();
+    };
+    const back = () => {
+      const o = nodeOwner(slot.layers, L); if (o) o.list.splice(o.i, 1);
+      scheduleComposite(slot);
+      for (const q of placed.slice().sort((a, b) => a.idx - b.idx))
+        if (!nodeOwner(q.slot.layers, q.L)) { q.slot.layers.splice(Math.min(Math.max(0, q.idx), q.slot.layers.length), 0, q.L); scheduleComposite(q.slot); }
+      refreshProjSurfaces(P);
+      App.activeLayer = src;
+      refreshLayerList(); refreshSlotList(); draw2D();
+    };
+    pushAction("place “" + (L.name || "decal") + "” on the texture", back, put);
+    put();
+    setStatus("“" + (L.name || "Decal") + "” is on the texture " + slot.id + " now — drag it in either view; " +
+      (at.scale > 3 ? "it was larger than a flat decal can be, so it is at the largest size; " : "") +
+      (sibs.length > 1 ? "it covered " + sibs.length + " textures, and a flat decal is on one, so the parts on the others are gone; " : "") +
+      "On the model puts it back on the surface", "ok");
+    return true;
+  },
 };
 // Cached world-space bounds per geometry group — the projector rejects whole meshes with this.
 function gdBounds(gd){
@@ -25609,15 +25704,20 @@ function commitProjEdit(){
 }
 // The floating UV decal is the SOURCE of a projection, not a second copy of it: once projected it
 // is consumed. Leaving it behind is what put a smeared duplicate on the sheet next to the real one.
-function bakeProjection(L, hit){
-  if (!App.geomData) { setStatus("Projection needs the 3D model loaded", "err"); return; }
+// `hit` aims it from the camera at a surface point; `at` (ProjSource.fromFlat) instead gives the
+// frame, turn, flip, size and mirrored copy outright. Returns whether anything was projected.
+function bakeProjection(L, hit, at){
+  if (!App.geomData) { setStatus("Projection needs the 3D model loaded", "err"); return false; }
   const srcSlot = slotOfLayer(L);
   const srcIdx = srcSlot ? srcSlot.layers.indexOf(L) : -1;
-  const P = { id: "p" + (projSeq++), frame: frameToArrays(projFrame(hit)), bmp: L.bmp, scale: L.scale, rot: L.rot,
+  const P = { id: "p" + (projSeq++), frame: at ? at.frame : frameToArrays(projFrame(hit)), bmp: L.bmp,
+    scale: at ? Math.max(ProjSource.SCALE_MIN, Math.min(ProjSource.SCALE_MAX, at.scale)) : L.scale, rot: at ? at.rot : L.rot,
     // `surf` is the Look the decal was given in the editor, and since 4.8b it is read: the first
     // non-live render turns it into derived content on the projected layer's own smoothness, metal
     // and normal channels (4.28(f)), on every sheet the projection landed on.
-    flip: !!L.flip, sym2: symEnabled(), name: L.name, surf: L.surf || null,
+    flip: at ? at.flip : !!L.flip, sym2: at ? at.sym2 : symEnabled(), name: L.name, surf: L.surf || null,
+    // the depth image travels with the Look that names it (4.19), on the model as on the sheet
+    heightMap: L.heightMap || null, heightName: L.heightName || null,
     // Text stays text once projected (4.50 (3)): the record rides with the image it drew, so
     // "Edit text…" can re-render and re-project it (`ProjSource.edit`).
     text: L.text ? { ...L.text } : null,
@@ -25627,7 +25727,7 @@ function bakeProjection(L, hit){
   if (!res.drawn) {
     for (const a of res.added) { const o = nodeOwner(a.slot.layers, a.L); if (o) o.list.splice(o.i, 1); scheduleComposite(a.slot); }
     setStatus("Nothing projected — the image landed on parts with no editable texture, on a protected part, or it faces away from the camera", "err");
-    return;
+    return false;
   }
   const added = res.added;
   const bytes = added.reduce((n, a) => n + a.L.canvas.width * a.L.canvas.height * 4, 0);
@@ -25653,11 +25753,12 @@ function bakeProjection(L, hit){
   if (here) { if (here.slot !== App.activeSlot) selectSlot(here.slot.id); App.activeLayer = here.L; }
   const names = added.map(a => a.slot.id);
   const blank = added.filter(a => a.slot.missing).map(a => a.slot.id);
-  setPlacing("movproj");
+  setPlacing(false);
   refreshLayerList(); refreshSlotList();
-  setStatus("Projected" + (names.length > 1 ? " onto " + names.length + " textures (" + names.join(", ") + ")" : "") +
+  setStatus("“" + (L.name || "Decal") + "” is on the model" + (names.length > 1 ? ", across " + names.length + " textures (" + names.join(", ") + ")" : "") +
     (blank.length ? " — note: " + blank.join(", ") + " has no texture loaded yet, so that part will not export" : "") +
-    " — now drag the decal itself to slide it around, in either view; its corners resize it and the knob above it turns it", "ok");
+    " — drag it to move it, in either view; its corners resize it and the knob above it turns it", "ok");
+  return true;
 }
 
 </script>
@@ -25709,12 +25810,12 @@ const ProjGrip = {
 
   // ---- which decal is in hand ----
   // The active layer when it is a projection, with painting off (the brush owns the pointer then) and
-  // no other placing mode armed (that mode owns the click). ONE copy for both views: the viewport adds
+  // no click armed (that mode owns the click). ONE copy for both views: the viewport adds
   // only what is its own (`ProjHandles.target`: a model, the fly camera) and the sheet only what owns
   // ITS pointer (`Draw2D.projGeom`). The sheet had its own copy without the placing mode, and with
   // "Set centre…" armed it drew and took the handles the model had hidden (4.2's review, 2026-09-27).
   target(){
-    if (App.paint3d || (App.placing && App.placing !== "movproj")) return null;
+    if (App.paint3d || App.placing) return null;
     const L = activeLayerObj();
     return L && L.proj && L.proj.frame && L.proj.bmp ? L : null;
   },
@@ -25740,6 +25841,23 @@ const ProjGrip = {
   },
   // A plane point's angle about the centre, in degrees, in the r/u axes `P.rot` turns t1 away from.
   angle(F, q){ const v = q.clone().sub(F.p); return Math.atan2(v.dot(F.u), v.dot(F.r)) * 180 / Math.PI; },
+  // Whether surface point `q` is inside the beam: within the image's rectangle across the plane and
+  // the Depth's reach along it — for the decal, or for its mirrored copy when that is on. This is what
+  // "on the decal" means for a press in 3-D. Its texels alone are not: a sheet shares texels between
+  // places on the model (a UV island used twice), so the projector's pixels also show far from where
+  // it points, and a press there used to grab the decal and throw its centre across the vehicle
+  // (reported 2026-10-17 on the A-10C). And inside the frame they are not needed: a press on a part
+  // the image did not paint — a sheet not loaded, a gap in the image — is still a press on the decal.
+  reaches(P, q){
+    if (!P || !P.frame || !P.bmp || !q) return false;
+    const F = ProjGrip.frame(P), lim = projDepthLim(P, F.halfW, F.halfH), m = 1.02;
+    const inside = b => {
+      const v = q.clone().sub(b.p);
+      return Math.abs(v.dot(b.t1)) <= F.halfW * m && Math.abs(v.dot(b.t2)) <= F.halfH * m && Math.abs(v.dot(b.n)) <= lim;
+    };
+    const b = { p: F.p, n: F.n, t1: F.t1, t2: F.t2 };
+    return inside(b) || (!!P.sym2 && inside(mirrorBasis(b, false)));
+  },
 
   // ---- the gesture: begin, drag, end ----
   // `kind` is "scale" (a corner — `opt.corner` says which), "rot" (the knob) or "move" (the body, 2-D).
@@ -26023,6 +26141,90 @@ const ProjGrip = {
     cx -= Math.floor(cx / W) * W; cy -= Math.floor(cy / H) * H;
     return { F, c: { x: cx, y: cy }, J, Ji: [J[3] / dJ, -J[1] / dJ, -J[2] / dJ, J[0] / dJ] };
   },
+  // ---- one decal, two placements (2026-10-17) ----
+  // "Decal and projected image should not be two completely separate things": a decal switches
+  // between On the model and On the texture in place, keeping where it is, its size and its turn.
+  // Both directions are the plane↔sheet map at the centre, so they are exact on a flat panel and
+  // the tangent-plane estimate on a curved one — the same answer the sheet's handles already give.
+  //
+  // The turn (and mirror) nearest a 2×2 map [[a, b], [c, d]] whose columns are where an image's right
+  // and down axes go, y running down. Where the sheet stretches the surface unevenly the two axes
+  // disagree about the angle, and a flat decal can only turn and scale, so the closest such map is
+  // the answer — read from one axis alone it was 22° on a 30° plate (t100, 2026-10-17). A negative
+  // determinant is a mirror image: the fit is a reflection, and that is a flip.
+  similar(a, b, c, d){
+    const det = a * d - b * c, mirror = det < 0;
+    // turn: [[cos, −sin], [sin, cos]]; flipped (x negated): [[−cos, −sin], [−sin, cos]]
+    const rot = mirror ? Math.atan2(-(c + b) / 2, -(a - d) / 2) : Math.atan2((c - b) / 2, (a + d) / 2);
+    return { rot: rot * 180 / Math.PI, mirror, det };
+  },
+  // A projected decal as a flat one on `slot`. The flat decal draws image pixel (i, j) at
+  // R(rot)·(±s·i, s·j) on the sheet (the compositor's stamp; `decalAtUV` inverts it); the projector
+  // puts it at J·(m·i, m·j), m metres per pixel — 2k, `projHalfSize`'s k being per HALF pixel
+  // (halfW = k·width; a test measured the flat copy at a quarter of the area before that was read
+  // right, 2026-10-17). So J's columns, times m, ARE the flat decal's axes:
+  // the down axis gives the turn whatever the handedness, and a negative determinant is a flip.
+  flatOf(P, slot){
+    const SF = ProjGrip.sheetFrame(P, slot);
+    if (!SF) return null;
+    const { k } = projHalfSize(P), J = SF.J, det = J[0] * J[3] - J[1] * J[2];
+    const fit = ProjGrip.similar(J[0], J[1], J[2], J[3]);
+    return { x: SF.c.x / slot.composite.width, y: SF.c.y / slot.composite.height,
+             rot: Math.round(fit.rot * 10) / 10, flip: fit.mirror, scale: 2 * k * Math.sqrt(Math.abs(det)) };
+  },
+  // …and back: the projector that puts a flat decal on `slot` exactly where it is drawn — aimed
+  // straight down the surface normal under its centre, its axes the image's own axes carried from
+  // the sheet onto that triangle. The frame's r/u are the plane's "up" (world Y, or Z on a surface
+  // facing up or down), so the Rotate slider reads an angle against something stable rather than 0.
+  // Null when the centre is over the gutter between islands.
+  frameOfFlat(L, slot){
+    if (!L || !L.bmp || !slot || !slot.composite) return null;
+    const W = slot.composite.width, H = slot.composite.height;
+    const hit = ProjGrip.surfaceAt(slot, L.x * W, L.y * H, camera ? camera.position : null);
+    if (!hit) return null;
+    const flipV = $("optFlipV").checked, gd = hit.gd, o = hit.t * 9, u6 = hit.t * 6;
+    const V = [0, 1, 2].map(i => new THREE.Vector3(gd.position[o + i * 3], gd.position[o + i * 3 + 1], gd.position[o + i * 3 + 2]));
+    const S = [0, 1, 2].map(i => [gd.uv[u6 + i * 2] * W, (flipV ? gd.uv[u6 + i * 2 + 1] : 1 - gd.uv[u6 + i * 2 + 1]) * H]);
+    const e1 = V[1].clone().sub(V[0]), e2 = V[2].clone().sub(V[0]);
+    const d1 = [S[1][0] - S[0][0], S[1][1] - S[0][1]], d2 = [S[2][0] - S[0][0], S[2][1] - S[0][1]];
+    const dd = d1[0] * d2[1] - d2[0] * d1[1];
+    if (!(Math.abs(dd) > 1e-12)) return null;
+    const world = (x, y) => e1.clone().multiplyScalar((x * d2[1] - d2[0] * y) / dd).addScaledVector(e2, (d1[0] * y - x * d1[1]) / dd);
+    const n = e1.clone().cross(e2).normalize();
+    // outward: the side the vertex normals face, or failing those the camera's
+    let side = null;
+    if (gd.normal) side = [0, 1, 2].reduce((a, i) => a.addScaledVector(new THREE.Vector3(gd.normal[o + i * 3], gd.normal[o + i * 3 + 1], gd.normal[o + i * 3 + 2]), hit.w[i]), new THREE.Vector3());
+    if (!side || side.lengthSq() < 1e-12) side = camera.position.clone().sub(hit.point);
+    if (n.dot(side) < 0) n.negate();
+    const a = L.rot * Math.PI / 180, s = L.scale, fs = L.flip ? -1 : 1;
+    const WR = world(fs * s * Math.cos(a), fs * s * Math.sin(a)), WD = world(-s * Math.sin(a), s * Math.cos(a));
+    const flat = v => v.clone().addScaledVector(n, -v.dot(n));
+    if (!(flat(WR).lengthSq() > 1e-18 && flat(WD).lengthSq() > 1e-18)) return null;
+    let up = flat(new THREE.Vector3(0, 1, 0));
+    if (up.lengthSq() < .01) up = flat(new THREE.Vector3(0, 0, 1));
+    up.normalize();
+    const r = up.clone().cross(n);                               // r × u = n, as the camera's are
+    // The image's two axes in the plane's (r, −u) — "down" is −u — fitted to the projector's
+    // t1 = ±(r cos + u sin), t2 = r sin − u cos, which in (r, −u) is the rotation by −rot, mirrored
+    // across r when flipped. A sheet that mirrors the surface makes the fit a reflection: the flip.
+    const fit = ProjGrip.similar(WR.dot(r), WD.dot(r), -WR.dot(up), -WD.dot(up));
+    const flip = fit.mirror, rot = Math.round(-fit.rot * 10) / 10;
+    const k = Math.sqrt(Math.abs(fit.det));                       // metres per image pixel, area-true
+    const diag = App.modelSize ? Math.max(App.modelSize.x, App.modelSize.y, App.modelSize.z) : 10;
+    const scale = k / 2 * (L.srcW || L.bmp.width) / (diag * .12);        // projHalfSize's k is per half pixel
+    return { frame: { p: hit.point.toArray(), n: n.toArray(), r: r.toArray(), u: up.toArray() }, rot, flip, scale };
+  },
+  // The flat decal's spot on `slot` for a world point and the surface's facing there — how a
+  // mirrored projected copy becomes the flat decal's own mirrored copy (`L.sym`).
+  uvAt(slot, p, n){
+    const h = ProjGrip.triAt(slot, p, n);
+    if (!h) return null;
+    const flipV = $("optFlipV").checked, uv = h.gd.uv, u6 = h.t * 6;
+    let x = 0, y = 0;
+    for (let i = 0; i < 3; i++) { x += h.w[i] * uv[u6 + i * 2]; y += h.w[i] * (flipV ? uv[u6 + i * 2 + 1] : 1 - uv[u6 + i * 2 + 1]); }
+    return { x: x - Math.floor(x), y: y - Math.floor(y) };
+  },
+
   // plane offset (a, b) → sheet texel, and back
   toSheet(SF, a, b){ return { x: SF.c.x + SF.J[0] * a + SF.J[1] * b, y: SF.c.y + SF.J[2] * a + SF.J[3] * b }; },
   fromSheet(SF, x, y){
@@ -26277,7 +26479,7 @@ const PathOverlay = {
 function updateBrushAvailability(){
   const s = App.activeSlot, L = activeLayerObj();
   const cls = vehicleClass();
-  let firstEnabled = null, activeStillOk = false;
+  let firstEnabled = null, activeStillOk = false, activeHeld = false;
   for (const b of document.querySelectorAll("#brushModes [data-bm]")) {
     const need = b.dataset.need;
     const forCls = b.dataset.cls;
@@ -26288,7 +26490,7 @@ function updateBrushAvailability(){
     // `Tool.resolve` names every mode there is and refuses the rest in a sentence.
     const pt = Tool.MODES[b.dataset.bm];
     const r = pt ? Tool.resolve(pt.tool, pt.chan, pt.target) : { err: "There is no " + Tool.q(b.dataset.bm) + " tool." };
-    let why = "";
+    let why = "", byLayer = false;
     // What the SELECTED layer holds on the channel THIS tool writes — the question 4.28(e) makes
     // askable. Before it, a layer wrote one channel and any other tool was refused against that one
     // channel ("“Gloss” writes the Smoothness channel — this tool writes Colour"), which is the rule
@@ -26312,31 +26514,39 @@ function updateBrushAvailability(){
     else if (s && s.camoTile && mChan === "wear") why = "A camouflage tile has no wear mask — it carries the alpha of the camouflage it replaces";
     // "paintable" = the slot is created on the first stroke if the layer has none; only content
     // that cannot take a brush stroke disables the tool.
-    else if (need === "paintable" && L && isGroup(L))
+    else if (need === "paintable" && L && isGroup(L) && (byLayer = true))
       why = "“" + L.name + "” is a group — select a layer inside it, or add one";
-    else if (need === "paintable" && mine && mine.proj)
+    else if (need === "paintable" && mine && mine.proj && (byLayer = true))
       why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
-    else if (need === "paintable" && mine && mine.derived)
+    else if (need === "paintable" && mine && mine.derived && (byLayer = true))
       why = "“" + L.name + "”'s " + Tool.chanWord(mChan) + " is derived from its Look and is rebuilt whenever the decal moves — duplicate the layer (⧉) to paint on a copy";
-    else if (need === "paintable" && mine && mine.kind !== "paint")
+    else if (need === "paintable" && mine && mine.kind !== "paint" && (byLayer = true))
       why = "“" + L.name + "” holds " + LayerNode.wordFor(mine) + " on the " + Tool.chanWord(mChan) +
         " channel — add a paint layer, or convert that content in the layer's channel strip";
-    else if (need === "paint" && (!mine || mine.kind !== "paint" || mine.derived)) why = "Select a paint layer to erase from";
-    else if (need === "paint" && mine.proj) why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
-    else if (need === "layer" && (!L || isGroup(L) || !LayerNode.channelsOf(L).length)) why = "Select a paint, image or fill layer";
+    else if (need === "paint" && (!mine || mine.kind !== "paint" || mine.derived) && (byLayer = true)) why = "Select a paint layer to erase from";
+    else if (need === "paint" && mine.proj && (byLayer = true)) why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
+    else if (need === "layer" && (!L || isGroup(L) || !LayerNode.channelsOf(L).length) && (byLayer = true)) why = "Select a paint, image or fill layer";
     const off = !!why;
     b.disabled = off;
     b.dataset.why = off ? why : "";
     if (off) b.title = why;
     else if (b.dataset.tip) b.title = b.dataset.tip;
     if (!off) { if (!firstEnabled) firstEnabled = b; if (b.dataset.bm === App.brush.mode) activeStillOk = true; }
+    else if (byLayer && b.dataset.bm === App.brush.mode) activeHeld = true;
   }
   // Never leave the user on a mode that cannot paint — QUIETLY. The second argument skips
   // `selectLayerForBrush`, which can open a native `confirm` ("this group has no smoothness layer,
   // add one?"), and this function runs from every `refreshLayerList`. A modal dialog reached by
   // *drawing a panel* is a dialog nobody asked for; it also deadlocked two headless tests, which is
   // how it was found. Choosing a tool by hand still asks, because there the question is the point.
-  if (!activeStillOk && firstEnabled) applyBrushMode(firstEnabled.dataset.bm, true);
+  // …but only when the SLOT or the vehicle rules the tool out (no _n, no albedo, an aircraft's wear
+  // mask). When it is the selected LAYER that cannot take it — an image decal, a projected decal, a
+  // group — the tool stays in hand, off and saying why, and is live again the moment a paint layer
+  // is selected. Reported 2026-10-17: pasting an image selected its decal layer, Color was off on
+  // it, and the brush quietly became Smoothness (the first tool that only needs an _n) — the
+  // Smoothness chip lit up on the decal and the panel showed that tool's options, greyed. The jump
+  // only ever took away the tool the user had picked.
+  if (!activeStillOk && !activeHeld && firstEnabled) applyBrushMode(firstEnabled.dataset.bm, true);
   const cur = document.querySelector('#brushModes [data-bm="' + App.brush.mode + '"]');
   const hint = $("brushHint");
   if (cur && cur.disabled) { hint.style.display = ""; hint.textContent = cur.dataset.why; }
@@ -26850,7 +27060,6 @@ const KEY_HINTS = {
   AltRight: "<span class='k'>Alt</span> + click = pick the colour under the cursor · with the mask brush = reveal instead of hide · + wheel = brush size",
   KeyS: "<span class='k'>S</span> + click a part = switch to that part's texture slot",
   KeyX: "<span class='k'>X</span> + click a part = protect it from painting (click again to unprotect)",
-  KeyG: "<span class='k'>G</span> = move the selected projected decal on the model — drag it over the surface, arrows nudge, <span class='k'>,</span> <span class='k'>.</span> rotate",
   Backquote: "Hold <span class='k'>`</span> to compare against the original texture",
 };
 let keyHintTimer = null;
@@ -26884,12 +27093,7 @@ window.addEventListener("keydown", e => {
   if (e.code === "Space") v2.space = true;
   if (e.code === "KeyB" && !e.ctrlKey && !e.metaKey) setPaint3d(!App.paint3d);
   if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey) setFly(!cam.fly);
-  // Grab-and-move is G everywhere else, and `KeyG` was free. Routed through the button's own click
-  // so it gives the same "select a projected decal layer first" answer instead of doing nothing
-  // silently (ROADMAP 3.14). `!e.repeat` because holding a key is what raises its hint bubble
-  // (420 ms), and a mode that flickered at the auto-repeat rate while the bubble explained it
-  // would be worse than no hint at all.
-  if (e.code === "KeyG" && !e.repeat && !e.ctrlKey && !e.metaKey) $("btnProjMove").click();
+  // G armed the Moving mode until 2026-10-17; a decal is dragged directly now, so G is free again.
   // T for text, as in every image editor; `KeyT` was free (4.50 (3)). Through the Layers panel's own
   // button, so the key and the click cannot come to do different things. The click opens the dialog
   // and puts the cursor in its text box before this handler returns, so the key's own character
@@ -45867,7 +46071,7 @@ TopWin.init();
 //                carries none at all, where "a vehicle will not load" is expected.
 // The line restarted at 1.0.0-beta.1 on 2026-10-03 (ROADMAP 5.5(5)): the 0.x numbers were never
 // published, so the first public build is the first number anyone outside sees.
-const APP_VERSION = "1.0.0-beta.1";
+const APP_VERSION = "1.0.0-beta.2";
 
 // e.g. "v1.0.0-beta.1 · own decoder" / "v1.0.0-beta.1 · ooz decoder (local build)" /
 //      "v1.0.0-beta.1 · RAD decoder (local build)" / "v1.0.0-beta.1 · no Oodle decoder"

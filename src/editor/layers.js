@@ -531,7 +531,7 @@ function layerMenu(ev, s, L){
     L.mask ? { label: "Delete mask", run: () => setLayerMask(s, L, null, "delete mask") }
            : { label: "Add mask (white)", run: () => addMaskTo(s, L, "white") },
     { sep: true },
-    { label: grouped ? "Delete group and its layers" : L.proj ? "Delete projected decal (all textures)" :
+    { label: grouped ? "Delete group and its layers" : L.proj ? "Delete decal (all textures)" :
         L.link ? "Delete layer (all linked textures)" : "Delete layer", danger: true,
       run: () => deleteLayerObject(s, L) },
   ]);

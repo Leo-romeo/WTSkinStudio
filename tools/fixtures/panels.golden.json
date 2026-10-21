@@ -53,78 +53,78 @@
     },
     "layers-panel-props-gradient": {
       "what": "layers panel: a colour gradient fill — its shape rows and three stops with colour pickers",
-      "chars": 11735,
-      "sha256": "01eb98ff274fc544831fc64717f2697586a7bb52e7cd5b7a2b03f37188a22cd3"
+      "chars": 11731,
+      "sha256": "831068f8dca893f69b1e5aa9c0f062c5b263151519b226647253e0521f94888a"
     },
     "layers-panel-props-gradient-grey": {
       "what": "layers panel: a smoothness gradient fill — value sliders instead of colour pickers",
-      "chars": 11500,
-      "sha256": "00d139dad83835809ae058141595e68e2a5743c8928255adb4485a4730b66c7c"
+      "chars": 11496,
+      "sha256": "903b7cf8ad912faefa7cb3d6076c05f355054dc770903bd061bb26f1e78a30a8"
     },
     "layers-panel-props-noise": {
       "what": "layers panel: a colour Perlin noise — its kind, scale, detail, roughness and seed, then levels and stops",
-      "chars": 12946,
-      "sha256": "95aeb7e4b1a6c06fa31d2c16df0849d563bd9804ece3a6524f38629ef6947923"
+      "chars": 12942,
+      "sha256": "0360397815d2baadb95c1b105bf99791ba9ab89f1b1f0080a04e5644edddc9cf"
     },
     "layers-panel-props-noise-streaks-grey": {
       "what": "layers panel: a streaks noise on smoothness — the stretch row, and value sliders for its stops",
-      "chars": 13161,
-      "sha256": "0371b02e5e4b95f33cc70086956fae66ffa6b74acce0fb261ba909a2645fb98b"
+      "chars": 13157,
+      "sha256": "c05d389c740f0b3ee00558882909a60b82980f05bdbb38d319655be10959c655"
     },
     "layers-panel-props-pattern-uv": {
       "what": "layers panel: a pattern on the sheet — the tile row, repeats, angle and offsets",
-      "chars": 9989,
-      "sha256": "894f1942f1d2ebaeb53be6ef37ae9a5ad3be861fd6deae44976ed6796f4a6bdb"
+      "chars": 9985,
+      "sha256": "75cd7fcf7a049b7f39cb20e2c7960523ac3c4a9a9b9ff6ebd79e3454380324ef"
     },
     "layers-panel-props-pattern-model-normal": {
       "what": "layers panel: a pattern along the model on the normal map — the size in metres, the blend, and the warning",
-      "chars": 10583,
-      "sha256": "20042dde33adc9ca03a99639bafa080605374c4bd1665311a657f40074108b60"
+      "chars": 10579,
+      "sha256": "c1b5ea7c28cb99bf5effbbb63f09b71642c9d0188e6df77c0c2e71597da71d2d"
     },
     "layers-panel-fx-levels": {
       "what": "layers panel: a colour Levels effect with its red channel in hand — the Channel select, five numbers, reset",
       "chars": 7379,
-      "sha256": "93233d68f3e245076f092f405ebbf7b9225cd3af3efef39b4b642c5a64848f10"
+      "sha256": "bef6f77cef6887ed078536c817ee978a3ec6040811a631d81a43ab7d4fad2aea"
     },
     "layers-panel-fx-curves": {
       "what": "layers panel: a colour Curves effect — the box, reset and the hint",
       "chars": 6554,
-      "sha256": "c8cff1bd84cb50a6e9aa55b3a31e51079bbdf7b48f740da970fdc1e4f9908b7f"
+      "sha256": "d87b2a2efb4d32856272513c28591a942e2bae5ad90c894cd547b68c81a6121b"
     },
     "layers-panel-fx-balance": {
       "what": "layers panel: a Colour balance with its midtones shifted — the range select, three sliders, keep luminosity",
       "chars": 6816,
-      "sha256": "68545d3d83a4cce147f18358f6f49da3e7f4ee499b3160b69fad7c7bc84ac37e"
+      "sha256": "7d2464b1fde7507b2425e93f29a5b7c25e94b4dc008f75befd8a2abd4f7b5cce"
     },
     "layers-panel-fx-gradmap": {
       "what": "layers panel: a Gradient map — the stop rows, pointed at the effect's own stops",
       "chars": 7828,
-      "sha256": "704f12fee5481b7698818f0167e5cc09072b8174d65f61d2c2888ae556fe4373"
+      "sha256": "484b291e1df801a3839c675be33f625cf174c444d9f93d73d1678389d1b138c4"
     },
     "layers-panel-fx-grey-levels": {
       "what": "layers panel: a Levels effect on smoothness — no Channel select, no colour-only kinds, the map's own hint",
       "chars": 6888,
-      "sha256": "3ce410a58f7f0b8bd2d0269d98409ecd3ac0aa2dc08dcdf3035a3120aa4f8f90"
+      "sha256": "f42fd89f8fc91b2d477f023ccaf6434dffc128c4403714c92af148d9474e5cca"
     },
     "layers-panel-fx-grey-threshold": {
       "what": "layers panel: a Threshold on smoothness — one number and its hint",
       "chars": 5875,
-      "sha256": "fcc8ecd6403d2c72bb0c6a196b7973899487f1f41d51c721c9a81829478bef7c"
+      "sha256": "24daed67f634571c132e0972dc3c7ba19fac83ef5531e052a4ecc438c3355b4f"
     },
     "layers-panel-fx-invert": {
       "what": "layers panel: an Invert effect — the kind select and its hint, and nothing to set",
       "chars": 5824,
-      "sha256": "6263a0a3ad2bb821899aebd56fa85bb05e53b48ecbac783a1f014e71bf5d45be"
+      "sha256": "e01bfa3840d584a024f3ca323edb3f3d50d87a2d7cdec6302326ea07b2f8daad"
     },
     "layers-panel-fx-posterize": {
       "what": "layers panel: a Posterize effect — one number and its hint",
       "chars": 5995,
-      "sha256": "02a0b8ddbfb6a5f534db613470b37d9f97385f912d0ad7f6479ddb9e3d800ba1"
+      "sha256": "f1e538798b06129c0419531d080bb3fdb10cfbb7426fa9c95c847cb7a3b8b7fa"
     },
     "layers-panel-fx-unknown": {
       "what": "layers panel: an effect kind from a newer build — named as such, with no rows",
       "chars": 5743,
-      "sha256": "e90c4ea6748cb3fc10249cf53a7e22689d8586d86815df1280702e2bb5e4b7c0"
+      "sha256": "fca57546f3399528f949a4227066f518c247fa45952eeb664355fc331e952f00"
     },
     "layers-panel-multichannel": {
       "what": "layers panel: one layer carrying three channels — the strip, the dots, and the rows describing the channel in hand",
@@ -133,38 +133,38 @@
     },
     "brush-no-slot": {
       "what": "brush panel: nothing loaded — every tool that needs a slot is off, and says so",
-      "chars": 14057,
-      "sha256": "4fd610c705fb7a9c4371b3c58b82251879750bc801579bc101aa3949a8b58007"
+      "chars": 14048,
+      "sha256": "278ed79222779031bcbbcf60ed08d73e411c62491518a4c4f7d06f447a9a3993"
     },
     "brush-air-paint": {
       "what": "brush panel: an aircraft with both sheets and a paint layer — the wear mask is not a concept here",
-      "chars": 14513,
-      "sha256": "d4fff28b063723a822720a43f7cf3a13cc504e27815a1c68280ee83dd1da068a"
+      "chars": 14504,
+      "sha256": "9413d99019f537fc55ceeea8b576661cad14cedaddc8b796d87aa1cb5fc6b1fa"
     },
     "brush-tank-no-n": {
       "what": "brush panel: a tank with no _n — the wear mask appears, every surface tool goes off with the reason",
-      "chars": 15047,
-      "sha256": "0fa11ce9db7fb0cc6fa92c8029834013181ec75013f42204d9043e66eb2908b5"
+      "chars": 15038,
+      "sha256": "fe4a8349326a2eee8dae3ec645b894420abeff5de6bfbea68be8e314ef3a4a67"
     },
     "brush-wrong-channel": {
       "what": "brush panel: a smoothness layer selected — every tool that can make its own slot stays on, the Eraser does not",
-      "chars": 14455,
-      "sha256": "973442fa02570f524dd7962e39bed6bd3038848af614d375fa935589cd29443c"
+      "chars": 14446,
+      "sha256": "999063b0f782e24ef6ce70bb168bd733baec46a833a872b030277813bc97d4b3"
     },
     "brush-mask-target": {
       "what": "brush panel: the mask brush — the value row renames itself and Alt stops picking and starts revealing",
-      "chars": 14417,
-      "sha256": "24a2760ffd15294076c7e3513a658c0dcf2d6e49d1bbd1d406eaa37e16ca9617"
+      "chars": 14408,
+      "sha256": "57e6d751ace99e9c587d5616b7aea914eae0179bd314b3808f9d3708707c543a"
     },
     "brush-panel-line": {
       "what": "brush panel: Panel line — the value row reads Depth, and Flow and Build up are hidden because a height stroke always adds",
-      "chars": 14547,
-      "sha256": "3322dca18e135736cb4e6adcc8b055b40322d70dcd65c4206d180d9181c5e1f6"
+      "chars": 14538,
+      "sha256": "859819b5ad08a1083328fb00fda5fae30de72c46ade7477a6377ccdff86b9c55"
     },
     "brush-camo-tile": {
       "what": "brush panel: a camouflage tile — the Wear mask brush is off and says the tile carries the camouflage's alpha",
-      "chars": 15025,
-      "sha256": "eb723e40dcd438ef2029f96dd1e5727c33a29dc0c67c4adaa6b72cf767ad3299"
+      "chars": 15016,
+      "sha256": "cd24c0895618ea6227eb12b1a5a4469f74045301e0d2f2b7ef3292bf3e66c6b6"
     },
     "slots-list": {
       "what": "texture slots: one loaded and active, one missing, one runtime-built (2D only)",

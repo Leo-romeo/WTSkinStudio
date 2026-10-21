@@ -13,7 +13,7 @@
 //                carries none at all, where "a vehicle will not load" is expected.
 // The line restarted at 1.0.0-beta.1 on 2026-10-03 (ROADMAP 5.5(5)): the 0.x numbers were never
 // published, so the first public build is the first number anyone outside sees.
-const APP_VERSION = "1.0.0-beta.1";
+const APP_VERSION = "1.0.0-beta.2";
 
 // e.g. "v1.0.0-beta.1 · own decoder" / "v1.0.0-beta.1 · ooz decoder (local build)" /
 //      "v1.0.0-beta.1 · RAD decoder (local build)" / "v1.0.0-beta.1 · no Oodle decoder"

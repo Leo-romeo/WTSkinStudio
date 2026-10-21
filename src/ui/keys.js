@@ -13,7 +13,6 @@ const KEY_HINTS = {
   AltRight: "<span class='k'>Alt</span> + click = pick the colour under the cursor · with the mask brush = reveal instead of hide · + wheel = brush size",
   KeyS: "<span class='k'>S</span> + click a part = switch to that part's texture slot",
   KeyX: "<span class='k'>X</span> + click a part = protect it from painting (click again to unprotect)",
-  KeyG: "<span class='k'>G</span> = move the selected projected decal on the model — drag it over the surface, arrows nudge, <span class='k'>,</span> <span class='k'>.</span> rotate",
   Backquote: "Hold <span class='k'>`</span> to compare against the original texture",
 };
 let keyHintTimer = null;
@@ -47,12 +46,7 @@ window.addEventListener("keydown", e => {
   if (e.code === "Space") v2.space = true;
   if (e.code === "KeyB" && !e.ctrlKey && !e.metaKey) setPaint3d(!App.paint3d);
   if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey) setFly(!cam.fly);
-  // Grab-and-move is G everywhere else, and `KeyG` was free. Routed through the button's own click
-  // so it gives the same "select a projected decal layer first" answer instead of doing nothing
-  // silently (ROADMAP 3.14). `!e.repeat` because holding a key is what raises its hint bubble
-  // (420 ms), and a mode that flickered at the auto-repeat rate while the bubble explained it
-  // would be worse than no hint at all.
-  if (e.code === "KeyG" && !e.repeat && !e.ctrlKey && !e.metaKey) $("btnProjMove").click();
+  // G armed the Moving mode until 2026-10-17; a decal is dragged directly now, so G is free again.
   // T for text, as in every image editor; `KeyT` was free (4.50 (3)). Through the Layers panel's own
   // button, so the key and the click cannot come to do different things. The click opens the dialog
   // and puts the cursor in its text box before this handler returns, so the key's own character

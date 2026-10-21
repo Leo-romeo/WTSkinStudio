@@ -264,6 +264,101 @@ const ProjSource = {
     if (!t) ProjSource.ids.set(img, t = ++ProjSource.seq);
     return t;
   },
+
+  // ---- one decal, two placements (2026-10-17) ----
+  // "Decal and projected image should not be two completely separate things and should work
+  // seamlessly, with nothing weird seen by the user." Underneath they still are two — a flat stamp
+  // on one sheet, and a projector rasterised onto every sheet it reaches — because each is right for
+  // something; what the user sees is one decal with a placement, switched in place (ProjGrip.flatOf
+  // / frameOfFlat hold the maths).
+  //
+  // A new image goes straight onto the model, projected from this view at the middle of it, and is
+  // selected with its frame and handles up — there is no image waiting on the cursor and no stand-in
+  // drawn flat at the sheet's centre meanwhile (reported 2026-10-17: that stand-in showed smeared on
+  // whatever part owns the middle of the sheet). Adding it and putting it there are one undo step.
+  // Off the model — nothing under the middle of the view, or no model — it stays flat, at the
+  // texture's centre, and says so.
+  landAtView(L){
+    if (!L || L.type !== "decal" || !App.geomData || !modelGroup) return false;
+    const r = cnv3.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return false;
+    // the middle first, then outwards in rings: the first hit nearest the middle wins
+    let hit = null;
+    for (let ring = 0; ring <= 4 && !hit; ring++) {
+      const n = ring ? 8 * ring : 1;
+      for (let i = 0; i < n && !hit; i++) {
+        const a = i / n * Math.PI * 2, d = ring * .08;
+        const h = ray3d({ clientX: r.left + r.width * (.5 + d * Math.cos(a)), clientY: r.top + r.height * (.5 + d * Math.sin(a)) }, true);
+        if (h && h.uv) hit = h;
+      }
+    }
+    return hit ? bakeProjection(L, hit) : false;
+  },
+  // On the texture → On the model: projected from straight above where it is drawn, at the size
+  // and turn it is drawn at, its Look, relief map, text and mirrored copy with it. One undo step.
+  fromFlat(L){
+    if (!L || L.type !== "decal" || L.proj) return false;
+    if (!App.geomData) { setStatus("Load the vehicle's model first — On the model projects the decal onto it", "err"); return false; }
+    const slot = slotOfLayer(L), at = slot && ProjGrip.frameOfFlat(L, slot);
+    if (!at) {
+      setStatus("“" + (L.name || "This decal") + "” is not over any part of the model — its centre is in the gap between UV islands. Drag it onto a part first", "err");
+      return false;
+    }
+    at.sym2 = !!L.sym;
+    return bakeProjection(L, null, at);
+  },
+  // On the model → On the texture: one flat decal, on the sheet holding the decal's centre (the
+  // active one when it is among them), drawn where the projection put it and at its size — its Look,
+  // relief map, text, layer settings and mirrored copy carried across, every sheet's projected layer
+  // taken away. One undo step, and undoing it puts the projection back exactly.
+  toFlat(P){
+    const sibs = projSiblings(P.id);
+    if (!sibs.length) return false;
+    const order = sibs.slice().sort((a, b) => (b.slot === App.activeSlot) - (a.slot === App.activeSlot));
+    let at = null, home = null;
+    for (const e of order) { at = ProjGrip.flatOf(P, e.slot); if (at) { home = e; break; } }
+    if (!at) {
+      setStatus("The decal's centre is not on any texture it covers — move it so its middle is on the model, then switch", "err");
+      return false;
+    }
+    const scale = Math.max(.01, Math.min(3, at.scale));
+    const F = ProjGrip.frame(P);
+    let sym = null;
+    if (P.sym2) { const m = mirrorBasis({ p: F.p, n: F.n, t1: F.t1, t2: F.t2 }, false); sym = ProjGrip.uvAt(home.slot, m.p, m.n); }
+    const src = home.L;
+    const L = LayerNode.of({ type: "decal", name: P.name || src.name, bmp: P.bmp, visible: src.visible !== false,
+      opacity: src.opacity == null ? 1 : src.opacity, blend: src.blend || "normal",
+      x: at.x, y: at.y, scale, rot: at.rot, flip: at.flip, sym, surf: P.surf || null,
+      text: P.text ? { ...P.text } : null });
+    if (P.heightMap) { L.heightMap = P.heightMap; L.heightName = P.heightName || null; }
+    const slot = home.slot, placed = sibs.map(e => ({ slot: e.slot, L: e.L, idx: e.slot.layers.indexOf(e.L) }));
+    const idx = Math.max(0, placed.find(q => q.slot === slot).idx);
+    const put = () => {
+      for (const q of placed) { const o = nodeOwner(q.slot.layers, q.L); if (o) { o.list.splice(o.i, 1); scheduleComposite(q.slot); } }
+      if (!nodeOwner(slot.layers, L)) slot.layers.splice(Math.min(idx, slot.layers.length), 0, L);
+      ensureDecalSurface(slot, L);
+      scheduleComposite(slot);
+      if (slot !== App.activeSlot) selectSlot(slot.id);
+      App.activeLayer = L;
+      refreshLayerList(); refreshSlotList(); draw2D();
+    };
+    const back = () => {
+      const o = nodeOwner(slot.layers, L); if (o) o.list.splice(o.i, 1);
+      scheduleComposite(slot);
+      for (const q of placed.slice().sort((a, b) => a.idx - b.idx))
+        if (!nodeOwner(q.slot.layers, q.L)) { q.slot.layers.splice(Math.min(Math.max(0, q.idx), q.slot.layers.length), 0, q.L); scheduleComposite(q.slot); }
+      refreshProjSurfaces(P);
+      App.activeLayer = src;
+      refreshLayerList(); refreshSlotList(); draw2D();
+    };
+    pushAction("place “" + (L.name || "decal") + "” on the texture", back, put);
+    put();
+    setStatus("“" + (L.name || "Decal") + "” is on the texture " + slot.id + " now — drag it in either view; " +
+      (at.scale > 3 ? "it was larger than a flat decal can be, so it is at the largest size; " : "") +
+      (sibs.length > 1 ? "it covered " + sibs.length + " textures, and a flat decal is on one, so the parts on the others are gone; " : "") +
+      "On the model puts it back on the surface", "ok");
+    return true;
+  },
 };
 // Cached world-space bounds per geometry group — the projector rejects whole meshes with this.
 function gdBounds(gd){
@@ -499,15 +594,20 @@ function commitProjEdit(){
 }
 // The floating UV decal is the SOURCE of a projection, not a second copy of it: once projected it
 // is consumed. Leaving it behind is what put a smeared duplicate on the sheet next to the real one.
-function bakeProjection(L, hit){
-  if (!App.geomData) { setStatus("Projection needs the 3D model loaded", "err"); return; }
+// `hit` aims it from the camera at a surface point; `at` (ProjSource.fromFlat) instead gives the
+// frame, turn, flip, size and mirrored copy outright. Returns whether anything was projected.
+function bakeProjection(L, hit, at){
+  if (!App.geomData) { setStatus("Projection needs the 3D model loaded", "err"); return false; }
   const srcSlot = slotOfLayer(L);
   const srcIdx = srcSlot ? srcSlot.layers.indexOf(L) : -1;
-  const P = { id: "p" + (projSeq++), frame: frameToArrays(projFrame(hit)), bmp: L.bmp, scale: L.scale, rot: L.rot,
+  const P = { id: "p" + (projSeq++), frame: at ? at.frame : frameToArrays(projFrame(hit)), bmp: L.bmp,
+    scale: at ? Math.max(ProjSource.SCALE_MIN, Math.min(ProjSource.SCALE_MAX, at.scale)) : L.scale, rot: at ? at.rot : L.rot,
     // `surf` is the Look the decal was given in the editor, and since 4.8b it is read: the first
     // non-live render turns it into derived content on the projected layer's own smoothness, metal
     // and normal channels (4.28(f)), on every sheet the projection landed on.
-    flip: !!L.flip, sym2: symEnabled(), name: L.name, surf: L.surf || null,
+    flip: at ? at.flip : !!L.flip, sym2: at ? at.sym2 : symEnabled(), name: L.name, surf: L.surf || null,
+    // the depth image travels with the Look that names it (4.19), on the model as on the sheet
+    heightMap: L.heightMap || null, heightName: L.heightName || null,
     // Text stays text once projected (4.50 (3)): the record rides with the image it drew, so
     // "Edit text…" can re-render and re-project it (`ProjSource.edit`).
     text: L.text ? { ...L.text } : null,
@@ -517,7 +617,7 @@ function bakeProjection(L, hit){
   if (!res.drawn) {
     for (const a of res.added) { const o = nodeOwner(a.slot.layers, a.L); if (o) o.list.splice(o.i, 1); scheduleComposite(a.slot); }
     setStatus("Nothing projected — the image landed on parts with no editable texture, on a protected part, or it faces away from the camera", "err");
-    return;
+    return false;
   }
   const added = res.added;
   const bytes = added.reduce((n, a) => n + a.L.canvas.width * a.L.canvas.height * 4, 0);
@@ -543,10 +643,11 @@ function bakeProjection(L, hit){
   if (here) { if (here.slot !== App.activeSlot) selectSlot(here.slot.id); App.activeLayer = here.L; }
   const names = added.map(a => a.slot.id);
   const blank = added.filter(a => a.slot.missing).map(a => a.slot.id);
-  setPlacing("movproj");
+  setPlacing(false);
   refreshLayerList(); refreshSlotList();
-  setStatus("Projected" + (names.length > 1 ? " onto " + names.length + " textures (" + names.join(", ") + ")" : "") +
+  setStatus("“" + (L.name || "Decal") + "” is on the model" + (names.length > 1 ? ", across " + names.length + " textures (" + names.join(", ") + ")" : "") +
     (blank.length ? " — note: " + blank.join(", ") + " has no texture loaded yet, so that part will not export" : "") +
-    " — now drag the decal itself to slide it around, in either view; its corners resize it and the knob above it turns it", "ok");
+    " — drag it to move it, in either view; its corners resize it and the knob above it turns it", "ok");
+  return true;
 }
 

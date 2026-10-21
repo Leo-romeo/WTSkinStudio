@@ -66,7 +66,7 @@ it).
 
 Press <kbd>?</kbd> in the app for the full control list (<kbd>Esc</kbd> closes it).
 
-**Reporting a bug.** Say which version (the welcome card shows it, e.g. `v1.0.0-beta.1 · own
+**Reporting a bug.** Say which version (the welcome card shows it, e.g. `v1.0.0-beta.2 · own
 decoder`), which browser and which vehicle, and what you did. <kbd>F12</kbd> ▸ *Console* shows any
 error in red — copy it. For something slow or jumpy, *View & scene ▸ Advanced ▸ Record a session*,
 press <kbd>F9</kbd> the moment it goes wrong, then stop it and attach the `.json` it saves. The app

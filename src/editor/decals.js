@@ -9,6 +9,8 @@
 const DecalCarry = {
   // Show / hide the ghost. `set(null)` is the only way it goes away, and setPlacing is the single
   // caller that ends a carry, so no path can strand it on the cursor.
+  // Only an image chosen before any texture is open is ever carried (2026-10-17): with a slot, a new
+  // decal lands on the model at once (ProjSource.landAtView).
   set(bmp, label){
     const el = $("carryGhost");
     App.carry = bmp ? { label: label || "decal" } : null;
@@ -25,33 +27,17 @@ const DecalCarry = {
     el.style.display = "block";
   },
   clear(){ this.set(null); },
-  // The one way a finished image becomes a decal on the skin. With a slot it lands as a layer and
-  // arms placement; without one it stays in hand instead of being thrown away with an error,
+  // The one way a finished image becomes a decal on the skin. With a slot it lands on the model
+  // (or flat, with no model); without one it stays in hand instead of being thrown away with an error,
   // because the user has already done the work of choosing and editing it.
   place(canvas, meta, name){
     const nm = (meta && meta.name) || name || "decal";
     const surf = meta && meta.surf;
     const s = App.activeSlot;
     if (s && s.composite) {
-      addDecalLayer(canvas, nm);
+      addDecalLayer(canvas, nm, meta);
       const L = activeLayerObj();
-      // The Look is REMEMBERED here and applied when the decal is put down — not now. Applying it
-      // at this moment was the 4.8 bug reported 2026-08-26: `addDecalLayer` puts the app straight
-      // into projection mode with the decal floating at the sheet centre, so there is nowhere yet
-      // for a surface response to be derived from — and building the group here also moved the
-      // selection onto the group, which broke every path that asks `activeLayerObj().type ===
-      // "decal"`: clicking the model to place or project it, and G.
-      if (L && L.type === "decal" && surf) { L.surf = surf; applyDecalSurfUI(L); }
-      // The depth image travels with the Look that names it (ROADMAP 4.19). A relief mode of "map"
-      // with no map is a mode that cannot do what it says, so `refreshDecalSurface` falls back to
-      // the outline — which is honest, and also exactly what used to happen to every decal that came
-      // back out of the library.
-      if (L && L.type === "decal" && meta && meta.height) { L.heightMap = meta.height; L.heightName = meta.heightName || null; }
-      // Text stays text (4.50 (3)): the record the image was drawn from goes on with it, so the
-      // decal can be edited AS text — here, once projected, and out of the library. Its name is
-      // the lettering as typed; `addDecalLayer` strips what looks like a file extension, which
-      // would take "SGT. PEPPER" down to "SGT".
-      if (L && L.type === "decal" && meta && meta.text) { L.text = { ...meta.text }; L.name = nm; refreshLayerList(); }
+      if (L && L.type === "decal" && L.surf) applyDecalSurfUI(L);
       return true;
     }
     pendingDecal = { bmp: canvas, name: nm, surf, edited: true, text: (meta && meta.text) || null,
@@ -117,18 +103,39 @@ $("btnDecalEditor").onclick = () => {
     refreshLayerList();
   }, { look: L.surf, height: L.heightMap || null, heightName: L.heightName || null });
 };
-function addDecalLayer(bmp, name){
+// `meta` is what the decal editor handed over — Look, depth image, text — and it is on the layer
+// BEFORE it lands, so the projection is made with it. Added afterwards (as until 2026-10-17) it
+// went onto a flat decal that a projection had already consumed.
+function addDecalLayer(bmp, name, meta){
   const s = App.activeSlot; if (!s || !s.composite) { setStatus("Select a slot first", "err"); return; }
   const scale = Math.min(1, (s.size * .3) / Math.max(bmp.width, bmp.height));
-  addLayer(LayerNode.of({ type: "decal", name: name.replace(/\.[^.]+$/, ""), bmp, visible: true, opacity: 1, blend: "normal", x: .5, y: .5, scale, rot: 0, flip: false }));
+  // Text keeps its lettering as its name (4.50 (3)); stripping a "file extension" would take
+  // "SGT. PEPPER" down to "SGT".
+  const nm = meta && meta.text ? name : name.replace(/\.[^.]+$/, "");
+  const extra = {};
+  if (meta && meta.surf) extra.surf = meta.surf;
+  // The depth image travels with the Look that names it (ROADMAP 4.19). A relief mode of "map"
+  // with no map is a mode that cannot do what it says, so `refreshDecalSurface` falls back to the
+  // outline — which is honest, and also what used to happen to every decal out of the library.
+  if (meta && meta.height) { extra.heightMap = meta.height; extra.heightName = meta.heightName || null; }
+  if (meta && meta.text) extra.text = { ...meta.text };
+  // Straight onto the model, from this view (ProjSource.landAtView): dropping an image into UV space
+  // is what makes it look smeared across the model, because the UV atlas is not the shape of the
+  // aircraft. Adding and placing are one undo step. It used to wait on the cursor for a click while
+  // a stand-in sat flat at the sheet's centre — two half-placed copies of one decal (2026-10-17).
+  let landed = false;
+  withUndoBatch("add decal “" + nm + "”", () => {
+    addLayer(LayerNode.of({ type: "decal", name: nm, bmp, visible: true, opacity: 1, blend: "normal", x: .5, y: .5, scale, rot: 0, flip: false }));
+    const L = activeLayerObj();
+    if (L) Object.assign(L, extra);                    // through the layer's own accessors, as before
+    landed = ProjSource.landAtView(L);
+  });
+  refreshLayerList();
   syncDecalUI();
-  // Straight into projection: dropping an image into UV space is what makes it look smeared
-  // across the model, because the UV atlas is not the shape of the aircraft.
-  setPlacing(App.geomData ? "proj" : "uv");
-  DecalCarry.set(bmp, name);                   // after setPlacing — that call clears any earlier carry
+  if (landed) return;
   setStatus(App.geomData
-    ? "Image added — click it onto the model from the angle you want it seen; it wraps around the surface. (Move to clicked spot places it in UV space instead.)"
-    : "Image added — drag it in 2D, nudge with arrow keys ( , / . rotate)", "ok");
+    ? "Image added flat, at the middle of the texture — nothing of the model is under the middle of the view. Turn the model towards you and press On the model, or drag it in 2D"
+    : "Image added — drag it in 2D, nudge with arrow keys ( , / . rotate)", App.geomData ? "err" : "ok");
 }
 // Nudge / rotate the active decal (arrow keys + , . keys), coalescing a key-hold into one undo.
 function nudgeDecal(dx, dy){
@@ -423,28 +430,6 @@ $("projSym2").onchange = () => {
     " — set the axis and offset in the brush panel if it lands wrong"
     : "The mirrored copy landed on nothing — check the symmetry axis in the brush panel", res.drawn ? "ok" : "err");
 };
-// The "select a projected decal layer first" message belongs HERE, where the user has just asked
-// for the mode and can act on it — not on every later click on the model, which is where it used to
-// come out once the mode outlived its layer.
-$("btnProjMove").onclick = () => {
-  if (App.placing === "movproj") { setPlacing(false); return; }
-  const L = decalOfSelection();
-  // Three different situations used to give one answer. "Select a projected decal layer first" is
-  // right when nothing decal-ish is selected; it is a poor answer when a decal IS selected and has
-  // simply not been projected yet, which is the state G was pressed in (reported 2026-08-26).
-  if (!L) { setStatus("Select a decal layer first — G moves a decal that has been projected onto the model", "err"); return; }
-  if (!L.proj) {
-    // "Click it onto the model first" was the answer here until 2026-09-02, and it was wrong in the
-    // one state a user reaches by following the panel: "Move to clicked spot" DOES click it onto
-    // the model, in UV, and G then told them to do what they had just done ("error keeps saying it
-    // floats in uv"). UV placement and projection are two different things and this is the only
-    // message that has to tell them apart, so it names the button that makes the difference.
-    setStatus("“" + (L.name || "This decal") + "” is placed in UV space, not projected — “Project onto model” is what puts it on the " +
-      "surface, and G moves it once it is there. Where it is now, drag it in the 2-D view or nudge it with the arrow keys.", "err");
-    return;
-  }
-  setPlacing("movproj");
-};
 // Re-aim the projector at the current camera without moving where it sits on the vehicle —
 // the fix for "I projected it from the wrong angle".
 $("btnReproject").onclick = () => {
@@ -515,8 +500,15 @@ $("btnDecFlipY").onclick = () => {
   apply(now);
   setStatus("Flipped top to bottom — a vertical mirror is the horizontal one plus a half turn, so that is what this did, in one step", "ok");
 };
-$("btnPlace3d").onclick = () => setPlacing(App.placing === "uv" ? false : "uv");
-$("btnProject3d").onclick = () => setPlacing(App.placing === "proj" ? false : "proj");
+// One decal, two placements (2026-10-17): the switch at the top of its panel. Each section shows one
+// placement, so its own button is the lit one and the other is the conversion (ProjSource.fromFlat
+// / toFlat), in place and one undo step either way.
+for (const b of document.querySelectorAll(".placeSw")) b.onclick = () => {
+  const L = decalOfSelection();
+  if (!L) return;
+  if (b.dataset.place === "model" && !L.proj) ProjSource.fromFlat(L);
+  else if (b.dataset.place === "sheet" && L.proj) ProjSource.toFlat(L.proj);
+};
 $("btnDecSymClear").onclick = () => {
   const L = activeLayerObj(); if (!L || L.type !== "decal" || !L.sym) return;
   const s = App.activeSlot, old = L.sym;

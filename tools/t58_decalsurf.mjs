@@ -614,7 +614,8 @@ const BODY = `async function(){
   App.activeLayer = GF;
   out.fromGroup = { resolves: decalOfSelection() === dF };
   $("status").textContent = "";
-  $("btnProjMove").click();
+  var toModel = document.querySelector('#decalSection .placeSw[data-place="model"]');
+  if (toModel) toModel.click();
   out.fromGroup.gSaid = $("status").textContent;
   refreshLayerProps();
   out.fromGroup.decalSectionShown = $("decalSection").style.display !== "none";
@@ -1034,7 +1035,7 @@ R.is(o.place.selectedType === "decal",
   `placing from the editor leaves the DECAL selected (${o.place.selectedType}) — selecting the group killed clicking the model, pasting into 3-D and G`);
 R.is(!o.place.grouped, "and makes no group yet: the decal is floating at the sheet centre, so there is nowhere to derive a response from");
 R.is(o.place.keptLook, "the Look is remembered on the layer, ready for when it lands");
-R.is(o.place.placing === "proj" || o.place.placing === "uv", `and the app is in a placing mode waiting for the click (${o.place.placing})`);
+R.is(!o.place.placing, `and no mode is left waiting for a click — with no model it lands flat, where it stays (${o.place.placing})`);
 console.log(`   once put down: ${o.settled.nodes} node(s), grouped=${o.settled.grouped}, derived=${o.settled.keys}`);
 R.is(!o.settled.grouped && o.settled.nodes === 1,
   `putting it down derives the response INTO the decal (${o.settled.nodes} node) — the folder, its name and its fold state go with the mechanism that needed them`);
@@ -1130,15 +1131,9 @@ R.is(o.proj.afterUndo === 2, `and undo brings the response back with it (${o.pro
 console.log("\n=== the decal's controls work from the folded group ===");
 R.is(o.fromGroup.resolves, "selecting the group resolves to the one decal inside it");
 R.is(o.fromGroup.decalSectionShown, "so the decal controls are shown — selecting the folder used to lose every one of them");
-console.log(`   G said: ${o.fromGroup.gSaid}`);
-R.is(/UV space/.test(o.fromGroup.gSaid) && /Project onto model/.test(o.fromGroup.gSaid),
-  "and G says the decal has not been projected yet, rather than “select a projected decal layer first” at someone holding a decal");
-// The wording matters as much as the fact, and this half was reported 2026-09-02: the message used
-// to end "click it onto the model first", which is precisely what “Move to clicked spot” had just
-// done. A user who follows the panel reaches this state BY clicking it onto the model, so an
-// instruction to do that again is an instruction to loop. It has to name the other button instead.
-R.is(!/click it onto the model/i.test(o.fromGroup.gSaid),
-  "and it does not tell them to do the thing they just did — UV placement is not projection");
+console.log(`   On the model said: ${o.fromGroup.gSaid}`);
+R.is(/model first/.test(o.fromGroup.gSaid),
+  "and On the model, reached from the folded group with no model loaded, says what it needs rather than doing nothing");
 
 console.log("\n=== picking a tool inside a group finds the layer it writes to ===");
 R.is(o.tool.landedOn === "My gloss" && o.tool.chan === "smooth",

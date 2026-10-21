@@ -90,18 +90,20 @@ const BODY = `async function(){
   App.paint3d = false; App.placing = false; App.projHover = false; App.projDragging = false;
   out.cursor.idle = cur();
   App.paint3d = true;                       out.cursor.painting = cur();
-  App.paint3d = false; App.placing = "uv";  out.cursor.placing = cur();
-  App.placing = "movproj";                  out.cursor.moveArmed = cur();
+  App.paint3d = false; App.placing = "radial"; out.cursor.placing = cur();
+  // A decal is dragged directly since 2026-10-17 — no Moving mode: off it the view is the idle one,
+  // over it the pointer is a grab, holding it a closed hand.
+  App.placing = false;                      out.cursor.moveArmed = cur();
   App.projHover = true;                     out.cursor.moveOverDecal = cur();
   App.projDragging = true;                  out.cursor.moveDragging = cur();
   App.projDragging = false; App.projHover = false;
 
   // ---- and the two modes must not both be on at once
-  App.placing = "movproj"; App.paint3d = false;
+  App.placing = "radial"; App.paint3d = false;
   setPaint3d(true);
   out.paintClearsPlacing = App.placing === false && App.paint3d === true;
-  setPlacing("movproj");
-  out.placingClearsPaint = App.paint3d === false && App.placing === "movproj";
+  setPlacing("radial");
+  out.placingClearsPaint = App.paint3d === false && App.placing === "radial";
   setPlacing(false);
 
   // ---- ROADMAP 4.38: the loadout view. From the front and a little below, at a distance FITTED
@@ -181,14 +183,13 @@ console.log("\n=== the cursor says which mode you are in ===");
 const c = r.cursor || {};
 R.is(c.idle === "(none)", `idle is the plain arrow — ${c.idle}`);
 R.is(c.painting === "crosshair", `painting is a crosshair — ${c.painting}`);
-R.is(c.placing === "crosshair", `waiting to place a decal is a crosshair — ${c.placing}`);
-R.is(c.moveArmed === "all-scroll", `move-on-model, away from the decal, says "drag here to orbit" — ${c.moveArmed}`);
+R.is(c.placing === "crosshair", `an armed click (the radial centre) is a crosshair — ${c.placing}`);
+R.is(c.moveArmed === "(none)", `off a decal the view is the plain arrow, where a drag orbits — ${c.moveArmed}`);
 R.is(c.moveOverDecal === "grab", `over the decal it becomes a grab — ${c.moveOverDecal}`);
 R.is(c.moveDragging === "grabbing", `and a closed hand while dragging it — ${c.moveDragging}`);
-R.is(c.moveArmed !== c.idle, "and move-on-model never looks like the idle view, so the mode is visible without hunting for the button");
 console.log("\n=== painting and a placing mode are mutually exclusive ===");
-R.is(r.paintClearsPlacing, "turning painting on leaves move-on-model");
-R.is(r.placingClearsPaint, "and arming move-on-model turns painting off");
+R.is(r.paintClearsPlacing, "turning painting on drops an armed click");
+R.is(r.placingClearsPaint, "and arming a click turns painting off");
 
 console.log("\n=== the loadout view (ROADMAP 4.38): front, a little below, fitted to the model ===");
 for (const f of r.frame || []) {

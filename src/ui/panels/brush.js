@@ -9,7 +9,7 @@
 function updateBrushAvailability(){
   const s = App.activeSlot, L = activeLayerObj();
   const cls = vehicleClass();
-  let firstEnabled = null, activeStillOk = false;
+  let firstEnabled = null, activeStillOk = false, activeHeld = false;
   for (const b of document.querySelectorAll("#brushModes [data-bm]")) {
     const need = b.dataset.need;
     const forCls = b.dataset.cls;
@@ -20,7 +20,7 @@ function updateBrushAvailability(){
     // `Tool.resolve` names every mode there is and refuses the rest in a sentence.
     const pt = Tool.MODES[b.dataset.bm];
     const r = pt ? Tool.resolve(pt.tool, pt.chan, pt.target) : { err: "There is no " + Tool.q(b.dataset.bm) + " tool." };
-    let why = "";
+    let why = "", byLayer = false;
     // What the SELECTED layer holds on the channel THIS tool writes — the question 4.28(e) makes
     // askable. Before it, a layer wrote one channel and any other tool was refused against that one
     // channel ("“Gloss” writes the Smoothness channel — this tool writes Colour"), which is the rule
@@ -44,31 +44,39 @@ function updateBrushAvailability(){
     else if (s && s.camoTile && mChan === "wear") why = "A camouflage tile has no wear mask — it carries the alpha of the camouflage it replaces";
     // "paintable" = the slot is created on the first stroke if the layer has none; only content
     // that cannot take a brush stroke disables the tool.
-    else if (need === "paintable" && L && isGroup(L))
+    else if (need === "paintable" && L && isGroup(L) && (byLayer = true))
       why = "“" + L.name + "” is a group — select a layer inside it, or add one";
-    else if (need === "paintable" && mine && mine.proj)
+    else if (need === "paintable" && mine && mine.proj && (byLayer = true))
       why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
-    else if (need === "paintable" && mine && mine.derived)
+    else if (need === "paintable" && mine && mine.derived && (byLayer = true))
       why = "“" + L.name + "”'s " + Tool.chanWord(mChan) + " is derived from its Look and is rebuilt whenever the decal moves — duplicate the layer (⧉) to paint on a copy";
-    else if (need === "paintable" && mine && mine.kind !== "paint")
+    else if (need === "paintable" && mine && mine.kind !== "paint" && (byLayer = true))
       why = "“" + L.name + "” holds " + LayerNode.wordFor(mine) + " on the " + Tool.chanWord(mChan) +
         " channel — add a paint layer, or convert that content in the layer's channel strip";
-    else if (need === "paint" && (!mine || mine.kind !== "paint" || mine.derived)) why = "Select a paint layer to erase from";
-    else if (need === "paint" && mine.proj) why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
-    else if (need === "layer" && (!L || isGroup(L) || !LayerNode.channelsOf(L).length)) why = "Select a paint, image or fill layer";
+    else if (need === "paint" && (!mine || mine.kind !== "paint" || mine.derived) && (byLayer = true)) why = "Select a paint layer to erase from";
+    else if (need === "paint" && mine.proj && (byLayer = true)) why = "Projected decals are rebuilt when they move — duplicate the layer (⧉) to paint on it";
+    else if (need === "layer" && (!L || isGroup(L) || !LayerNode.channelsOf(L).length) && (byLayer = true)) why = "Select a paint, image or fill layer";
     const off = !!why;
     b.disabled = off;
     b.dataset.why = off ? why : "";
     if (off) b.title = why;
     else if (b.dataset.tip) b.title = b.dataset.tip;
     if (!off) { if (!firstEnabled) firstEnabled = b; if (b.dataset.bm === App.brush.mode) activeStillOk = true; }
+    else if (byLayer && b.dataset.bm === App.brush.mode) activeHeld = true;
   }
   // Never leave the user on a mode that cannot paint — QUIETLY. The second argument skips
   // `selectLayerForBrush`, which can open a native `confirm` ("this group has no smoothness layer,
   // add one?"), and this function runs from every `refreshLayerList`. A modal dialog reached by
   // *drawing a panel* is a dialog nobody asked for; it also deadlocked two headless tests, which is
   // how it was found. Choosing a tool by hand still asks, because there the question is the point.
-  if (!activeStillOk && firstEnabled) applyBrushMode(firstEnabled.dataset.bm, true);
+  // …but only when the SLOT or the vehicle rules the tool out (no _n, no albedo, an aircraft's wear
+  // mask). When it is the selected LAYER that cannot take it — an image decal, a projected decal, a
+  // group — the tool stays in hand, off and saying why, and is live again the moment a paint layer
+  // is selected. Reported 2026-10-17: pasting an image selected its decal layer, Color was off on
+  // it, and the brush quietly became Smoothness (the first tool that only needs an _n) — the
+  // Smoothness chip lit up on the decal and the panel showed that tool's options, greyed. The jump
+  // only ever took away the tool the user had picked.
+  if (!activeStillOk && !activeHeld && firstEnabled) applyBrushMode(firstEnabled.dataset.bm, true);
   const cur = document.querySelector('#brushModes [data-bm="' + App.brush.mode + '"]');
   const hint = $("brushHint");
   if (cur && cur.disabled) { hint.style.display = ""; hint.textContent = cur.dataset.why; }

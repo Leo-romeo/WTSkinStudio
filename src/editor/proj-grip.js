@@ -45,12 +45,12 @@ const ProjGrip = {
 
   // ---- which decal is in hand ----
   // The active layer when it is a projection, with painting off (the brush owns the pointer then) and
-  // no other placing mode armed (that mode owns the click). ONE copy for both views: the viewport adds
+  // no click armed (that mode owns the click). ONE copy for both views: the viewport adds
   // only what is its own (`ProjHandles.target`: a model, the fly camera) and the sheet only what owns
   // ITS pointer (`Draw2D.projGeom`). The sheet had its own copy without the placing mode, and with
   // "Set centre…" armed it drew and took the handles the model had hidden (4.2's review, 2026-09-27).
   target(){
-    if (App.paint3d || (App.placing && App.placing !== "movproj")) return null;
+    if (App.paint3d || App.placing) return null;
     const L = activeLayerObj();
     return L && L.proj && L.proj.frame && L.proj.bmp ? L : null;
   },
@@ -76,6 +76,23 @@ const ProjGrip = {
   },
   // A plane point's angle about the centre, in degrees, in the r/u axes `P.rot` turns t1 away from.
   angle(F, q){ const v = q.clone().sub(F.p); return Math.atan2(v.dot(F.u), v.dot(F.r)) * 180 / Math.PI; },
+  // Whether surface point `q` is inside the beam: within the image's rectangle across the plane and
+  // the Depth's reach along it — for the decal, or for its mirrored copy when that is on. This is what
+  // "on the decal" means for a press in 3-D. Its texels alone are not: a sheet shares texels between
+  // places on the model (a UV island used twice), so the projector's pixels also show far from where
+  // it points, and a press there used to grab the decal and throw its centre across the vehicle
+  // (reported 2026-10-17 on the A-10C). And inside the frame they are not needed: a press on a part
+  // the image did not paint — a sheet not loaded, a gap in the image — is still a press on the decal.
+  reaches(P, q){
+    if (!P || !P.frame || !P.bmp || !q) return false;
+    const F = ProjGrip.frame(P), lim = projDepthLim(P, F.halfW, F.halfH), m = 1.02;
+    const inside = b => {
+      const v = q.clone().sub(b.p);
+      return Math.abs(v.dot(b.t1)) <= F.halfW * m && Math.abs(v.dot(b.t2)) <= F.halfH * m && Math.abs(v.dot(b.n)) <= lim;
+    };
+    const b = { p: F.p, n: F.n, t1: F.t1, t2: F.t2 };
+    return inside(b) || (!!P.sym2 && inside(mirrorBasis(b, false)));
+  },
 
   // ---- the gesture: begin, drag, end ----
   // `kind` is "scale" (a corner — `opt.corner` says which), "rot" (the knob) or "move" (the body, 2-D).
@@ -359,6 +376,90 @@ const ProjGrip = {
     cx -= Math.floor(cx / W) * W; cy -= Math.floor(cy / H) * H;
     return { F, c: { x: cx, y: cy }, J, Ji: [J[3] / dJ, -J[1] / dJ, -J[2] / dJ, J[0] / dJ] };
   },
+  // ---- one decal, two placements (2026-10-17) ----
+  // "Decal and projected image should not be two completely separate things": a decal switches
+  // between On the model and On the texture in place, keeping where it is, its size and its turn.
+  // Both directions are the plane↔sheet map at the centre, so they are exact on a flat panel and
+  // the tangent-plane estimate on a curved one — the same answer the sheet's handles already give.
+  //
+  // The turn (and mirror) nearest a 2×2 map [[a, b], [c, d]] whose columns are where an image's right
+  // and down axes go, y running down. Where the sheet stretches the surface unevenly the two axes
+  // disagree about the angle, and a flat decal can only turn and scale, so the closest such map is
+  // the answer — read from one axis alone it was 22° on a 30° plate (t100, 2026-10-17). A negative
+  // determinant is a mirror image: the fit is a reflection, and that is a flip.
+  similar(a, b, c, d){
+    const det = a * d - b * c, mirror = det < 0;
+    // turn: [[cos, −sin], [sin, cos]]; flipped (x negated): [[−cos, −sin], [−sin, cos]]
+    const rot = mirror ? Math.atan2(-(c + b) / 2, -(a - d) / 2) : Math.atan2((c - b) / 2, (a + d) / 2);
+    return { rot: rot * 180 / Math.PI, mirror, det };
+  },
+  // A projected decal as a flat one on `slot`. The flat decal draws image pixel (i, j) at
+  // R(rot)·(±s·i, s·j) on the sheet (the compositor's stamp; `decalAtUV` inverts it); the projector
+  // puts it at J·(m·i, m·j), m metres per pixel — 2k, `projHalfSize`'s k being per HALF pixel
+  // (halfW = k·width; a test measured the flat copy at a quarter of the area before that was read
+  // right, 2026-10-17). So J's columns, times m, ARE the flat decal's axes:
+  // the down axis gives the turn whatever the handedness, and a negative determinant is a flip.
+  flatOf(P, slot){
+    const SF = ProjGrip.sheetFrame(P, slot);
+    if (!SF) return null;
+    const { k } = projHalfSize(P), J = SF.J, det = J[0] * J[3] - J[1] * J[2];
+    const fit = ProjGrip.similar(J[0], J[1], J[2], J[3]);
+    return { x: SF.c.x / slot.composite.width, y: SF.c.y / slot.composite.height,
+             rot: Math.round(fit.rot * 10) / 10, flip: fit.mirror, scale: 2 * k * Math.sqrt(Math.abs(det)) };
+  },
+  // …and back: the projector that puts a flat decal on `slot` exactly where it is drawn — aimed
+  // straight down the surface normal under its centre, its axes the image's own axes carried from
+  // the sheet onto that triangle. The frame's r/u are the plane's "up" (world Y, or Z on a surface
+  // facing up or down), so the Rotate slider reads an angle against something stable rather than 0.
+  // Null when the centre is over the gutter between islands.
+  frameOfFlat(L, slot){
+    if (!L || !L.bmp || !slot || !slot.composite) return null;
+    const W = slot.composite.width, H = slot.composite.height;
+    const hit = ProjGrip.surfaceAt(slot, L.x * W, L.y * H, camera ? camera.position : null);
+    if (!hit) return null;
+    const flipV = $("optFlipV").checked, gd = hit.gd, o = hit.t * 9, u6 = hit.t * 6;
+    const V = [0, 1, 2].map(i => new THREE.Vector3(gd.position[o + i * 3], gd.position[o + i * 3 + 1], gd.position[o + i * 3 + 2]));
+    const S = [0, 1, 2].map(i => [gd.uv[u6 + i * 2] * W, (flipV ? gd.uv[u6 + i * 2 + 1] : 1 - gd.uv[u6 + i * 2 + 1]) * H]);
+    const e1 = V[1].clone().sub(V[0]), e2 = V[2].clone().sub(V[0]);
+    const d1 = [S[1][0] - S[0][0], S[1][1] - S[0][1]], d2 = [S[2][0] - S[0][0], S[2][1] - S[0][1]];
+    const dd = d1[0] * d2[1] - d2[0] * d1[1];
+    if (!(Math.abs(dd) > 1e-12)) return null;
+    const world = (x, y) => e1.clone().multiplyScalar((x * d2[1] - d2[0] * y) / dd).addScaledVector(e2, (d1[0] * y - x * d1[1]) / dd);
+    const n = e1.clone().cross(e2).normalize();
+    // outward: the side the vertex normals face, or failing those the camera's
+    let side = null;
+    if (gd.normal) side = [0, 1, 2].reduce((a, i) => a.addScaledVector(new THREE.Vector3(gd.normal[o + i * 3], gd.normal[o + i * 3 + 1], gd.normal[o + i * 3 + 2]), hit.w[i]), new THREE.Vector3());
+    if (!side || side.lengthSq() < 1e-12) side = camera.position.clone().sub(hit.point);
+    if (n.dot(side) < 0) n.negate();
+    const a = L.rot * Math.PI / 180, s = L.scale, fs = L.flip ? -1 : 1;
+    const WR = world(fs * s * Math.cos(a), fs * s * Math.sin(a)), WD = world(-s * Math.sin(a), s * Math.cos(a));
+    const flat = v => v.clone().addScaledVector(n, -v.dot(n));
+    if (!(flat(WR).lengthSq() > 1e-18 && flat(WD).lengthSq() > 1e-18)) return null;
+    let up = flat(new THREE.Vector3(0, 1, 0));
+    if (up.lengthSq() < .01) up = flat(new THREE.Vector3(0, 0, 1));
+    up.normalize();
+    const r = up.clone().cross(n);                               // r × u = n, as the camera's are
+    // The image's two axes in the plane's (r, −u) — "down" is −u — fitted to the projector's
+    // t1 = ±(r cos + u sin), t2 = r sin − u cos, which in (r, −u) is the rotation by −rot, mirrored
+    // across r when flipped. A sheet that mirrors the surface makes the fit a reflection: the flip.
+    const fit = ProjGrip.similar(WR.dot(r), WD.dot(r), -WR.dot(up), -WD.dot(up));
+    const flip = fit.mirror, rot = Math.round(-fit.rot * 10) / 10;
+    const k = Math.sqrt(Math.abs(fit.det));                       // metres per image pixel, area-true
+    const diag = App.modelSize ? Math.max(App.modelSize.x, App.modelSize.y, App.modelSize.z) : 10;
+    const scale = k / 2 * (L.srcW || L.bmp.width) / (diag * .12);        // projHalfSize's k is per half pixel
+    return { frame: { p: hit.point.toArray(), n: n.toArray(), r: r.toArray(), u: up.toArray() }, rot, flip, scale };
+  },
+  // The flat decal's spot on `slot` for a world point and the surface's facing there — how a
+  // mirrored projected copy becomes the flat decal's own mirrored copy (`L.sym`).
+  uvAt(slot, p, n){
+    const h = ProjGrip.triAt(slot, p, n);
+    if (!h) return null;
+    const flipV = $("optFlipV").checked, uv = h.gd.uv, u6 = h.t * 6;
+    let x = 0, y = 0;
+    for (let i = 0; i < 3; i++) { x += h.w[i] * uv[u6 + i * 2]; y += h.w[i] * (flipV ? uv[u6 + i * 2 + 1] : 1 - uv[u6 + i * 2 + 1]); }
+    return { x: x - Math.floor(x), y: y - Math.floor(y) };
+  },
+
   // plane offset (a, b) → sheet texel, and back
   toSheet(SF, a, b){ return { x: SF.c.x + SF.J[0] * a + SF.J[1] * b, y: SF.c.y + SF.J[2] * a + SF.J[3] * b }; },
   fromSheet(SF, x, y){

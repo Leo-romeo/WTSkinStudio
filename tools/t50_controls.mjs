@@ -258,14 +258,15 @@ const BODY = `async function(){
   });
 
   // ---- 3.14: .active must not be .primary ----
-  var mv = document.getElementById("btnProjMove");
-  var p3 = document.getElementById("btnProject3d");
+  // (The buttons this was measured on — Moving, Project onto model, Move to clicked spot — went on
+  // 2026-10-17 with the decal's own modes; any primary and any plain button carry the rule.)
+  var mv = document.getElementById("btnDecalEditor");
   setPlacing(false);
   out.primaryOnly = css(mv);
   mv.classList.add("active");
   out.primaryPlusActive = css(mv);
   mv.classList.remove("active");
-  var plain = document.getElementById("btnPlace3d");
+  var plain = document.getElementById("btnReproject");
   out.plainOnly = css(plain);
   plain.classList.add("active");
   out.plainPlusActive = css(plain);
@@ -274,26 +275,16 @@ const BODY = `async function(){
   var tab = document.querySelector(".tabs button.active");
   out.tab = { bg: getComputedStyle(tab).backgroundColor, colour: getComputedStyle(tab).color };
 
-  // ---- 3.14: the label tracks the mode, and G reaches the same handler ----
-  out.labels = {};
-  setPlacing("movproj");
-  out.labels.on = { text: mv.textContent, active: mv.classList.contains("active"), css: css(mv) };
-  setPlacing("proj");
-  out.labels.otherMode = { move: mv.textContent, moveActive: mv.classList.contains("active"),
-    projActive: p3.classList.contains("active") };
-  setPlacing(false);
-  out.labels.off = { text: mv.textContent, active: mv.classList.contains("active"), css: css(mv) };
+  // ---- one decal, two placements (2026-10-17): the switch says which one this decal has ----
+  var swOf = function(sec){ return [].map.call(document.querySelectorAll("#" + sec + " .placeSw"), function(b){
+    return { place: b.dataset.place, text: b.textContent, active: b.classList.contains("active"), css: css(b) }; }); };
+  out.sw = { proj: swOf("projSection"), flat: swOf("decalSection"),
+             old: ["btnProjMove", "btnProject3d", "btnPlace3d"].filter(function(id){ return !!document.getElementById(id); }) };
+  // G armed the Moving mode; a decal is dragged directly now, so G is free and says nothing
   var st = document.getElementById("status");
   st.textContent = "";
   window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyG", bubbles: true }));
   out.gWithNoDecal = st.textContent;
-  // ... and G must be inert while a field has focus, like every other bare letter here
-  var field = document.getElementById("skinName");
-  field.focus();
-  st.textContent = "";
-  field.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyG", bubbles: true }));
-  out.gWhileTyping = st.textContent;
-  field.blur();
   out.gInHints = Object.keys(KEY_HINTS).indexOf("KeyG") >= 0;
   out.gInKeymap = document.getElementById("helpOverlay").innerHTML.indexOf("<kbd>G</kbd>") >= 0;
 
@@ -716,17 +707,11 @@ const BODY = `async function(){
   vmBtn("split").click(); await frame(); out.vm.back = vmW(); out.vm.ratio = Layout.split();
   Layout.setSplit(0.5); vmBtn("split").click(); await frame();
 
-  // ---- 4.32: the two ARMED placing buttons say what they are waiting for ----
-  out.arm = { placeOff: document.getElementById("btnPlace3d").textContent,
-              projOff: document.getElementById("btnProject3d").textContent };
-  setPlacing("uv");
-  out.arm.placeOn = document.getElementById("btnPlace3d").textContent;
-  out.arm.projWhileUv = document.getElementById("btnProject3d").textContent;
-  setPlacing("proj");
-  out.arm.projOn = document.getElementById("btnProject3d").textContent;
-  out.arm.placeBack = document.getElementById("btnPlace3d").textContent;
-  setPlacing(false);
-  out.arm.offAgain = document.getElementById("btnPlace3d").textContent + " | " + document.getElementById("btnProject3d").textContent;
+  // ---- 4.32: an ARMED click says what it is waiting for — the radial centre is the one left ----
+  var rc = document.getElementById("btnRadialCentre");
+  out.arm = { off: rc.textContent };
+  setPlacing("radial"); out.arm.on = rc.textContent; out.arm.active = rc.classList.contains("active");
+  setPlacing(false); out.arm.back = rc.textContent;
 
   // ---- 4.33: one decal editor, however many pastes arrive ----
   var modals = function(){ return document.querySelectorAll("#modalHost .modal").length; };
@@ -1190,19 +1175,14 @@ R.is(o.primaryPlusActive === o.plainPlusActive, "with the same result either way
 const activeBg = o.primaryPlusActive.split(" / ")[0], activeFg = o.primaryPlusActive.split(" / ")[2];
 R.is(o.tab.bg !== activeBg && o.tab.colour !== activeFg,
   `the sidebar tabs keep their own look — ${o.tab.bg} on ${o.tab.colour}, not the ${activeBg} chip`);
-R.is(o.labels.off.text === "Moving: off" && !o.labels.off.active, `the button says its state — "${o.labels.off.text}"`);
-R.is(o.labels.on.text === "Moving: on" && o.labels.on.active, `and says it in the other state too — "${o.labels.on.text}"`);
-R.is(o.labels.on.css !== o.labels.off.css, "which is backed by the colour, not only by the text");
-R.is(o.labels.otherMode.move === "Moving: off" && !o.labels.otherMode.moveActive && o.labels.otherMode.projActive,
-  "arming a different placing mode turns it off, and one mode is on at a time");
-// The property is that G ANSWERS, not that it answers in one particular sentence — the wording
-// split in three on 2026-08-26, because "select a projected decal layer first" is a poor reply
-// to someone holding a decal that simply has not been projected yet.
-R.is(/decal/i.test(o.gWithNoDecal) && o.gWithNoDecal.length > 20,
-  `G answers like the button rather than doing nothing — "${o.gWithNoDecal}"`);
-R.is(o.gWhileTyping === "", "and G types a g into a text field instead of firing");
-R.is(o.gInHints, "G is in the hold-a-key hints");
-R.is(o.gInKeymap, "and in the help overlay's keymap");
+const SW = o.sw || {}, swA = l => (l || []).filter(b => b.active).map(b => b.place).join(",");
+console.log(`   projected: ${JSON.stringify((SW.proj || []).map(b => b.text + (b.active ? "*" : "")))}  ·  flat: ${JSON.stringify((SW.flat || []).map(b => b.text + (b.active ? "*" : "")))}`);
+R.is(swA(SW.proj) === "model" && swA(SW.flat) === "sheet" && (SW.proj || []).length === 2 && (SW.flat || []).length === 2,
+  "a decal's panel has one placement switch, On the model / On the texture, lit on the placement it has — the projected panel on the model, the flat one on the texture");
+R.is(SW.proj && SW.proj[0].css !== SW.proj[1].css, "and the lit one looks different, not only reads different");
+R.is(SW.old && SW.old.length === 0, `and the three mode buttons it replaces are gone (${JSON.stringify(SW.old)})`);
+R.is(o.gWithNoDecal === "" && !o.gInHints && !o.gInKeymap,
+  `G armed the Moving mode, which is gone: it is out of the hints and the keymap, and says nothing ("${o.gWithNoDecal}")`);
 
 console.log("\n=== 3.10 the Vehicle name is a control only when it is one ===");
 R.is(o.vehAtBoot.input && !o.vehAtBoot.span && !o.vehAtBoot.pencil,
@@ -1420,15 +1400,9 @@ R.is(VM.ratio === 0.6,
 
 console.log("\n=== the armed placing buttons say what they are waiting for (4.32) ===");
 const AR = o.arm;
-console.log(`   idle "${AR.placeOff}" / "${AR.projOff}"  ·  uv "${AR.placeOn}"  ·  proj "${AR.projOn}"`);
-R.is(AR.placeOn !== AR.placeOff && /click/i.test(AR.placeOn),
-  `arming UV placement changes its own button ("${AR.placeOff}" -> "${AR.placeOn}") — both of these arm a click on the MODEL, and "clicking button does not seem to do anything by itself" is exactly what a label that never moves says`);
-R.is(AR.projOn !== AR.projOff && /click/i.test(AR.projOn),
-  `and so does arming the projection ("${AR.projOff}" -> "${AR.projOn}")`);
-R.is(AR.projWhileUv === AR.projOff && AR.placeBack === AR.placeOff,
-  "only the armed one changes — the other says what it would do, not what the first one is waiting for");
-R.is(AR.offAgain === AR.placeOff + " | " + AR.projOff,
-  `and leaving the mode puts both labels back (${AR.offAgain})`);
+console.log(`   "${AR.off}" -> "${AR.on}" -> "${AR.back}"`);
+R.is(AR.on !== AR.off && /click/i.test(AR.on) && AR.active && AR.back === AR.off,
+  "the one armed click left, the radial centre, says what it is waiting for while armed and puts its label back after");
 
 console.log("\n=== one decal editor, however many pastes arrive (4.33) ===");
 const DE = o.dedit;
