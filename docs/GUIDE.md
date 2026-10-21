@@ -786,6 +786,18 @@ keep on your own machine. The mark then stays lit in amber for the rest of the s
 experiment turned on to test one thing cannot quietly become the state a day of real work was done in.
 Reload the page and every gate is closed again.
 
+**File names.** War Thunder finds a skin by the vehicle's **unit name**, which is usually not the
+3-D model's name. The app reads the game's own unit list and writes the right `.blk` file for you:
+
+| model | file the game looks for |
+| --- | --- |
+| `f_4e` | `f-4e.blk` |
+| `m1a2_sep3` | `us_m1a2_sep3_abrams.blk` *and* `uk_m1a2_sep3_abrams.blk` |
+| `leopard_2a4` | `germ_leopard_2a4.blk`, `it_leopard_2a4.blk`, … |
+
+Where several vehicles share one model (every F-16A, both Leopard 2A4s, all six Fletchers), they
+are listed under **Skin & export ▸ Applies to**, with the confident matches already ticked.
+
 ## Projects
 
 `.wtproj` embeds the model, all source textures, every edit and the font files your text uses — one file restores the whole session on any machine. It is saved wherever your browser saves downloads; reopen it with **Add files…** or by dragging it onto the window. Size runs ~15–35 MB for a jet (deflate-compressed). Older v2 projects still load (they ask for the obj/dds files).
