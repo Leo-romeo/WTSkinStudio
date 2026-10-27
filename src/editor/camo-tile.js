@@ -24,6 +24,7 @@ const CamoTile = {
   // The player's two hangar sliders, previewed. NOT exported: the player owns them, per vehicle.
   view: { scale: 1, rot: 0 },
   _stems: null,                     // { key, list } — stems() is asked once per material build
+  _scale: null,                     // { parts, info } — scaleInfo()'s last measurement
   on(){ return camoBaseMode() === "tile"; },
   slot(){ return App.slots.get(CamoTile.ID) || null; },
   is(s){ return !!(s && s.camoTile); },
@@ -71,10 +72,13 @@ const CamoTile = {
     return list;
   },
   pins(stem){ return CamoTile.on() && !!CamoTile.slot() && CamoTile.stems().includes(stem); },
-  // The exported file: the albedo's format decides the extension, exactly as `encodeAllTextures` will.
+  // The exported file: the albedo's format decides the extension, exactly as `encodeAllTextures` will
+  // — through the same `ExportCollect.formatFor`, so a tile with level content under the TGA preset
+  // is the .dds it is written as, and the pins name that (ROADMAP 4.58; review of (a)).
   fileName(){
-    const s = CamoTile.slot(), o = s ? expOpt(s, "c") : null;
-    const fmt = (o && o.fmt) || exportFormats().c;
+    const s = CamoTile.slot();
+    const lv = s && s.composite ? ExportCollect.levels(null, s, "tile", s.composite.width, s.composite.height) : null;
+    const fmt = s ? ExportCollect.formatFor({ slot: s, kind: "c", levelNote: lv && lv.note }, exportFormats()) : exportFormats().c;
     return CamoTile.ID + (fmt === "tga" ? ".tga" : ".dds");
   },
 
@@ -117,10 +121,12 @@ const CamoTile = {
     // Square at a size the tile may have: nothing else is ever written, and a size that is not one
     // is not read back as one.
     const N = CamoTile.SIZES.includes(+rec.size) ? +rec.size : CamoTile.SIZE, s = CamoTile.ensure(N);
-    if (rec.base) ctx2d(s.baseC).drawImage(await ctx.img(rec.base), 0, 0, N, N);
+    const base = rec.base ? await ctx.img(rec.base) : null;      // null when the file lost it (1.21 (4))
+    if (base) ctx2d(s.baseC).drawImage(base, 0, 0, N, N);
     const a = Math.round(+rec.alpha);
     if (a >= 0 && a <= 255) s.camoAlpha = a;
     s.layers = [];
+    ctx.blank = () => mkCanvas(N, N);                             // a painted layer whose sheet the file lost
     for (const lm of rec.layers || []) s.layers.push(await ProjNode.load(lm, ctx));
     if (rec.exp) Object.assign(expOpt(s, "c"), { size: +rec.exp.size || 0, fmt: rec.exp.fmt || "", off: !!rec.exp.off });
     const v = rec.view || {};
@@ -203,6 +209,194 @@ const CamoTile = {
     return { a: 255, from: "none" };
   },
 
+  // ---- the calibration grid, and the repeat length it is held to (ROADMAP 4.50 (6)) ----
+  // The preview's one number that came from the model's data and not from a shader is "one repeat per
+  // unit of tc1". A tile that says which cell is which turns the hangar into the measuring stick: the
+  // same hull, the same grid, and the owner reads off which cells land on the nose, the rear and the
+  // turret in the game and in the app.
+  //   * a mid-grey ground, a 4 × 4 grid of cells numbered 1–16 from the top left, each digit a
+  //     quarter of a cell high (a whole-pixel 5 × 7 font, drawn with fillRect: canvas TEXT is never
+  //     the same pixels twice across machines — wt-canvas — and this has to be hashable);
+  //   * a red frame two texels wide on the tile's own edge, so one repeat is one red square;
+  //   * a yellow arrow in cell 1 pointing to +v. The game's v runs down a DDS's rows (the extractor
+  //     flips it for the viewport, `mvReadUV`), so +v is DOWN the picture here.
+  // No antialiasing anywhere: every edge is a whole texel, and the bytes are a function of N alone.
+  GLYPHS: ["01110 10001 10011 10101 11001 10001 01110", "00100 01100 00100 00100 00100 00100 01110",
+    "01110 10001 00001 00010 00100 01000 11111", "11110 00001 00001 01110 00001 00001 11110",
+    "00010 00110 01010 10010 11111 00010 00010", "11111 10000 11110 00001 00001 10001 01110",
+    "00110 01000 10000 11110 10001 10001 01110", "11111 00001 00010 00100 01000 01000 01000",
+    "01110 10001 10001 01110 10001 10001 01110", "01110 10001 10001 01111 00001 00010 01100"],
+  calibration(N){
+    const c = mkCanvas(N, N), g = ctx2d(c), cell = N / 4, line = Math.max(1, Math.round(N / 512));
+    g.fillStyle = "#808080"; g.fillRect(0, 0, N, N);
+    g.fillStyle = "#666666";                                    // the cell borders, so a cell reads as a cell
+    for (let i = 1; i < 4; i++) { const p = i * cell - (line >> 1); g.fillRect(p, 0, line, N); g.fillRect(0, p, N, line); }
+    // The digits: a whole number of texels per font pixel, as large as a quarter of a cell allows.
+    const s = Math.max(1, Math.floor(cell / 4 / 7)), pad = Math.max(4, Math.round(cell / 12));
+    g.fillStyle = "#ffffff";
+    for (let k = 0; k < 16; k++) {
+      let x = (k % 4) * cell + pad;
+      const y = Math.floor(k / 4) * cell + pad;
+      for (const ch of String(k + 1)) {
+        CamoTile.GLYPHS[+ch].split(" ").forEach((row, r) => {
+          for (let col = 0; col < 5; col++) if (row[col] === "1") g.fillRect(x + col * s, y + r * s, s, s);
+        });
+        x += 6 * s;
+      }
+    }
+    // The arrow in cell 1: a shaft, then a head that narrows a row at a time to its tip, which is the
+    // lowest row — toward +v.
+    const cx = Math.round(cell / 2), top = Math.round(cell * .4), tip = Math.round(cell * .9), headH = Math.round(cell * .22);
+    const hw = Math.max(1, Math.round(cell / 24)), hh = 3 * hw;
+    g.fillStyle = "#ffd400";
+    g.fillRect(cx - hw, top, 2 * hw + 1, tip - headH - top + 1);
+    for (let r = 0; r < headH; r++) { const w = Math.round(hh * (headH - r) / headH); g.fillRect(cx - w, tip - headH + 1 + r, 2 * w + 1, 1); }
+    g.fillStyle = "#ff0000";                                   // the frame last: two texels, on the tile's own edge
+    g.fillRect(0, 0, N, 2); g.fillRect(0, N - 2, N, 2); g.fillRect(0, 2, 2, N - 4); g.fillRect(N - 2, 2, 2, N - 4);
+    return c;
+  },
+  // ---- the grid as a toggle (ROADMAP 3.45) ----
+  // "There is no way to turn it off": the button only ever added the grid, one Undo was the only way
+  // back, and a few edits later the pattern underneath was out of reach. So the base the tile had is
+  // kept when the grid goes in, and the same button puts it back — as an edit of its own, at any
+  // later point. Kept in memory only, not in the .wtproj (that is a format change, §0, for a
+  // tool used for a minute); after a reload the button still sees the grid and puts the tile's own
+  // start back instead (`startSheet`), and says so. `slot` ties the copy to the tile it came from,
+  // so a project loaded or a tile made anew cannot be handed another tile's pattern.
+  calBase: null,                    // { slot, canvas }
+  // Whether the tile's base IS the grid, read off its pixels — the one answer that holds through
+  // undo, redo and a reload alike, with no flag to keep in step. Six lines of texels, not the sheet:
+  // the frame's first row and column and its last, a row through the top cells' numbers and a
+  // column through cell 1's arrow, compared byte for byte with the same lines of `calibration(N)`
+  // (kept per N). The whole sheet was the first version, and its review measured what that costs: two
+  // 64 MB reads and a 67-million-step loop at 4096², on every list refresh while the grid was in.
+  // Six lines are 6·N texels, and paint put on the base over the grid between them still reads as
+  // the grid — which Remove grid then takes away with it, as it would have to anyway.
+  calRef: null,                     // { N, lines }: the grid's own six lines at that size
+  calLines(c){
+    const N = c.width, g = ctx2d(c), cell = N / 4;
+    const pad = Math.max(4, Math.round(cell / 12)), s = Math.max(1, Math.floor(cell / 4 / 7));
+    const at = [[0, 0, N, 1], [0, N - 1, N, 1], [0, 0, 1, N], [N - 1, 0, 1, N],
+      [0, Math.min(N - 1, pad + 2 * s), N, 1], [Math.min(N - 1, Math.round(cell / 2)), 0, 1, N]];
+    return at.map(r => g.getImageData(r[0], r[1], r[2], r[3]).data);
+  },
+  calIn(){
+    const s = CamoTile.slot(), c = s && s.baseC;
+    if (!c || c.width !== c.height || c.width < 8) return false;
+    const N = c.width;
+    if (!CamoTile.calRef || CamoTile.calRef.N !== N) CamoTile.calRef = { N, lines: CamoTile.calLines(CamoTile.calibration(N)) };
+    const want = CamoTile.calRef.lines, got = CamoTile.calLines(c);
+    for (let k = 0; k < want.length; k++) for (let i = 0; i < want[k].length; i++) if (want[k][i] !== got[k][i]) return false;
+    return true;
+  },
+  // The button's two halves. Both go through ReplaceTex.byUser, as any picture put into the base
+  // does, so each is one undo step and neither touches the paint layers over the base.
+  calPut(){
+    const s = CamoTile.ensure(), N = s.baseC.width;
+    const keep = mkCanvas(N, N);
+    ctx2d(keep).drawImage(s.baseC, 0, 0);
+    // Not over a copy already kept for this tile while its base still wears the frame's red: that is
+    // a grid this check no longer recognises (painted on, say), and the copy is the only way back.
+    const red = ctx2d(s.baseC).getImageData(0, 0, 1, 1).data;
+    if (!(CamoTile.calBase && CamoTile.calBase.slot === s && red[0] === 255 && red[1] === 0 && red[2] === 0))
+      CamoTile.calBase = { slot: s, canvas: keep };
+    CamoTile.calApply(s, CamoTile.calibration(N), "the calibration grid");
+    return s;
+  },
+  // Says what it put back: "kept", or for a base not kept (a reload) the tile's start — "camo" when
+  // there is a camouflage sheet to start from, "grey" when there is none (an .obj import), which the
+  // status line has to tell apart from the grid's own grey.
+  calTake(){
+    const s = CamoTile.slot(), N = s.baseC.width, kept = CamoTile.calBase && CamoTile.calBase.slot === s;
+    // A tile resized since the grid went in takes the kept base at its new size, as a resize does.
+    const k = kept && CamoTile.calBase.canvas;
+    const back = !kept ? CamoTile.startSheet(N) : k.width === N ? k : CamoTile.fit(k, N);
+    CamoTile.calApply(s, back, kept ? "the base from before the grid" : "the tile's start (the base from before the grid was not kept across a reload)");
+    const stem = CamoTile.stems()[0];
+    return kept ? "kept" : stem && App.paintTex.get(stem) ? "camo" : "grey";
+  },
+  calApply(s, canvas, name){
+    const N = s.baseC.width;
+    ReplaceTex.byUser(s, { width: N, height: N, mips: [{ w: N, h: N, rgba: ctx2d(canvas).getImageData(0, 0, N, N).data }] }, false, name);
+  },
+  // How long one repeat of the camouflage is on a model, at scale 1, from its own tc1 against its own
+  // positions: per triangle, the square root of (UV area ÷ surface area) is UV per metre, and one
+  // repeat is its reciprocal. The figure is the AREA-weighted median — a planar or box projection puts
+  // every face squarely to its axis at exactly one density, so the median is that density and the
+  // oblique faces and the odd small part cannot move it (`tools/camo_sweep.mjs --tc1`, which measured
+  // it over the roster and is this function's oracle). A histogram on a log scale rather than a sort:
+  // a tank's camouflaged surface is a third of a million triangles, and this runs on the UI thread;
+  // 4096 bins over 1e-3–1e3 UV/m is 0.17 % a bin. `parts` is [{pos, uv}], three floats and two a
+  // vertex, three vertices a triangle. `length` is the longer horizontal extent (Y is up); `fit` is
+  // how many repeats that is. Null when there is no triangle to measure.
+  measure(parts){
+    const NB = 4096, LO = Math.log(1e-3), K = NB / (Math.log(1e3) - LO), hist = new Float64Array(NB);
+    let area = 0, tris = 0, xlo = Infinity, xhi = -Infinity, zlo = Infinity, zhi = -Infinity;
+    for (const { pos, uv } of parts) {
+      for (let v = 0; v + 2 < pos.length / 3; v += 3) {
+        const p = v * 3, t = v * 2;
+        const e1x = pos[p+3] - pos[p], e1y = pos[p+4] - pos[p+1], e1z = pos[p+5] - pos[p+2];
+        const e2x = pos[p+6] - pos[p], e2y = pos[p+7] - pos[p+1], e2z = pos[p+8] - pos[p+2];
+        const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+        const aw = Math.sqrt(cx * cx + cy * cy + cz * cz) / 2;
+        const au = Math.abs((uv[t+2] - uv[t]) * (uv[t+5] - uv[t+1]) - (uv[t+3] - uv[t+1]) * (uv[t+4] - uv[t])) / 2;
+        if (!(aw >= 1e-6) || au !== au) continue;               // a collapsed triangle has no surface; NaN is no tc1
+        const d = Math.sqrt(au / aw);
+        hist[d > 1e-3 ? Math.min(NB - 1, Math.floor((Math.log(d) - LO) * K)) : 0] += aw;
+        area += aw; tris++;
+        for (let k = 0; k < 9; k += 3) {
+          xlo = Math.min(xlo, pos[p+k]); xhi = Math.max(xhi, pos[p+k]);
+          zlo = Math.min(zlo, pos[p+k+2]); zhi = Math.max(zhi, pos[p+k+2]);
+        }
+      }
+    }
+    if (!tris) return null;
+    let acc = 0, bin = 0;
+    for (; bin < NB - 1; bin++) { acc += hist[bin]; if (acc >= area / 2) break; }
+    const dens = Math.exp(LO + (bin + .5) / K), repeat = 1 / dens, length = Math.max(xhi - xlo, zhi - zlo);
+    return { dens, repeat, length, fit: length / repeat, area, tris };
+  },
+  // The tile panel's scale line: how long one repeat is on THIS model at scale 1, and how many fit along
+  // the hull — the number the Calibration grid's cells are held to in the hangar. Text only; the panel
+  // puts it on the page. At another preview scale the repeat is that much longer, said after it.
+  // The same, as the one line the tile panel shows; `readout` is its tooltip (ROADMAP 3.44).
+  readoutLine(){
+    const i = CamoTile.scaleInfo(), m = x => x.toFixed(1) + " m", sc = CamoTile.view.scale;
+    if (!i) return "This model has no camouflaged part with a camouflage UV (tc1).";
+    return "One repeat " + m(i.repeat) + " · hull " + m(i.length) + " · " + i.fit.toFixed(1) + " repeats fit" +
+      (Math.abs(sc - 1) > .005 ? " · " + m(i.repeat * sc) + " at " + Math.round(sc * 100) + " %" : "");
+  },
+  readout(){
+    const i = CamoTile.scaleInfo(), m = x => x.toFixed(1) + " m", sc = CamoTile.view.scale;
+    if (!i) return "The loaded model has no camouflaged part with a camouflage UV (tc1), so there is no repeat length to give — an .obj from outside this app has none, and the preview then wraps the tile through the ordinary UV.";
+    return "At scale 1 one repeat is " + m(i.repeat) + " long, measured from this model's own camouflage UV; the hull is " + m(i.length) +
+      " long, so " + i.fit.toFixed(1) + " repeats fit along it." +
+      (Math.abs(sc - 1) > .005 ? " At the preview's " + Math.round(sc * 100) + " % one repeat is " + m(i.repeat * sc) + "." : "");
+  },
+  // The model's camouflaged parts as `measure` takes them: what the viewport lays the camouflage on
+  // through a tc1 — a material with a camouflage stem, as materials.js's `paintTintFor` asks — less an
+  // effect card and bone-driven cloth (neither is hull, and a flame sits metres behind it). Measured on
+  // 2026-10-22 without the stem rule, the T-34-1941 carried 11 000 more triangles than its camouflaged
+  // materials hold, which is the tracks and fittings drawn from the same vertex format.
+  hullParts(){
+    const out = [];
+    for (const mesh of App.meshes.values()) {
+      const u = mesh.userData || {}, pa = mesh.geometry && mesh.geometry.attributes.position;
+      if (!u.camoUv0 || !pa || u.effect || u.unposed || mesh.visible === false || !App.matPaint.get(u.mat)) continue;
+      out.push({ pos: pa.array, uv: u.camoUv0 });
+    }
+    return out;
+  },
+  // Asked on every panel redraw, so it answers from the last measurement while the same arrays are
+  // there: 330 000 triangles is tens of milliseconds, and a slider move is not allowed that.
+  scaleInfo(){
+    const parts = CamoTile.hullParts(), was = CamoTile._scale;
+    if (was && was.parts.length === parts.length && parts.every((p, i) => p.pos === was.parts[i].pos && p.uv === was.parts[i].uv)) return was.info;
+    const info = CamoTile.measure(parts);
+    CamoTile._scale = { parts, info };
+    return info;
+  },
+
   // ---- a tile has no edges ----
   // Every copy of a disc of radius r at (x, y) that touches a W×H sheet which repeats — the dab
   // itself when it is well inside, and its twins across each edge it crosses, so a stroke over the
@@ -263,6 +457,6 @@ const CamoTile = {
   // the preview's scale and rotation, which describe how THIS tile was being looked at.
   reset(){
     CamoTile.view.scale = 1; CamoTile.view.rot = 0;
-    CamoTile._stems = null;
+    CamoTile._stems = null; CamoTile._scale = null;
   },
 };

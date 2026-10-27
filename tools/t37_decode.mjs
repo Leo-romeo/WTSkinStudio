@@ -7,7 +7,7 @@
 //
 // Three things here are specific to decode and are the reason this test exists at all:
 //
-//   * parseDDS returns a mip chain whose levels >= 1 are GETTERS. Structured clone invokes
+//   * DDS.parseDDS returns a mip chain whose levels >= 1 are GETTERS. Structured clone invokes
 //     getters, so returning that object from a worker would force the entire chain eagerly and
 //     undo the v0.16 win. The worker returns level 0 plus the header, and the buffer comes back
 //     with it so the main thread can rebuild the lazy levels; this asserts level 0 is a plain
@@ -140,22 +140,22 @@ const BODY = `async function(){
     return -1;
   };
   var refDecode = function(fmt, top, w, h){
-    if (fmt === "BC7") return decodeBC7(top, w, h);
-    if (fmt === "ATI1") return decodeBC4Tex(top, w, h);
-    if (fmt === "ATI2" || fmt === "BC5U") return decodeBCn(top, w, h, "BC5");
-    return decodeBCn(top, w, h, fmt);
+    if (fmt === "BC7") return BCnDec.decodeBC7(top, w, h);
+    if (fmt === "ATI1") return BCnDec.decodeBC4Tex(top, w, h);
+    if (fmt === "ATI2" || fmt === "BC5U") return BCnDec.decodeBCn(top, w, h, "BC5");
+    return BCnDec.decodeBCn(top, w, h, fmt);
   };
 
   var pool = decodePool();
   out.mode = await pool.warm();
   out.size = pool.size;
-  out.oodleAvail = oodleAvailable();
-  out.zstdAvail = zstdAvailable();
+  out.oodleAvail = Oodle.oodleAvailable();
+  out.zstdAvail = Zstd.zstdAvailable();
 
-  // ---- 1. parseDDSAsync vs the page's own parseDDS ----
+  // ---- 1. parseDDSAsync vs the page's own DDS.parseDDS ----
   var oneDDS = async function(f){
     var src = un(f.b64);
-    var ref = parseDDS(src.slice().buffer);
+    var ref = DDS.parseDDS(src.slice().buffer);
     var send = src.slice().buffer;
     var got = await parseDDSAsync(send);
     // capture the property shapes BEFORE reading any level — reading a lazy one replaces it
@@ -182,7 +182,7 @@ const BODY = `async function(){
   var oneGame = async function(g){
     var top = un(g.top);
     var refRgba = refDecode(g.fmt, top, g.w, g.h);
-    var refDDS = writeBCnDDS(g.fmt, g.w, g.h, top);
+    var refDDS = DDS.writeBCnDDS(g.fmt, g.w, g.h, top);
     var send = un(g.body).slice().buffer;
     var r = await pool.call("gameTexture", { body: send, comp: g.comp, memSz: g.memSz,
       packedSz: g.packedSz, compName: g.compName, fmt: g.fmt, w: g.w, h: g.h,
@@ -229,7 +229,7 @@ const BODY = `async function(){
 }`;
 
 const run = await evalInPage({
-  browser, expr: pageExpr(BODY, 400), timeoutMs: 120000, keep: argv.includes("--keep"),
+  browser, expr: pageExpr(BODY), timeoutMs: 120000, keep: argv.includes("--keep"),
   inject: "<script>window.__T = " + JSON.stringify(T).replace(/</g, "\\u003c") + ";</script>\n",
 });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }

@@ -62,15 +62,17 @@ function buildExportPlan(items, opts){
     // both the file and its set_tex/replace_tex entry together.
     if (it.off) continue;
     const o = it.slot ? expOpt(it.slot, it.kind) : null;
-    const fmt = it.fmtOverride || (o && o.fmt) || (it.kind === "c" ? fmts.c : fmts.n);
+    const fmt = ExportCollect.formatFor(it, fmts);
+    // A texture with level content carries its chain whatever the tick says (ROADMAP 4.58).
+    const lv = it.levels ? it.levels.note : it.levelNote || null;
     // the resolution override is applied by collectExports() only on the real path, so the panel
     // has to apply it here or it would validate a size that will never be written
     const w = o && o.size && o.size < it.w ? o.size : it.w;
     const h = w === it.w ? it.h : Math.max(1, Math.round(it.h * w / it.w));
     const fileName = it.fileName || (it.fileNameBase + (fmt === "tga" ? ".tga" : ".dds"));
-    plan.items.push({ fileName, fromStem: it.fromStem, kind: it.kind, w, h, camoTile: !!it.camoTile,
-      role: it.slot ? slotRole(it.slot) : "exterior",
-      bytes: byName.has(fileName) ? byName.get(fileName) : estimateBytes(w, h, fmt, mips) });
+    plan.items.push({ fileName, fmt, fromStem: it.fromStem, kind: it.kind, w, h, camoTile: !!it.camoTile, calGrid: !!it.calGrid,
+      role: it.slot ? slotRole(it.slot) : "exterior", levels: lv,
+      bytes: byName.has(fileName) ? byName.get(fileName) : estimateBytes(w, h, fmt, mips || !!lv) });
   }
   // A tile's pins name a file that is already one of the items, so its bytes are counted there once.
   for (const p of (opts.pins || (mode === "set_tex" ? camoPinPlan() : [])))

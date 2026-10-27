@@ -53,6 +53,13 @@ const Clone = {
   begin(t, slot, chan){
     const pick = Clone.source(slot);
     if (!pick) return null;
+    const cl = Clone.copy(t, slot, chan), lx = cl.lx, ly = cl.ly;
+    return Object.assign(cl, { pick, src: { x: pick.x * lx, y: pick.y * ly }, off: pick.off.map(o => o ? { x: o.x * lx, y: o.y * ly } : null) });
+  },
+  // The stroke's lazily copied sheet on its own, with no source: what the Clone copies from, and
+  // what the Retouch brush (ROADMAP 4.50 (11)) reads under itself, for the same reason — a stroke
+  // that read the live composite would read its own output.
+  copy(t, slot, chan){
     flushComposites();
     const live = chan === "color" ? slot.composite : chanOut(slot, chan);
     // Unreachable past `paintTarget`, which has already found this channel's base; said loudly
@@ -64,10 +71,100 @@ const Clone = {
     const g = ctx2d(sheet);
     g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; g.filter = "none";
     const lx = W / slot.composite.width, ly = H / slot.composite.height;   // composite px -> layer px
-    return { live, sheet, kx: live.width / W, ky: live.height / H, lx, ly, copied: new Set(), pick,
-      src: { x: pick.x * lx, y: pick.y * ly },
-      off: pick.off.map(o => o ? { x: o.x * lx, y: o.y * ly } : null),
+    return { live, sheet, kx: live.width / W, ky: live.height / H, lx, ly, copied: new Set(),
       wrap: CamoTile.is(slot) };                      // a camouflage tile has no outside to read (`read`)
+  },
+  // ---- the Retouch brush (ROADMAP 4.50 (11)) ----
+  // Blur, sharpen, smudge, dodge or burn: the stroke's copy of the sheet, its settings taken once
+  // (`Effect.retouch.of`), and what each kind needs on top. It rides in `stroke.clone` because
+  // everything the stroke path does for the Clone — whole-texel dabs, the tip's shape, a dab per
+  // tile copy — is what it needs too; `stamp` hands it to `retouchStamp`.
+  //
+  // **Blur, sharpen, dodge and burn are a PROCESSED COPY, made a tile at a time.** Their result at a
+  // texel depends only on the sheet as the stroke began, never on where a dab is, so each 256² tile
+  // of it is made once per stroke, the first time a dab reaches it — blur and sharpen by the effect
+  // pass (`Composite.spaceGL`, on the GPU, over the tile and the margin its radius reads), dodge and
+  // burn by `Effect.retouch.tone` — and a dab is a draw from that copy. The first version blurred each
+  // dab's own patch on the CPU: measured by its review under Node at 37 ms a dab for a 200-texel brush
+  // at 50 %, 386 ms for a 400-texel one at 100 %, with every texel blurred again by each of the ~7
+  // dabs over it. At the sheet's edge the margin is cut off, so the pass clamps there as the blur
+  // effect does; on a camouflage tile, which repeats, the whole sheet is made at once, wrapped.
+  // Pooled like the Clone's copy: one full-size canvas, kept.
+  retouch(t, slot, b){
+    const cl = Clone.copy(t, slot, "color"), W = cl.sheet.width, H = cl.sheet.height;
+    let proc = Clone._proc;
+    if (!proc || proc.width !== W || proc.height !== H) proc = Clone._proc = mkCanvas(W, H);
+    return Object.assign(cl, { rt: Effect.retouch.of(b), proc, made: new Set(), carry: [], last: [] });
+  },
+  // Make the processed copy's tiles under a rectangle, once each.
+  procEnsure(cl, x, y, w, h){
+    const T = Clone.TILE, W = cl.sheet.width, H = cl.sheet.height;
+    if (cl.wrap) { if (!cl.made.size) { cl.made.add("all"); Clone.procRect(cl, 0, 0, W, H); } return; }
+    const t0x = Math.max(0, Math.floor(x / T)), t1x = Math.min(Math.floor((x + w) / T), Math.ceil(W / T) - 1);
+    const t0y = Math.max(0, Math.floor(y / T)), t1y = Math.min(Math.floor((y + h) / T), Math.ceil(H / T) - 1);
+    for (let ty = t0y; ty <= t1y; ty++) for (let tx = t0x; tx <= t1x; tx++) {
+      const k = tx + "," + ty;
+      if (cl.made.has(k)) continue;
+      cl.made.add(k);
+      Clone.procRect(cl, tx * T, ty * T, Math.min(T, W - tx * T), Math.min(T, H - ty * T));
+    }
+  },
+  // One rectangle of the processed copy, from the stroke's copy round it (its tiles copied first).
+  procRect(cl, px, py, pw, ph){
+    const W = cl.sheet.width, H = cl.sheet.height, m = cl.rt.radius;
+    const gx = Math.max(0, px - m), gy = Math.max(0, py - m), gw = Math.min(W, px + pw + m) - gx, gh = Math.min(H, py + ph + m) - gy;
+    Clone.ensure(cl, gx, gy, gw, gh);
+    const src = Composite.scratch("_rt", gw, gh), sg = ctx2d(src);   // its own size: the GL pass uploads the whole canvas
+    Composite.reset(sg);
+    sg.clearRect(0, 0, gw, gh);
+    sg.drawImage(cl.sheet, gx, gy, gw, gh, 0, 0, gw, gh);
+    const fx = Effect.retouch.fx(cl.rt), cx = { tw: gw, th: gh, sx: gx, sy: gy }, into = { canvas: src, g: sg };
+    let out = src;
+    if (fx) out = Composite.spaceGL.draw(cx, into, fx, false, cl.wrap) || Composite.spaceCPU(cx, into, fx, false, cl.wrap);
+    else { const img = sg.getImageData(0, 0, gw, gh); Effect.retouch.tone(cl.rt, img.data); sg.putImageData(img, 0, 0); }
+    const pg = ctx2d(cl.proc);
+    Composite.reset(pg);
+    pg.clearRect(px, py, pw, ph);
+    pg.drawImage(out, px - gx, py - gy, pw, ph, px, py, pw, ph);
+  },
+  // One dab, on whole texels — at a fractional corner a patch is resampled twice, read and then laid,
+  // and a blur stroke came out up to 3 levels from the blur effect over the same texels (t155). Like
+  // the Clone's, the destination's tiles are copied before this dab's frame composites them, and since
+  // nothing reads its own output a stroke is ONE application however its dabs overlap: a blur passed
+  // back and forth blurs once, as Photoshop's does; another stroke blurs again.
+  //
+  // Smudge carries: the patch under the dab, the carried one laid over it at Strength (canvas
+  // source-over, so a carried texel from off the sheet — transparent — lends no black, which the first
+  // version's byte mix did), and the result carried on, scaled when the dab's size moves under a pen
+  // or jitter (where the first version dropped it and the smear restarted). On a camouflage tile a dab
+  // is stamped once per copy of the sheet it touches (`rep`), and every copy lays the one result.
+  retouchStamp(cl, bg, x, y, ch, r, size, alpha, mask, mk, rep){
+    const Rt = cl.rt, dx = Math.round(x - r), dy = Math.round(y - r);
+    Clone.ensure(cl, dx, dy, size, size);
+    const tmp = Clone.buf(1, size), tg = ctx2d(tmp);
+    tg.globalCompositeOperation = "source-over"; tg.globalAlpha = 1;
+    tg.clearRect(0, 0, tmp.width, tmp.height);
+    if (Rt.kind !== "smudge") Clone.read(cl, tg, dx, dy, size, true);
+    else {
+      const key = (dx - (rep ? Math.round(rep.x) : 0)) + "," + (dy - (rep ? Math.round(rep.y) : 0)) + "," + size;
+      let c = cl.carry[ch];
+      if (c && cl.last[ch] === key) tg.drawImage(c, 0, 0);      // another copy of the dab just laid
+      else {
+        Clone.read(cl, tg, dx, dy, size);
+        if (c) { tg.globalAlpha = Rt.s; tg.drawImage(c, 0, 0, c.width, c.height, 0, 0, size, size); tg.globalAlpha = 1; }
+        if (!c) c = cl.carry[ch] = mkCanvas(size, size);
+        if (c.width !== size || c.height !== size) { c.width = size; c.height = size; }
+        const cg = ctx2d(c);
+        cg.clearRect(0, 0, size, size);
+        cg.drawImage(tmp, 0, 0, size, size, 0, 0, size, size);
+        cl.last[ch] = key;
+      }
+    }
+    tg.globalCompositeOperation = "destination-in";
+    Clone.lay(tg, alpha, size);
+    if (mask) tg.drawImage(mask, dx * mk.x, dy * mk.y, size * mk.x, size * mk.y, 0, 0, size, size);
+    tg.globalCompositeOperation = "source-over";
+    bg.drawImage(tmp, 0, 0, size, size, dx, dy, size, size);
   },
   // Copy the tiles under a rectangle from the live sheet into the stroke's copy, once each.
   ensure(cl, x, y, w, h){
@@ -96,10 +193,13 @@ const Clone = {
   // scratch one texel larger, and the patch is read from that at the sub-texel offset: pieces
   // meeting at a fractional edge would each cover it in part, and two partial coverages never sum
   // to a whole (wt-canvas).
-  read(cl, g, x, y, size){
+  //
+  // With `proc`, from the Retouch brush's processed copy instead (`procEnsure` making its tiles).
+  read(cl, g, x, y, size, proc){
+    const from = proc ? cl.proc : cl.sheet, make = proc ? Clone.procEnsure : Clone.ensure;
     if (!cl.wrap) {
-      Clone.ensure(cl, x, y, size, size);
-      g.drawImage(cl.sheet, x, y, size, size, 0, 0, size, size);
+      make(cl, x, y, size, size);
+      g.drawImage(from, x, y, size, size, 0, 0, size, size);
       return;
     }
     const W = cl.sheet.width, H = cl.sheet.height, ix = Math.floor(x), iy = Math.floor(y), n = size + 1;
@@ -110,8 +210,8 @@ const Clone = {
       const sy = (((iy + py) % H) + H) % H, h = Math.min(H - sy, n - py);
       for (let px = 0; px < n; ) {
         const sx = (((ix + px) % W) + W) % W, w = Math.min(W - sx, n - px);
-        Clone.ensure(cl, sx, sy, w, h);
-        pg.drawImage(cl.sheet, sx, sy, w, h, px, py, w, h);
+        make(cl, sx, sy, w, h);
+        pg.drawImage(from, sx, sy, w, h, px, py, w, h);
         px += w;
       }
       py += h;
@@ -168,6 +268,7 @@ const Clone = {
   // copy left of the sheet came first, fixed the offset a period out, and a clone stroke started at
   // x = 250 of a 256² tile painted nothing at 250.
   stamp(cl, bg, x, y, ch, r, size, alpha, mask, mk, at, rep){
+    if (cl.rt) { Clone.retouchStamp(cl, bg, x, y, ch, r, size, alpha, mask, mk, rep); return; }
     const ox = rep ? rep.x : 0, oy = rep ? rep.y : 0;
     let off = cl.off[ch];
     if (!off) {

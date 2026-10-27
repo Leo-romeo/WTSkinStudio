@@ -117,6 +117,83 @@ const GameScan = {
     }
     return { dir: null, inside: GameScan.INSIDE.test(picked.name || "") };
   },
+  // ---- An install split across drives by folder links (2026-10-24) ----
+  // Players move the big packs to an SSD and leave a junction (or a folder symlink) where they were;
+  // the game and Steam follow it. Chrome does not, on purpose: a page is never shown what a link
+  // points at. MEASURED on the owner's install with content/base, content.hq/hq_tex,
+  // content.hq/uhq_aircraft and levels junctioned to C:\WT — the folder picker and the file chooser
+  // alike saw 5 369 of its 12 538 files, and the scan said "16 vehicles ready" with no model to load.
+  // So the folder the links point at is picked as well and laid over the install, by relative path:
+  // `merge` answers like one directory handle and nothing downstream knows there are two.
+  // Every install has these; one that will not open from the install's own handle is a link.
+  LINKED: ["content/base"],
+  // Whether `path` under `dir` is a folder that opens and holds something.
+  async opens(dir, path){
+    try {
+      let d = dir;
+      for (const name of path.split("/")) d = await d.getDirectoryHandle(name);
+      for await (const _ of d.entries()) return true;
+      return false;
+    } catch { return false; }                     // the throw IS the answer: Chrome will not open it
+  },
+  // A gap is a folder whose parent opens and it does not: an install with no `content` at all is not
+  // linked, it is not an install (and the scan says so in its own words).
+  async linkGaps(dir){
+    const gaps = [];
+    for (const p of GameScan.LINKED) {
+      let up = dir;
+      for (const name of p.split("/").slice(0, -1)) if (up) up = await GameScan.child(up, name);
+      if (up && !await GameScan.opens(dir, p)) gaps.push(p);    // one listing, stopped at its first entry
+    }
+    return gaps;
+  },
+  async child(dir, name){
+    try { return await dir.getDirectoryHandle(name); }
+    catch { return null; }                        // the throw IS the answer: the other folder has none
+  },
+  // `a` is the install (it is what is remembered, written to and opened in a picker: `_primary`), `b`
+  // the folder its links point at. Names are matched case-blind, as NTFS matches them. A folder both
+  // hold is merged again one level down; a file both hold is the install's. A folder of `a` that
+  // will not list — the link itself, where Chrome shows it at all — is listed from `b`, which holds
+  // what it points at. Anything created goes to `a` only: UserSkins is the install's.
+  merge(a, b){
+    const M = {
+      kind: "directory", name: a.name, _primary: a._primary || a, _linked: b,
+      _legacy: !!a._legacy, _via: a._via,
+      async *entries(){
+        let own = [];
+        try { for await (const e of a.entries()) own.push(e); }
+        catch { own = []; }                       // the throw IS the answer: a link Chrome will not follow; `b` lists it
+        const seen = new Set();
+        for (const [k, h] of own) {
+          seen.add(k.toLowerCase());
+          const o = h.kind === "directory" ? await GameScan.child(b, k) : null;
+          yield [k, o ? GameScan.merge(h, o) : h];
+        }
+        for await (const [k, h] of b.entries()) if (!seen.has(k.toLowerCase())) yield [k, h];
+      },
+      async *values(){ for await (const [, h] of M.entries()) yield h; },
+      async getDirectoryHandle(name, opts){
+        if (opts && opts.create) return a.getDirectoryHandle(name, opts);
+        const o = await GameScan.child(b, name);
+        let own;
+        try { own = await a.getDirectoryHandle(name); }
+        catch (e) { if (o) return o; throw e; }
+        return o ? GameScan.merge(own, o) : own;
+      },
+      async getFileHandle(name, opts){
+        if (opts && opts.create) return a.getFileHandle(name, opts);
+        try { return await a.getFileHandle(name); }
+        catch (e) {
+          try { return await b.getFileHandle(name); }
+          catch { throw e; }                      // neither holds it: the install's own answer stands
+        }
+      },
+      queryPermission: o => a.queryPermission(o),
+      requestPermission: o => a.requestPermission(o),
+    };
+    return M;
+  },
   // Every vehicle onto the model it flies (game/registry.js). Each unit's own blk names its `model`,
   // and those 3 474 blks are zstd frames against the archive's dictionary, so they are read in a
   // worker pool (readRoots, CLAUDE.md §3.1) — once per install: the stored index keeps the answer
@@ -145,7 +222,7 @@ const GameScan = {
   // GameUnits.rootParams' own text, so the worker runs exactly what tools/t138_join.mjs runs in-line.
   async readRoots(jobs){
     const P = makeWorkerPool({ name: "unitblk", size: jobs.length, sections: ["ZSTD", "BLK", "VROMFS"],
-      ops: "var ZSTD_WASM_B64 = " + JSON.stringify(zstdAvailable() ? ZSTD_WASM_B64 : "") + ";\n" +
+      ops: "var ZSTD_WASM_B64 = " + JSON.stringify(Zstd.zstdAvailable() ? ZSTD_WASM_B64 : "") + ";\n" +
            "var WT_OPS = { rootParams: " + String(GameUnits.rootParams) + " };" });
     // Every buffer a job carries is its own (GameUnits.ownModels copies them out of the archive), so
     // all four move rather than copy (§3.2): the dictionary and the name map are ~1 MB a lane.
@@ -419,7 +496,7 @@ async function loadDescFiles(keepModels){
 // Access beyond the handle it is given. Marked so the offline tools can lift it and run the real
 // parser against a real install instead of a paraphrase of it (tools/ooz_sweep.mjs).
 //
-// It needs `packAdd` from PACKS and `oodleAvailable` from OODLE, both inside their markers — but
+// It needs `packAdd` from PACKS and `Oodle.oodleAvailable` from OODLE, both inside their markers — but
 // also `GameDB` and `KNOWN_FMTS`, which sit just OUTSIDE the PACKS markers in game/packs.js. A
 // tool lifting this has to declare those two itself; t21_cache.mjs and ooz_sweep.mjs both do.
 
@@ -474,7 +551,7 @@ async function indexDxp(handle, path){
     const comp = (hd.getUint32(8, true) >>> 24) & 0xE0;
     const { stem, tier } = parseTexName(names[i] || ("tex_" + i));
     const knownFmt = KNOWN_FMTS.includes(fmt);
-    const knownComp = comp === 0 || comp === 0x20 || comp === 0x80 || (comp === 0x60 && oodleAvailable());
+    const knownComp = comp === 0 || comp === 0x20 || comp === 0x80 || (comp === 0x60 && Oodle.oodleAvailable());
     // No tally of the formats this cannot read is kept here any more: GameScan.unread counts them
     // from the entries, which a restored index has too and a walk-time tally did not (2026-10-10).
     const en = {

@@ -3,6 +3,47 @@ const $ = id => document.getElementById(id);
 // stems, file names and unit ids read straight out of the game's own packs — they are data, not
 // markup, and nothing upstream guarantees what characters they contain.
 const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// ---------- One line, and the rest in its tooltip (ROADMAP 3.44) ----------
+// The Export window carried a paragraph under most settings and scrolled to reach its own controls
+// (reported 2026-10-23, "has too much text"). The owner's answer was one line plus a tooltip: the
+// line says what the setting does here and now, the tooltip keeps every true thing the paragraph
+// said. An element that has more in its tooltip carries `tipmore` — a dotted underline and the help
+// cursor — so the tooltip is something you can tell is there, not something you happen on.
+// `Tip.more` alone is for an element whose own text is already short, such as a setting's name
+// (ROADMAP 3.40 (2) puts tooltips there). Text is always set as text, never as markup.
+// Warnings are not explanations: what says something is WRONG stays on the line in full.
+const Tip = {
+  set(el, line, more){ el.textContent = line || ""; return Tip.more(el, line ? more : ""); },
+  more(el, more){
+    if (more) { el.title = more; el.classList.add("tipmore"); }
+    else { el.removeAttribute("title"); el.classList.remove("tipmore"); }
+    return el;
+  },
+  make(tag, cls, line, more){ const d = document.createElement(tag); if (cls) d.className = cls; return Tip.set(d, line, more); },
+  // A setting's name and its control say the same thing on hover (ROADMAP 3.40 (2)). The markup put
+  // the tooltip on one half, row by row — Spacing's on its slider, Size jitter's on its name — so the
+  // half that had none showed nothing: counted over src/index.html on 2026-10-23, 16 rows had it only
+  // on the control and 22 only on the name. Copied once at boot rather than written twice in the
+  // markup, and only between a row's leading <label> and a control that is the row's own child: a
+  // nested label (Pressure's size / flow) already lends its title to the checkbox inside it, and a
+  // button's title says what the button does, not what the setting is. A name that borrowed its
+  // control's text takes it again on hover, so a control that retitles itself cannot leave it stale.
+  from: new WeakMap(),
+  names(root){
+    for (const row of root.querySelectorAll(".row")) {
+      const name = row.firstElementChild;
+      if (!name || name.tagName !== "LABEL" || name.querySelector("input, select, textarea, button")) continue;
+      const ctl = row.querySelector(":scope > input, :scope > select, :scope > textarea");
+      if (ctl && !name.title && ctl.title) Tip.from.set(name, ctl);
+      else if (ctl && name.title && !ctl.title) ctl.title = name.title;
+      Tip.more(name, Tip.from.has(name) ? ctl.title : name.title);     // a name with no tip anywhere stays plain
+    }
+    root.addEventListener("pointerover", e => {
+      const name = e.target.closest && e.target.closest("label"), ctl = name && Tip.from.get(name);
+      if (ctl && ctl.title !== name.title) Tip.more(name, ctl.title);
+    });
+  },
+};
 const statusEl = $("status");
 // `detail` is what a user MAY want and should not have to read: it goes into Messages under the line,
 // and the line is marked as having more (ROADMAP 3.36).

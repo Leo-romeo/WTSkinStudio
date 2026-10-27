@@ -1,6 +1,6 @@
-# WT Skin Studio — user guide (1.0.0-beta.2)
+# WT Skin Studio — user guide (1.0.0-beta.3)
 
-This guide describes the build whose welcome card reads `v1.0.0-beta.2`. What each earlier, internal
+This guide describes the build whose welcome card reads `v1.0.0-beta.3`. What each earlier, internal
 build added is kept at the end, under *History*.
 
 ## Quick start
@@ -23,6 +23,11 @@ through its file chooser and export a `.zip`, but cannot open a folder for writi
    by double-clicking the `.html` file *(measured 2026-08-05: on a `file://` page Chrome cannot read a
    dropped folder's contents at all; `readEntries()` rejects with `EncodingError`. On `http://` it
    works normally)*, and a junction no longer helps: Chrome resolves it since ~v128.
+   **Moved part of the game to another drive and left a link (a junction) behind?** The game follows
+   the link; the browser never does, so those folders look empty to the app. When `content\base` is
+   one of them the app asks for the folder the links point at — pick it (the one holding `content`)
+   and the two are read as one install, and remembered. For links it cannot spot by itself (only
+   `content.hq` moved, say), use **Advanced ▸ Add linked folder…**.
    *No install to hand?* Drop a vehicle `.obj` and its `.dds` textures anywhere in the window — the
    manual path always works. A skin you already have opens with **Load a skin…** (a UserSkins
    folder or a `.zip`).
@@ -31,26 +36,36 @@ through its file chooser and export a `.zip`, but cannot open a folder for writi
 3. **Pick a texture slot and paint.** `B` turns painting on in both views. Add layers with
    **+ Layer**, **Img**, **Text** or **Group** at the top of the Layers panel; every brush writes to a
    layer, and makes one if there is none.
-4. **Export as… ▸ To War Thunder** (the foot of the Export window), then press *Update custom
-   camouflage list* in the hangar. It writes `UserSkins/<name>/` into the install. Where the browser
-   cannot write there — an install under `Program Files`, opened another way — it says so before
-   encoding anything and offers **Download .zip** instead, with *Choose UserSkins folder…* beside it
-   for an install that is somewhere else. **Download .zip** works everywhere. The zip holds one folder,
-   `<name>/`: extract it *into* `War Thunder/UserSkins/`, so that the `.blk` lands in
-   `UserSkins/<name>/` — Windows' *Extract All* proposes a folder named after the zip, which nests it
-   one level too deep — and Windows asks for administrator approval to write under `Program Files`.
+4. **Export**, then press *Update custom camouflage list* in the hangar. One click writes
+   `UserSkins/<name>/` into the install with the settings as they are; the first time, if the game
+   folder is not open, it asks for the UserSkins folder once. The **gear** beside *Export* opens the
+   settings, with **Download .zip** and **Save project** at their foot. Where the browser cannot write
+   into the install — one under `Program Files`, opened another way — it says so before encoding
+   anything and offers the `.zip` instead, with *Choose UserSkins folder…* beside it for an install
+   that is somewhere else. **In Firefox**, which cannot write into folders at all, Export downloads
+   the `.zip` straight away, and the Export window says so before you click. The zip holds one
+   folder, `<name>/`: put the zip in `War Thunder/UserSkins/` and choose **Extract here**, so the
+   `.blk` lands in `UserSkins/<name>/` — Windows' *Extract All* proposes a folder named after the zip,
+   which nests it one level too deep — and Windows asks for administrator approval to write under
+   `Program Files`.
 5. **`Ctrl+S`** saves the self-contained project, a `.wtproj`: model, textures and every edit.
 
 **Where your files go.** Inside your War Thunder folder the app writes only `UserSkins/<name>/`, and
-only when you press *To War Thunder*. Everything else it makes — a `.wtproj`, a `.zip`, an OBJ, an
+only when you press *Export* (or *To War Thunder* in its settings). When a skin of that name is already there, it asks first;
+*Replace* writes the new files and removes the `.blk` and texture files in that folder the new export
+did not write, so an old vehicle's `.blk` cannot outlive the skin — anything else you keep there is
+left alone, and the status line names what was removed. Everything else it makes — a `.wtproj`, a `.zip`, an OBJ, an
 exported layer, your settings, a session recording — goes wherever your browser saves downloads.
 Reopen a `.wtproj` with **Add files…** or by dragging it onto the window. The recovery copy and the
 index of your install stay in the browser's own storage on this machine.
 
 **Reporting a bug.** Say which version (on the welcome card), which browser and which vehicle, and
-what you did. `F12` ▸ *Console* shows any error in red — copy it. For something slow or jumpy, *View &
+what you did. An error the app did not expect is on the status bar as *Unexpected error at src/…*,
+naming the file and line it came from: click the bar for *Messages* and *Copy* it. `F12` ▸ *Console*
+has the whole of it in red. For something slow or jumpy, *View &
 scene ▸ Advanced ▸ Record a session*, press `F9` the moment it goes wrong, then stop and attach the
-`.json` it saves. The app sends nothing anywhere, so a report holds exactly what you put in it.
+`.json` it saves. It opens with a line per stroke saying how long it held the page and what that
+time went on. The app sends nothing anywhere, so a report holds exactly what you put in it.
 
 Press `?` in the app for every control; `Esc` closes it.
 
@@ -67,7 +82,7 @@ Left-drag orbits around the grabbed point (raycast pivot). Right/middle-drag pan
 
 ## Exterior / Cockpit
 
-Almost every aircraft in the game has a second model beside its exterior: the high-detail cockpit you sit in when you switch to first person. The **Exterior / Cockpit** select in the 3-D view's bar switches between them. It is the same vehicle — one `.blk`, one skin, one texture list — so nothing you painted on the exterior is touched by the switch, and the parts of the airframe you can see from the seat (wings, nose, pylons) are on the exterior's own sheet: a stroke on the wing from inside lands on `f_4e_c` like any other. The cockpit's own sheets (the panel, the gauges, the seat) appear as further texture slots the first time you open it; they are **cockpit sheets**, so in Export they start unticked behind the protected mark — WT Live does not accept modified cockpits, and a personal skin can carry them once you open the gate. Each body keeps its own part list, selection and hidden parts. Stores hang on the exterior only (the cockpit model carries its own pylons and pods). Drones, catapult floatplanes and the zeppelin have no cockpit model, and the select says so. A project saves both bodies and which one was on screen.
+Almost every aircraft in the game has a second model beside its exterior: the high-detail cockpit you sit in when you switch to first person. The **Exterior / Cockpit** select in the 3-D view's bar switches between them. It is the same vehicle — one `.blk`, one skin, one texture list — so nothing you painted on the exterior is touched by the switch, and the parts of the airframe you can see from the seat (wings, nose, pylons) are on the exterior's own sheet: a stroke on the wing from inside lands on `f_4e_c` like any other. The cockpit's own sheets (the panel, the gauges, the seat) appear as further texture slots the first time you open it; they are **cockpit sheets**, so in Export they start unticked behind the protected mark — WT Live does not accept modified cockpits, and a personal skin can carry them once you open the gate. Glass that carries a sheet of its own — the gauge glass, and the inner layer of the canopy that a skin can put a picture on (`empty_glass`) — shows through its own transparency, as in the game, and is still a slot you can paint. Each body keeps its own part list, selection and hidden parts. Stores hang on the exterior only (the cockpit model carries its own pylons and pods). Drones, catapult floatplanes and the zeppelin have no cockpit model, and the select says so. A project saves both bodies and which one was on screen.
 
 **Carrying the cockpit out.** From outside, the exterior shows a low-detail copy of the cockpit — the tub, the seat, the frames you see through the canopy — and on many aircraft that copy is painted by a sheet of its own (`f_4c_interior_c` on the F-4E) that the first-person cockpit does not use, so what you paint in the cockpit does not show from outside. To carry it across: paint the cockpit body, open it once if you have not, then select the exterior's interior sheet, select a paint or fill layer on it (add one if it has none) and choose **model…** in its Mask row, then **From the cockpit**. Every texel of the sheet takes the colour the cockpit body has at the nearest point of its surface — glass, effects and hidden parts lend nothing, so hide a part on the cockpit body to keep it out. It is worked out in the background, with a progress bar you can cancel. **Reach** says how far from the sheet to look: 5 cm to start; shorter keeps only the surfaces the two models agree on, longer fills more of the sheet with colour from further away. It costs nothing to change, and the preview and the line under it follow it. **Add as layer** puts the result in a new layer on top of that sheet and leaves the mask you started from alone; delete the layer to take it back. Judge it from the **Pilot's seat** on the Exterior body. On many aircraft the cockpit body also paints part of the exterior's interior sheet itself; what you paint there already shows from both, so those texels are left exactly as they are and only the rest is carried. Where the cockpit uses the whole of it — the B-17s, for one — the dialog says there is nothing to carry. Closing the dialog stops a bake that is still running.
 
@@ -103,6 +118,16 @@ thing placed at sheet size, through opacity, mask, part limit and blend — the 
 another editor and paint over, and the only form that carries a projected decal's wrap). PNG by
 default; TGA if you want it. A decal with a height map writes that beside it.
 
+**One whole texture as a file of its own.** The texture's ⋮ ▸ *export texture…* offers, for the
+albedo and for the `_n`: **as the skin export writes it** (the very `.dds` or `.tga` *Export* puts in
+the skin — that texture's format, size and mip levels from *Textures out*), **as an image** (PNG or
+TGA: the pixels *Export* would encode, at the size you paint at; an `_n` keeps all four of its
+channels, so its normal X in alpha does not eat its colour), or **the game's original** (`.dds`, as
+the game ships it, before your edits — offered when the game folder is open and holds it). In the
+game-file search, each texture you can open has **save** beside *add* and *→slot*: the game's own
+`.dds`, or the texture as a PNG or TGA image. Either way it is a download, like the project file;
+a game texture saved this way is for your own use.
+
 **A selected decal shows on the model** as a ring round its footprint — its edge, how far its depth
 reached, how it is turned. Click a decal in 3-D to select it; click beside it, or on nothing, to let
 go. A **projected** decal also carries **handles**, in the 3-D view and on the sheet in the 2-D view
@@ -123,6 +148,12 @@ up to four times its size, over a transparent background with a soft shadow unde
 a promo page or a forum post, dropped straight onto another image. It is the app's own shading, not
 the game's; a good angle and the 4× size do most of the work.
 
+**Market preview.** The same button's last size, *Market preview — 1920 × 1080 (16:9)…*, is the picture
+the WT Live market shows for a skin. Picking it puts a 16:9 frame over the 3-D view with the rest
+dimmed; the view stays live, so orbit and zoom until the vehicle sits in the box the way you want,
+then press *Take* (or *Cancel*). What lands in the file is exactly what the box held, on
+the view's own background rather than transparent.
+
 **Masks.** Any paint, image or fill layer can carry one: a sheet whose brightness decides how much of the layer shows — white shows, black hides, grey partly shows — and nothing is deleted, so removing the mask brings the layer back whole. Ways in: **+ white** (then hide where you paint), **+ black** (then reveal where you paint), **from selected parts**, **image…** (a stencil, a grunge map, a hand-drawn shape; its own alpha counts too, so a transparent PNG background hides), or **layer…** — another layer's painted pixels, live: paint on that layer and this one follows, the way an anchor point works in Substance. A referenced mask shows the source's name; *→ painted copy* freezes it into a mask of its own when you want to edit it or delete the source. **clip ↓** is the same thing pointed at whatever sits directly below in the stack — a clipping mask, which follows when either layer is moved. **model…** bakes one from the model itself: its **curvature** (where the surface bends — *edges* for chipped paint and bare metal, *cavities* for the grime in fillets and panel joints; the mesh's own creases plus the normal map's panel lines and rivets) or its **occlusion** (how enclosed each point is — under the wings, in the wells, between hull and fenders; *occluded* for dirt, *open* for fading). Each has a levels pair (*from* / *to*) and a soften, previewed live over the sheet's own colour; the bake is done once per texture and the levels are free after that. Whatever is hidden on the model casts no shadow, so hide a gear door to bake the bay open. On an aircraft the same dialog has a third entry, **From the cockpit**, which is not a mask at all — it adds a layer carrying the first-person cockpit's paint onto the exterior's own (see *Exterior / Cockpit*). **noise…** puts a hidden noise layer directly under this one and masks this one by it, in one undo step — select the noise layer to change its kind, scale, seed and levels (see *Noise and patterns* below). Once it exists: **paint it** with the Mask brush (paint hides, Alt or value ≥ 128 reveals; hidden areas tint red while the tool is active), **invert**, **soften** into a fade, **show all** / **hide all**, or replace it from another image. Every one of those is a single undo step. The mask has its own thumbnail beside the layer's content in the stack — click it to start painting on it — and it works on every channel, not just colour.
 
 **Blend if.** Beside the mask, a layer can be shown by *what lies beneath it*: only where the sheet below is dark, or light, or in a band between (*From* / *To*, with a *Soften* ramp at each end and an *invert*), or only where it is near a colour you pick (*Match* is how close). Weathering that follows the panel lines already in the game's albedo starts here — a grime layer set to show where the tone beneath is under 35 % lands in every seam and nowhere else. It combines with the mask: both have to let a texel through. On a group it applies to the group's flattened result, read off the sheet beneath the group.
@@ -135,9 +166,9 @@ the game's; a good angle and the 4× size do most of the work.
 
 **Gradients.** A fill layer is a flat colour or a gradient — the *Fill* select on the layer panel: **gradient on the sheet** (an *Angle*; a Limit rectangle you drew centres it, and *From* / *To* are fractions of the rectangle's reach), **radial on the sheet**, or **gradient along the model** — read off where each texel sits on the vehicle, so a fade from the nose back is one setting (*Along*: nose → tail, top → bottom, port → starboard and their reverses, or a *Yaw* / *Pitch* of your own) and meets itself where two textures join. *From* / *To* there are fractions of the vehicle's length along that direction, or of the layer's parts when it is limited to some: limit a layer to the left wing, choose nose → tail, set To to 25 %, and that is the leading-edge fade. Each **stop** is a colour (a value, on a single-value channel) and an opacity, so a fade to nothing is a stop at 0 %; *+ stop* adds one with the colour the gradient already has there, *reverse* swaps the ends. *Past ends*: hold the end stops, repeat (stripes), or reflect — set From to 50 % and a reflected fade runs out from the centre line to both sides. Along the model the first one on a texture takes a moment to place (a progress bar; once per texture, and only while a gradient along the model is on it); everything after that is immediate. A gradient converts to painted pixels from the channel strip's menu when you want to paint into it — and it works as a **mask**: hide the gradient layer, put the layer you want faded above it and press **clip ↓** (or pick it under **layer…**), and that layer shows where the fade is opaque.
 
-**Noise and patterns.** The same *Fill* select has three more kinds. **Noise, along the model** is grime, mottling, chips and rain marks without anyone's grunge maps: a noise worked out from where each texel sits on the vehicle, so it runs across UV seams without a break and agrees on every texture the vehicle uses. *Noise* picks the look — **Perlin** (soft grime), **value** (blotchy mottling), **cells** (spots and chips) or **streaks** (rain marks running down the vehicle, with a *Stretch*); *Scale* is the size of the largest features in metres (drag, or type metres in the box); *Detail* adds finer layers and *Roughness* says how strongly they show; the same *Seed* is the same noise every time (*new* rolls another). Below those are a gradient's own rows, and they are what shape it: *From* / *To* are levels on the noise — close together is a hard-edged cut, which is how spots come out of a soft field — and the stops colour it, so a stop at 0 % leaves the dark half transparent. **Pattern, on the sheet…** asks for an image (any picture, or a DDS) and repeats it a whole number of times across the sheet, with an *Angle* and an *Offset*; **pattern, along the model…** wraps it round the vehicle from three sides instead (tri-planar), with a *Size* in metres — the same on every texture — and a *Blend* saying how quickly one side's projection hands over to the next where the surface turns. *Angle* turns either kind clockwise and *Offset* slides it along the tile, the same way on the sheet and along the model, so switching between the two keeps the look. A tile that repeats seamlessly hides its own edges; the app does not make it seamless for you. On smoothness, metalness and the paint mask a pattern is its brightness. Both work as masks (**clip ↓**, **layer…**, or *noise…* in the Mask row): a noise by its opacity, as a gradient does, so its stops decide — and a pattern by its brightness, as **image…** reads a picture: white shows, black hides, and a transparent part of the tile hides too. Both convert to painted pixels from the channel strip. **Chipped paint** is a noise and the curvature bake together: a noise fill in the bare-metal colour — *cells*, with From and To close together so it is hard-edged spots and nothing between them — given a *model… ▸ curvature (edges)* mask. The noise decides where a chip is and the mask keeps the chips to the edges; *Blend if* on top of that keeps them off whatever tone you name. Along the model the noise and the tri-planar pattern are worked out in the background: the layer keeps showing its last result while a new setting is worked out, a long one shows the progress bar (with *Cancel*), and an export waits for the setting you left it on.
+**Noise, patterns and lattices.** The same *Fill* select has five more kinds. **Noise, along the model** is grime, mottling, chips and rain marks without anyone's grunge maps: a noise worked out from where each texel sits on the vehicle, so it runs across UV seams without a break and agrees on every texture the vehicle uses. *Noise* picks the look — **Perlin** (soft grime), **value** (blotchy mottling), **cells** (spots and chips) or **streaks** (rain marks running down the vehicle, with a *Stretch*); *Scale* is the size of the largest features in metres (drag, or type metres in the box); *Detail* adds finer layers and *Roughness* says how strongly they show; the same *Seed* is the same noise every time (*new* rolls another). Below those are a gradient's own rows, and they are what shape it: *From* / *To* are levels on the noise — close together is a hard-edged cut, which is how spots come out of a soft field — and the stops colour it, so a stop at 0 % leaves the dark half transparent. **Pattern, on the sheet…** asks for an image (any picture, or a DDS) and repeats it a whole number of times across the sheet, with an *Angle* and an *Offset*; **pattern, along the model…** wraps it round the vehicle from three sides instead (tri-planar), with a *Size* in metres — the same on every texture — and a *Blend* saying how quickly one side's projection hands over to the next where the surface turns. *Angle* turns either kind clockwise and *Offset* slides it along the tile, the same way on the sheet and along the model, so switching between the two keeps the look. A tile that repeats seamlessly hides its own edges; the app does not make it seamless for you. **Lattice, on the sheet** and **lattice, along the model** are a pattern whose tile the app draws for you, seamless: a honeycomb to start with, or squares, diamonds, triangles or scales (*Cells*), with a *Cell fill* and a *Border*, each in its own colour and each with a tick to leave it out — no fill draws only the lines over what is under them — and a *Border width* as a share of a cell. Its repeats, angle and offsets are the pattern rows below, so along the model the cells run on across every seam of the texture. On smoothness, metalness and the paint mask a pattern is its brightness. Both work as masks (**clip ↓**, **layer…**, or *noise…* in the Mask row): a noise by its opacity, as a gradient does, so its stops decide — and a pattern by its brightness, as **image…** reads a picture: white shows, black hides, and a transparent part of the tile hides too. Both convert to painted pixels from the channel strip. **Chipped paint** is a noise and the curvature bake together: a noise fill in the bare-metal colour — *cells*, with From and To close together so it is hard-edged spots and nothing between them — given a *model… ▸ curvature (edges)* mask. The noise decides where a chip is and the mask keeps the chips to the edges; *Blend if* on top of that keeps them off whatever tone you name. Along the model the noise and the tri-planar pattern are worked out in the background: the layer keeps showing its last result while a new setting is worked out, a long one shows the progress bar (with *Cancel*), and an export waits for the setting you left it on.
 
-**Effects.** An effect layer changes what lies beneath it on its channel — live, and changeable any time. Its first row picks the kind: *Hue / saturation / brightness / contrast* (where a new effect starts), **Levels** (*In black* and *In white* squeeze the range, *Gamma* bends the middle — above 1 lifts the midtones — and *Out black* / *Out white* lift or cap the result: the everyday tool for a roughness or metalness map), **Curves** (click in the box to add a point and drag it; drag a point out of the box, or double-click it, to remove it; the dashed line is no change), **Colour balance** (pick shadows, midtones or highlights, then push cyan–red, magenta–green and yellow–blue; *Keep luminosity* changes the colour and not the brightness), **Gradient map** (every tone becomes the colour at its place along the stops — black's at the left end, white's at the right; a stop at 0 % leaves those tones as they were), **Invert**, **Threshold** (black or white by tone, around a level) and **Posterize** (a few flat bands). Picking another kind starts it fresh, and Ctrl+Z takes you back to the settings you had. On the colour channel Levels and Curves have a *Channel* select: red, green and blue can each have their own, applied before the one for all channels. Colour balance and the gradient map are for colour; the rest work on smoothness, metalness, the normal map and the paint mask too. Opacity fades an effect and a mask or a Limit confines it. An effect changes colour, never coverage: inside a group over half-transparent paint, the paint stays exactly as transparent — except with the four-number kind, which for now still makes it more opaque there (use Levels, or put it outside the group).
+**Effects.** An effect layer changes what lies beneath it on its channel — live, and changeable any time. Its first row picks the kind: *Hue / saturation / brightness / contrast* (where a new effect starts), **Levels** (*In black* and *In white* squeeze the range, *Gamma* bends the middle — above 1 lifts the midtones — and *Out black* / *Out white* lift or cap the result: the everyday tool for a roughness or metalness map), **Curves** (click in the box to add a point and drag it; drag a point out of the box, or double-click it, to remove it; the dashed line is no change), **Colour balance** (pick shadows, midtones or highlights, then push cyan–red, magenta–green and yellow–blue; *Keep luminosity* changes the colour and not the brightness), **Gradient map** (every tone becomes the colour at its place along the stops — black's at the left end, white's at the right; a stop at 0 % leaves those tones as they were), **Invert**, **Threshold** (black or white by tone, around a level), **Posterize** (a few flat bands), **Blur** (a *Radius* in texels of the sheet), **Sharpen** (an unsharp mask: a *Radius* and an *Amount* — edges and fine detail stand out) and **Add noise** (grain: an *Amount* in levels, *Mono* for the same shift on red, green and blue, and a *Seed*, so the same noise comes back every time). Picking another kind starts it fresh, and Ctrl+Z takes you back to the settings you had. On the colour channel Levels and Curves have a *Channel* select: red, green and blue can each have their own, applied before the one for all channels. Colour balance and the gradient map are for colour; the rest work on smoothness, metalness, the normal map and the paint mask too. Opacity fades an effect and a mask or a Limit confines it. An effect changes colour, never coverage: inside a group over half-transparent paint, the paint stays exactly as transparent, whatever the kind.
 
 **A saved stack.** Right-click a group (or a layer) ▸ *Save group as stack…* writes it as a `.wtstack` — the layers, their masks, blend-if bands, decals with their Looks, everything — and *Load a stack here…* (or dropping the file in, or *Add files…*) puts it on the selected texture of any vehicle, above what is there. "My weathering stack" onto the next vehicle. What cannot carry over is adapted and said in the status line: canvases are resampled to the new sheet, a projected decal is kept as its painted pixels (its projection frame belonged to the vehicle it was made on), part limits keep only the part names this model has, and a link across textures is dropped.
 
@@ -217,9 +248,90 @@ have it affect everything below.
 
 **Limiting a layer to a few parts.** Select the parts (Parts tab, or `Ctrl`+click in 3D) and press the layer's `Limit ▸ ← selection` — or just add the layer while a selection is live and it inherits it. The limit is non-destructive, stored as part names (so it survives a texture resize, a project reload and a re-projection), names itself after the part group when it matches one, and confines the brush as well as the display. Works on paint, fill, decal and adjustment layers: "green turret over grey hull" needs no hand-painted mask.
 
+**Showing a layer only up close, or only from far (mip levels).** A texture in the game is a chain of
+copies, each half the size of the one before — its *mip levels* — and the game picks a smaller one the
+further away a surface is and, on a UserSkin, the more edge-on you see it. Any layer or group can be
+limited to some of those levels: right-click it and choose **Near only** (levels 0–2) or **Far only**
+(level 3 on); with a vehicle loaded the entry says roughly how far that is on that layer's own parts,
+at 1440p. Kill marks or a signature that only show close, a message or a second camouflage that only
+shows from far — and since it is a limit and not a copy, every tool works per level: a near look and a
+far look are two groups. Once a layer has a range its panel gets a **Shows at** row — first level,
+last level (*end* is every level past the first) and a soft edge over a few levels — with ✕ to show
+it at every level again, and its row in the list says `mip 3+`. The 3-D view draws the texture's
+own levels, so a far-only layer appears as you zoom out and a near-only one goes; the 2-D view shows
+level 0 unless you pick another (below). A project with a range in it is project version 7,
+which an older build refuses rather than half-opening. Hand-made levels are a UserSkin feature:
+Gaijin's tool regenerates the levels of a Market or trophy skin.
+
+**The level ruler** (a texture's ⋮ menu, *level ruler*) adds a group that colours and numbers every
+level of that texture — red 0 up close, then orange, yellow, green, cyan… — with two grey bands of
+a fine checker (the filter strip). Export with it and walk away from the vehicle in the game: the
+colour says which level the game is showing where, which is what every level effect is set from. The
+strip's two kinds of segment are averaged two ways at level 1; the one that keeps its brightness as
+the game moves off level 0 says how the game filters. Delete the group before you export the real skin.
+
+**A colour or a number that changes with distance.** A plain fill's colour (its value, on smoothness or
+metalness) and an effect's numbers — hue, saturation, brightness, contrast; Levels' black, white and
+gamma; blur's radius; sharpen's and noise's amount — can be different at each mip level. Right-click the
+layer and choose **Vary with distance…**: its panel gets a **By distance** row, the number to vary and
+one bar per level of the texture. Click a bar, set its value, and that level is keyed (the first time,
+level 0 keeps the value it had); the levels between two keys run smoothly from one to the other, and
+past the last key the value holds. ✕ takes one level's key off, ✕ all makes it the same at every level
+again. While a number varies, its own slider above is read-only — the bars say what it is everywhere.
+The texture then restarts its chain wherever a value changes, like a range does.
+
+**Level effects** (a texture's ⋮ menu, *level effect…*) build those into ready-made looks, as ordinary
+layers you can open and change. Each is limited to the selected parts, or the rectangle you drew, when
+there is a selection:
+- **Holo foil** — a colour that runs along a palette (the same five as the gradient's holo presets) as
+  the game walks down the levels, from a first level and a cycle every few levels, over the paint, with
+  gloss and metalness rising with it: foil that shifts as you move away and as the surface turns.
+- **Colour flip** — one colour near and another from a level on: colour-shift paint.
+- **Distance camouflage** — pick a group with the near look and one with the far look and the level
+  they swap at; each is limited to its side, with a soft edge. The far pattern is then designed, not
+  whatever the near one blurs into.
+- **Metal flake** — fine flakes in gloss and metalness up close, and a sheen of your choosing further
+  out instead of the grey they would average into.
+
+On a UserSkin a level effect changes with the viewing angle as well as with distance, because the game
+samples a UserSkin's levels without anisotropic filtering; check it with **In game** below.
+
+**Seeing it as the game will.** Bottom right of the 3-D view, **In game** shows the skin the way the
+game samples a UserSkin: without the extra sharpening at an angle that the rest of the app uses (the
+game's anisotropic filtering setting does not reach UserSkins), with only the mip levels the export
+will write — none at all with Mipmaps off, which is how the game shows such a skin: level 0 at every
+distance — and at the **texture quality** and **screen** you pick. Distances then mean metres in the
+game (at an assumed 50° field of view): **Distance…** puts the camera 8 m (third person), 50 m, 200 m
+or 1 km away, and the number beside it is how far away it is now. Texture quality starts at High: the
+game drops the sharpest one or two levels of its own textures at Medium and Low, and whether it does
+that to a UserSkin is not measured yet — if it does, those players never see what is in the dropped
+levels, and every further level stays where it was. **Mip levels**, in the channel view list, paints
+each level as the ruler's colour with its number, so the colour on the model is the level the
+graphics card picks there — walk away, or turn a surface edge-on, and watch it change. In the 2-D
+view, the **Level** list shows one level of the sheet, texel for texel — what the game draws from far
+enough away; strokes still land on the layer at full size.
+
 ## Brushes
 
 Color · Eraser · Clone · Smoothness (R) · Metal (B) · Flatten normal · Panel line (emboss: value <128 carves, >128 raises) · Clone normal · Wear mask · Mask. Size, opacity, **flow**, hardness, and **spacing** (how often stamps land along a stroke — low = dense/smooth, high = dotted). Alt+click picks color, Shift+click draws a straight line from the last point (in either view, however far), `[` `]` / Alt+wheel resize, recent colors become palette chips. **The picker gives you the colour you can see**, which on a ground or naval vehicle is not the same as the colour in the layer: those are drawn as the vehicle's own bare sheet with your paint over it through the coverage mask, exactly as the game does it, so an unpainted area shows the camouflage and not what is underneath. Pick it, paint it back, and the surface comes out the colour you picked; the status line names the layer's own colour too when the two differ.
+
+**Swatches.** Under the brush, the *Swatches* row picks which colours its chips show: the ones you
+painted with last, **My palette** — colours you keep: **+** adds the brush's colour, `Alt`+click takes
+a chip out, and a settings export carries it to another machine — or a published paint standard:
+**FS 595**, **ANA** (the US WWII bulletin colours, as their FS 595 equivalents) and **RAL Classic**.
+Hover a chip for its code and name; a click makes it the brush's colour. **A chip is an sRGB
+approximation of a paint sample**, from one cited table per standard, and the row says so: real paint
+differs with gloss, age, the batch and the light it is seen in, and published tables disagree by a few
+levels. (RLM and the Soviet aviation enamels are not there yet — they wait for a table that can be
+cited.)
+
+**Reference images.** *Reference…* beside the swatches opens a window of photos or colour charts to
+paint from: *Add…* or drop images onto it (local files only — nothing is uploaded). Wheel to zoom
+about the pointer, drag to move, double-click to fit, and **click to take the colour under the
+pointer for the brush** — it reads the image's own pixel, whatever the zoom. Drag the window by its
+title bar and resize it by its corner; it stays up while you paint. A project carries the images only
+if **Save with project** is ticked — off by default, because reference photos are often someone
+else's — and then as the files they came from; such a project opens the window again when loaded.
 
 **Opacity and Flow are two different things.** *Opacity* is the most one stroke can lay down: go
 over the same spot twenty times in one stroke and it is still no darker than Opacity. *Flow* is how
@@ -254,7 +366,11 @@ picture — a tenth or more — is see-through: a screenshot's rounded corners, 
 thin transparent frame round opaque paper are paper, not ink. Where the picture is darker, more paint lands, so the
 rivet's highlight lets the panel show through; the colour is always the brush's own, so one chip tip
 paints olive chips, silver chips, or chips on a mask. The little square beside the select shows the
-tip as it lays paint. Loaded tips are kept in this browser beside the decal library and travel with
+tip as it lays paint; click it and every tip opens as a grid of pictures, the ones you loaded too, so
+you can pick one by its look (Escape or a click elsewhere closes it). Under the row, a **sample
+stroke** is laid with everything the brush is set to — tip, spacing, flow, opacity, dynamics and
+colour — by the same code a real stroke runs, scaled down to fit, so you can see how scatter or a
+wide spacing will look before you paint. Loaded tips are kept in this browser beside the decal library and travel with
 a settings export (see *Settings* below); the remove button beside **Load…** takes one out again, and
 every tool that used it goes back to Round. Hardness only shows for Round and Square; the others carry their own edge.
 
@@ -274,13 +390,49 @@ neighbouring part's island, so a row of rivets along a panel's edge mirrors as a
 and all of these are remembered per tool, like Flow, and Panel line has none of them (its groove is
 carved, not stamped).
 
-**The brush outline.** In the 2D view a *Square* is outlined as its square, turned to its Angle; every
-other tip is outlined as the circle its Size spans. That circle is the Size, not the dab: a Round, a
-Rivet and a Chip lie inside it, but a loaded tip is scaled so that its longer side is the Size, so a
-picture whose ink reaches its corners reaches past the circle, by up to half its diagonal. The ring on
-the model is that circle for every tip, the Square included — whose corners reach past it the same
-way — and its inner ring, where a soft edge stops being opaque, shows only for Round and Square, the
-two tips Hardness shapes.
+**Colour along** (under *Tip dynamics*) changes the colour as the stroke goes, by the distance
+painted — a holographic rainbow in one stroke rather than one nudge of the colour picker per stroke.
+*Hue* turns the brush colour round the colour wheel (so a grey brush has nothing to turn; the panel
+says so), and the presets — *Rainbow*, *Holographic foil*, *Oil slick*, *Pearl*, *Heat tint* — run
+through their colours and back. *Cycle every* is how long the stroke is before the colour comes round
+again, in brush sizes, so it reads the same at any size. Only the colour brush takes it. The game has
+no shader that shifts with the viewing angle on a skin, so a holo is baked colour; for a fill, the
+gradient's stop rows have the same sets under *holo preset…*. The shape tool's *Stamp along* takes it
+too — one-shot, as a path layer and on the model — each stamp coloured by how far along the path it
+is, and a path layer keeps the cycle and redraws with it.
+
+**Pattern** (its own section, under *Tip dynamics*) turns the colour brush into a pattern brush: pick
+*Cells* — hexagons, squares, diamonds, triangles or scales — and a stroke on the model reveals the
+lattice **a whole cell at a time**, honeycomb-fashion, wherever the ring passes over a cell's centre. A
+cell is laid whole even where it runs past the ring, the cells line up from stroke to stroke, and
+because the lattice lies on the model rather than on the texture a cell over a part seam or a UV
+island's edge is one cell on both sides. *Cell fill* and *Border* each have a colour and a switch,
+*Border width* is a share of a cell's side, and *Size* (metres, one tile's width) and *Angle* place the
+lattice — the same numbers as a *lattice, along the model* fill, so a brush and a fill set alike lay
+the same cells. Opacity, Flow and the tip's shape and size still apply: a soft or low-flow brush
+reveals each cell at a lower opacity, never half a cell. It paints in the 3-D view with the
+*Projected 3-D brush* on; on the sheet, or with the projected brush off, a pattern stroke is refused
+with a message rather than painted as plain dabs.
+
+**The brush outline** is the shape of the dab, in both views: a *Round* as the circle its Size spans,
+a *Square* as its square, and a Rivet, a Chip or a loaded picture as its own outline — traced where its
+coverage is half its strongest — turned to its Angle and, while you paint with *Follow* on, the way
+the stroke is heading. On the model it lies on the surface the way the texture runs there, so a
+turned or one-sided tip shows the way it will paint (on a mirrored piece of the texture, mirrored);
+with the projected 3-D brush it faces you instead, because that brush paints what is under the ring
+as the camera sees it. The inner line, where a soft edge stops being opaque, shows only for Round and
+Square, the two tips Hardness shapes.
+
+**Retouch blurs, sharpens, smudges, dodges or burns** the colour under the brush — pick which in its
+*Retouch* row. *Strength* is how much: Blur's reach (an eighth of the brush size at 100), Sharpen's
+amount, how much colour Smudge carries on from dab to dab (so a smudge fades as it goes, sooner at a
+low Spacing), how far Dodge lightens or Burn darkens. Dodge and Burn have *Tones*: the shadows, the
+midtones or the highlights move most. Like the Clone, a stroke reads the sheet as it was when it
+began, so going back and forth over a spot in one stroke does it once; another stroke does it again.
+It reads what you see — every layer together — and paints the result onto the layer in hand, colour
+only, so use a normal layer at full opacity on top: on a Multiply layer, say, a Dodge would darken. It
+has no Fill; *Stamp along* a path works. For the other maps, or the whole sheet at once, an effect
+layer's Blur and Sharpen do the same live.
 
 **Clone copies the sheet from somewhere else** — the rivets, panel lines and dirt the game's own
 albedo already has, onto where a marking used to be. Alt+click sets the source (a cross in the 2D
@@ -293,13 +445,23 @@ onto a shaded one; off, the copy is exact. **Clone normal** is the same tool on 
 which is where the rivets and panel lines live post-2022. Both write to a layer of their own, like
 every brush.
 
-**Painting is one switch.** The **Painting** button under the brush, the button over either view, or `B` — it covers 2D and 3D together, and picking up a tool turns it on. With it off, a click in 3D picks parts and orbits and a drag in 2D pans. While it is on, a **ring is projected on the surface** under the cursor showing the brush's true size: brush size is authored in texture pixels, which is half a drop tank and a hand's width of fuselage at the same number, so the ring is derived from the hit triangle's texels-per-metre. It is the circle the Size spans whatever the tip — it marks the Size, not the dab: the Round, the Rivet and the Chip lie inside it, while a Square's corners, and those of a loaded picture whose ink reaches them, lie outside — and its inner ring, where a soft brush stops being opaque, shows only for Round and Square.
+**Painting is one switch.** The **Painting** button under the brush, the button over either view, or `B` — it covers 2D and 3D together, and picking up a tool turns it on. With it off, a click in 3D picks parts and orbits and a drag in 2D pans. While it is on, a **ring is projected on the surface** under the cursor showing the brush's true size: brush size is authored in texture pixels, which is half a drop tank and a hand's width of fuselage at the same number, so the ring is derived from the hit triangle's texels-per-metre. It has the tip's own shape — see *The brush outline* — and its inner ring, where a soft brush stops being opaque, shows only for Round and Square.
 
-**Across UV seams.** Painting over an island border used to leave pale straight lines along it, or spray onto an unrelated part of the sheet. The stroke is now continued from the geometry: each triangle's texel density says how far a stamp should have moved on the sheet, so a genuine seam crossing is recognised and never bridged, and the pointer's travel is subdivided in screen space with a raycast per sub-step, so both sides of the seam are filled with real surface hits.
+**The 3-D brush paints what you see.** In the 3-D view each dab covers whatever is under the ring as the camera sees it, so a stroke runs on across a part line or a UV seam without a step or a cut, a dab at a wing's edge seen from above stops at the edge instead of running round onto the underside, a part hidden behind the one you paint stays clean, and a dab on one piece of a part never lands on another piece that happens to sit beside it on the texture. The dab is the ring's size on any part, however its texture is stretched; its size is fixed in metres when the stroke starts — what the ring shows there — so the paint is the same zoomed in or out. Every tool works this way but the Clone and Retouch, which read the texture round each dab and paint on it as the 2-D view does (the status line says so once) — colour, the eraser, smoothness, metalness, wear, Flatten, Panel line and a layer's mask, with pressure, the tip and its dynamics, and with Symmetry and Radial, whose copies land as the mirror image or the turn of exactly what the stroke paints. When the ring hangs over a part's edge, whatever shows through past the edge — the fuselage behind a wing, the ground — is left alone, while a panel turned steeply away still takes the whole dab; and the paint runs a texel or two past the edge of each piece of the texture, so the 3-D view shows no thin line of the old colour along it. A surface on another texture still hides what is behind it, as for a projected decal; hide the part in front to paint behind it.
+
+**Facing limit** (*More brush options*, 85° unless you change it) is how steep a surface the 3-D brush still paints: one turned further than that from you takes nothing, and the paint fades in over the 15° before it, so the edge of a curved surface is soft rather than cut. Lower it to keep paint off surfaces you see at a glancing angle; at 90° the brush paints right up to the silhouette.
+
+**Projected 3-D brush** (*More brush options*, on) is the switch for all of the above. Turned off, a 3-D dab is a disc on the texture round the point under the cursor, the way the 2-D view paints, kept to the part you clicked: it follows a piece of the texture round an edge you cannot see, and a stroke is continued across a UV seam by casting a ray at every step of the pointer's travel.
 
 **A layer owns one channel, and the tools follow it.** With a Metalness layer selected the colour brush is switched off and says which channel you are in — a layer that declares a channel only ever writes that channel, so a "Metalness fill" no longer paints the vehicle in the colour picked for it, and it no longer offers a colour to pick: a fill on a single-value channel takes a value slider. Only the options a tool actually uses are shown. Click the selected layer again to deselect it and go back to painting the base texture.
 
-**The shape tool.** **Shape: off / on** in the right-hand panel turns the 2-D view into a pen: click to place points, drag as you click to curve the one you just placed, **Ctrl+drag** a point to curve it later, **Alt+click** one to take it out, **Backspace** to drop the last, and click the first point again to close the path. **Esc** throws it away. Then any of three verbs — they are the same path:
+**The shape tool.** **Shape: off / on** in the right-hand panel turns the 2-D view into a pen: click to place points, drag as you click to curve the one you just placed, **Ctrl+drag** a point to curve it later, **Backspace** to drop the last, and click the first point again to close the path. **Click the line** between two points to put a new point there — the curve keeps its shape, and you can drag the new point straight away; on a closed path this is how you add one. The point you last clicked is **selected** (drawn larger): **Delete**, or the **Delete point** button, takes it out, as does **Alt+click** on any point. Curves are smooth by default; **Angle** makes them deliberately angular — the curve turns at most that much inside one straight piece, so at 30° a quarter circle is three pieces, at any size — and **Bias** bunches those pieces towards the start or the end of each segment. Both belong to the path: a new path takes the panel's values.
+
+**A path as a layer.** With **as a layer you can reshape** ticked (the default), **Fill** and **Stamp along** with the Brush put the path on a new layer of its own — *Path 1*, *Path 2* — instead of into the layer you had selected. The shape tool goes on editing that layer: drag a point, click the line to add one, Delete one, change Angle or Bias, and the layer redraws to follow; each change is one undo step. Press **Fill** or **Stamp along** again to redo it with the brush you have now — another colour, another tip. **Esc** lets go of the layer (it keeps its path); select a path layer with the shape tool on to pick it up again. You cannot paint on a path layer with the brush, because it is redrawn from its path — duplicate it to get a copy you can paint on. A project holding a path layer is saved as version 6, which older builds of the app refuse rather than lose the path. Untick the box to fill or stamp straight into the selected layer, as before; a path drawn on the model is always painted that way.
+
+**Moving a whole path.** **Move · scale · turn** puts a box round the path: drag inside it to move the path, a corner to scale it, the knob above it to turn it (hold **Shift** for 15° steps). While it is on, clicks do not add points; press it again to go back to editing points. On a path layer the layer follows, and each drag is one undo step. It works on the 2-D sheet.
+
+**Path presets.** The **Preset** row keeps paths in this browser, beside the decal library. **Save** keeps the path you are editing — on a path layer, with its Fill or Stamp along and its brush. **Use** lays the chosen preset on the selected texture: a path layer with the brush it was saved with, or, for a path saved before it was filled, the path alone to fill or stamp. A preset is scaled to the texture it lands on. The ✕ forgets it. **Esc** throws it away. Then any of three verbs — they are the same path:
 
 - **Fill** paints the closed shape on the layer you are painting, in the brush's own colour (or value, on a single-value channel) and opacity — in **one** fill, so the edge is clean rather than the pale seam that two overlapping fills leave. A hard-edged disruptive camouflage is about six clicks.
 - **Stamp along** walks the brush you are holding down the path at its own **Spacing**: rivets round a hatch, a panel line that follows a curve, a dotted wear line. It works with every tool and every channel, so *Panel line* stamped along a path carves the groove and *Clone normal* copies rivets onto the normal map. It lays the brush's tip, and with *Angle follows the stroke* each stamp is turned to the path — a row of square rivets round a curve stays square to it, and so does its mirrored copy.
@@ -372,9 +534,14 @@ project**: an island has no name, only a place, so it is a selection rather than
 Bake it into a mask, or use a layer's part limit, if you need it to survive a reload.
 
 **The selection shows on the model, not only on the sheet.** Whatever is selected — a rectangle, a
-set of islands, or a lasso's, a wand's or a path's shape — is tinted on the vehicle in the 3D view,
+set of islands, or a lasso's, a wand's or a path's shape — is marked on the vehicle in the 3D view,
 because a selection confines the brush in *both* views and a viewport that showed none while half
-your strokes were refused was the worst kind of hidden mode. Press `V` to draw the UV island outlines
+your strokes were refused was the worst kind of hidden mode. It is marked the same way in both views:
+a solid blue line just inside its edge and a faint blue wash over the rest, so the colour and wear of
+what you selected still show through. Press `H` (or *Hide* in the Selection panel) to put the marking
+away while you judge or paint the texture under it: the selection is still there and still keeps the
+brush inside it, the panel says it is hidden, and `H` again — or making a new selection — shows it.
+`H` hides the selected decal's outline on the model too. Press `V` to draw the UV island outlines
 over the sheet as well, so you can see the shells before you click one.
 
 ### The lasso, the magic wand and a path
@@ -398,7 +565,12 @@ project; *→ layer mask* keeps one.
   any one of red, green, blue and alpha, 0–255; 0 takes exactly that colour. With **Contiguous** on
   (the default) only the patch you clicked is taken, joined edge to edge, so two blotches that touch
   at a single corner stay two; with it off every texel of that colour anywhere on the sheet is taken,
-  which is Photoshop's *Colour Range*. The wand reads the sheet the 2-D view is showing: the finished
+  which is Photoshop's *Colour Range*. With **Edge** on (the default) it also takes the soft edge
+  round what you click — the thin ring of texels that are part this colour and part the one beside
+  it, the way a stock marking's edge is drawn — so filling a picked star with a new colour leaves no
+  ragged ring of the old star round it. It adds only texels that are a mix of the two colours, never
+  plain background, and never a texel that only touches the patch at a corner. Turn it off to take
+  exactly what the tolerance says. The wand reads the sheet the 2-D view is showing: the finished
   colour normally, or the smoothness, metalness or normal sheet when the brush in hand paints that
   channel or a channel view shows it, so a patch of gloss is picked by its gloss. On a ground or naval
   vehicle with the camouflage preview on it takes the colours you see — the camouflage where the
@@ -495,6 +667,14 @@ strength for all of them:
   so a crop out of a larger map still has relief. Depth tools disagree about which end is near; most
   output *near = white*, which is what this expects, and **Invert** is there for the ones that do not
   — the wrong polarity turns every ridge into a groove.
+- **Generated from the image** makes that map from the decal itself, with no file: light parts are
+  high and transparent parts are the surface, softened so a hard edge slopes (**Soften**, which
+  remakes it when moved) and stretched to the full range so **Emboss** alone sets the strength. It is
+  also the **Generate from the image** button beside *Load…*; the little square beside it shows the
+  map the relief is read from, whichever kind it is. It is a simple estimate — right for lettering,
+  stencils and printed markings, wrong wherever a dark colour is not a hollow — so tick **Invert** if
+  the marking should be the low part, or load a real map. A one-colour image has no tone to read and
+  is refused; *Bevelled body* is the relief for that.
 
   **A normal map works too** — the blue-purple kind. It is recognised when it is loaded and turned
   into a height map, so it rotates, mirrors and wraps round the model with the decal exactly the way
@@ -542,13 +722,16 @@ sessions.
 
 ## Decals
 
-Add one by dropping an image file, dragging one out of a web page, or `Ctrl+V` — or letter one with
-**Text** (`T`): see *Text — serials, codes and names* below.
+Add one by dropping an image file, or `Ctrl+V` — or letter one with **Text** (`T`): see *Text —
+serials, codes and names* below. To bring in a picture from a web page, right-click it ▸ *Copy image*
+and press `Ctrl+V`, or save it and drop the file. Dragging it straight out of the page only works when
+the page hands over the image itself; when it hands over a link, the app does not download it — it
+never reaches the network — and the status line says so.
 
 - **A new decal lands on the model.** When you add or paste an image (or *Use* one from the library), it goes straight onto the model, projected from the current view onto whatever is in the middle of it, and is selected with its frame and handles showing — nothing waits on the cursor. So line the camera up the way you want it to read first. It is a true planar projection, wrapping correctly across UV seams and panel gaps; selection, protected and hidden parts are respected; symmetry projects the mirrored copy too; it is depth-limited so it won't print through to the far side. Adding it is one `Ctrl+Z`. With no model loaded, or nothing of it in the middle of the view, it lands flat in the middle of the texture instead and the status line says so.
 - **One decal, two placements: On the model / On the texture.** The switch at the top of the decal's panel converts it in place, either way, at the same size and turn — *On the texture* lays it flat on one texture, the way that texture is unwrapped (right for a flat panel, or for exact work in 2-D); *On the model* wraps it round the surface again. Its Look, depth map, text and mirrored copy go with it, and each switch is one `Ctrl+Z`. A decal that covered several textures keeps only the one under its middle when it goes flat, and the status line says so. On a texture whose unwrap is stretched unevenly a flat decal cannot follow the stretch, so it comes out at the nearest size and angle.
 - **One decal even across several textures.** A marking over a wing root needs a layer in each sheet it covers, but it stays one object: moving, resizing, rotating, hiding, renaming and deleting all act on the whole group, and the layer list marks it `×2 tex`.
-- **Moving a decal** — with painting off, just drag it: on the model or on the texture, whichever placement it has, and a press anywhere else still orbits. There is no mode to switch on first. `←↑→↓` nudge, `,` `.` rotate — on the model in the projector's own axes. Grab a decal on the model anywhere inside its blue frame; it holds the point you grabbed, so it does not jump. It re-projects onto whatever surface it lands on, so it never smears, and it picks up textures it moves onto. With painting off it can be **dragged on the sheet** in the 2-D view as well: it holds the point you grabbed and lands on the part of the vehicle under that texel. It keeps its aim while it moves, in either view, so a decal dragged onto a panel facing another way projects onto nothing until you press *Re-aim from this view*.
+- **Moving a decal** — with painting off, just drag it: on the model or on the texture, whichever placement it has, and a press anywhere else still orbits. There is no mode to switch on first. `←↑→↓` nudge, `,` `.` rotate — on the model in the projector's own axes. Grab a decal on the model anywhere inside its blue frame; it holds the point you grabbed, so it does not jump. It re-projects onto whatever surface it lands on, so it never smears, and it picks up textures it moves onto. On a big texture (over 2048) it is drawn a little soft while it moves, so it keeps up with the pointer, and sharpens a moment after it stops — what it shows then, and where you let go, is exactly what placing it there would give. With painting off it can be **dragged on the sheet** in the 2-D view as well: it holds the point you grabbed and lands on the part of the vehicle under that texel. It keeps its aim while it moves, in either view, so a decal dragged onto a panel facing another way projects onto nothing until you press *Re-aim from this view*.
 - **Size / Rotate re-project** from the original image rather than stretching baked pixels — and so do its corner handles and turn knob, which are the same two controls in your hand. **Re-aim from this view** points the projector at the current camera without moving where the decal sits — the fix for one placed from the wrong angle. Because the pixels are regenerated on every move, the brush won't touch a projected layer; duplicate it (⧉) to paint on the copy.
 - **Edit a projected decal's image afterwards.** **Open decal editor…** in the decal's panel opens the image the decal was projected from, as it is on the model now: remove its background, crop it, adjust it, turn or flip it. **Use this decal** re-projects it where it is — same place, same angle, and the marking keeps its size even when a crop or a turn changes the image's shape; cropping away a margin that was wider on one side does not move it (a mirrored copy with *Keep the copy's lettering readable* then moves to sit exactly opposite it — the uneven margin had held it off — and the status line says so). A depth or normal map used for its relief is cropped and turned with it, and an outline or shadow keeps its width. It is one step, so `Ctrl+Z` puts the old image back. The Look stays as it was unless you pick another in the dialog. The name box there names the copy **Save** puts in your library; rename the decal itself in the layer list. If an undo or a redo changes the decal while the editor is open, **Use** does nothing and the status line says so — open the editor again.
 - **A flat decal** (On the texture) drags in either view too, holding the point you grabbed — on the model it moves while the pointer is over its own texture.
@@ -715,9 +898,13 @@ The top bar runs from what you are making (files, skin name, vehicle, export, un
 (*3D · Split · 2D*, *View*, the camera button for a screenshot, the side-panel toggle) to the app's
 own chrome at the right edge: **?** for help and **Settings** last.
 
-**Export as…**, **History** and **Settings** each open a window under their button. The windows are not modal —
-nothing dims, and the Export window stays open while you orbit and paint, because two of its settings
-are previewed by the 3-D view itself. Escape closes whichever is open. The **?** screen (*Controls &
+**Export** exports in one click; the **gear** beside its text, **History** and **Settings** each
+open a window under their button. The windows are not modal —
+nothing dims, because two of the Export window's settings are previewed by the 3-D view itself.
+The Export window closes by itself once an export from it has finished, when you click in the 3-D
+or 2-D view, and when you start a tool from the keyboard (B, M, K, L, W, T); it stays open while an
+export is running and after one that failed or was cancelled, so you can read why, and the gear
+opens it again as you left it. Escape closes whichever window is open. The **?** screen (*Controls &
 guide*) opens above them, and Escape closes it first — as do its ✕ and a click outside its panel.
 **View & scene** sits in the right sidebar under the tools you paint with, and the *View* button
 scrolls to it; **Moving parts** is a section of its own under it, which appears once the loaded model
@@ -730,6 +917,20 @@ has more than it shows — hover it (after opening the game folder, the line cou
 list holds, and the counts of models, textures and packs, the textures not opened and why, and the
 game's units the list leaves out are there — the same on a visit that reuses the stored index). An
 error that does not fit opens by itself.
+
+### Updating
+
+Click the version — under the title on the welcome card, or at the right end of the status bar. The
+panel shows **What's new in this build**, and **Check for updates** asks GitHub for the list of
+releases: every build newer than yours is listed newest first with its date, its size and what it
+adds, so you can decide whether it is worth taking before you download anything. *Open the release
+page* takes you to the newest one; download `wt_skin_studio.html` there and save it over your old
+copy, in the same place, so the browser keeps treating it as the same page. With no newer build it says *You have the newest build*; offline, it says so in one sentence
+and gives the release page's link.
+
+The check is the **only** request the app ever makes, it happens only when you click it, and it
+sends nothing about you or your work. After you open a new build for the first time, it shows its
+*What's new* once by itself; the panel shows it again whenever you like.
 
 ## Settings
 
@@ -753,6 +954,23 @@ library or the open project — `Forget folder & cache` is the one for the first
 
 ## Export
 
+**Export** in the top bar exports at once, with the settings as they are; the **gear** beside it
+opens them.
+
+**Uploading to WT Live.** *Zip for WT Live*, at the foot of the Export window, packages the skin the
+way the market takes it: **one archive per vehicle**, each with only that vehicle's `.blk` and the
+textures it names, and the archive and its folder named in English letters and digits only (a skin
+called *My Skin-2* becomes `MySkin2.zip`). The rule list above it is what the app checked; under it,
+*For WT Live — only you can confirm* lists what no file can show — a 16:9 preview (the screenshot's
+*Market preview*), reference photos for a historical scheme, no trademarks or banned symbols, and the
+upload form's *inverted roughness* box while the textures carry it. Its ticks are for you and are not
+saved. **Mipmaps are off by default**: with War Thunder's older-video-card support on, a
+mipmapped surface seen at an angle comes out blurry. Tick *Advanced export ▸ Mipmaps* if you want
+less shimmer at a distance — the game accepts a skin either way. A texture with a layer limited to
+some mip levels (*Shows at*, under Layers & masks) is written with its whole chain whatever the tick
+says, since those levels are the point — its row in *Textures out* says *own levels 3–11* — and as a
+DDS even under the TGA preset, which holds one level; set to TGA by hand, the rule check stops it.
+
 **Every export setting has a preview of what it does**, in the right half of the Export window.
 *Preset / format* shows a 64-texel crop of the sheet where the 2-D view is looking — *as painted*
 beside *as exported*, the second really encoded with the chosen format and decoded back, with how many
@@ -762,9 +980,14 @@ move the crop. *Mipmaps* shows the crop at a quarter size two ways — averaged,
 game, and point-sampled, as no chain does — with the one you will get outlined. *Seam padding* shows
 the same crop with the texels the export will bleed past the island edges tinted, and how deep. *Camo
 under skin* and *Alpha* are previewed by the model itself: the viewport blends the camouflage through
-the sheet's alpha exactly when the export keeps it, and the sentence under Alpha says which and why.
+the sheet's alpha exactly when the export keeps it, and the line under Alpha says which and why.
 *Mode* and *inverted roughness* change what the game does with the file rather than a pixel, so their
-preview is the sentence under the control.
+preview is the line under the control.
+
+**Each explanation in the Export window is one line; hover it for the whole of it.** A line with a
+dotted underline has more in its tooltip — why DXT5 bleeds, what set_tex keeps, where the repeat
+length comes from. What says something is *wrong* (a failing publishing rule, a camouflage that
+cannot be pinned) is always shown in full.
 
 Presets: Game (BC3 + lossless normals) · WT Live (BC3 everything — Gaijin's recommended format) · Lossless · TGA · Custom per-map. Options: mipmaps (normals renormalized per *generated* level — the full-size level is left exactly as you painted it), seam padding (color dilated past UV island edges — prevents seams in distant mips). **War Thunder accepts a skin with no mip chain at all** — the game's own extracted textures have none — and there is a real reason to turn mipmaps off: with the in-game *older video card support* option enabled, sampling is biased toward a lower mip, so angled surfaces on a mipmapped skin read as blurry. That is the game's sampling, not a fault in the skin. Generates the `.blk` automatically. *To War Thunder* writes straight into `UserSkins/<name>/` (Chrome/Edge); where the browser cannot write there it offers *Download .zip* instead, before encoding anything (Quick start, step 4). Normal maps are always packed to WT's layout: R = inverted roughness, G = normal X, B = metallicity, A = normal Y.
 
@@ -820,7 +1043,7 @@ A session you saved to a file is not offered again. If you close the welcome scr
 
 ## Shortcuts
 
-`?` controls & guide (`Esc` closes it) · `Ctrl+Z/Y` undo/redo · `Ctrl+S` save project · `B` painting on/off (both views) · `S+click` switch to that part's texture slot · `X+click` protect / unprotect that part · `F9` mark the moment in a session recording · `F` fly · `[` `]` / `Alt+wheel` brush size · `Ctrl+wheel` widen/narrow the part selection · `Ctrl+Alt` select the same shape · `Ctrl+H` solo the selection · `Alt+click` pick color · `Shift+click` line · `` ` `` compare original · `Space`/middle-drag pan · `T` add text · `M` rectangular selection · `K` UV island selection · `L` lasso · `W` magic wand (Shift adds, Alt takes away, with any of them) · `V` UV island outlines · `Ctrl+A` select the whole sheet · `Esc` deselect · `Ctrl+'` pixel grid · `Ctrl+;` rulers and guides (`Ctrl` while dragging places freely). All shortcuts use physical key positions, so they work with any keyboard layout.
+`?` controls & guide (`Esc` closes it) · `Ctrl+Z/Y` undo/redo · `Ctrl+S` save project · `B` painting on/off (both views) · `S+click` switch to that part's texture slot · `X+click` protect / unprotect that part · `F9` mark the moment in a session recording · `F` fly · `[` `]` / `Alt+wheel` brush size · `Ctrl+wheel` widen/narrow the part selection · `Ctrl+Alt` select the same shape · `Ctrl+H` solo the selection · `Alt+click` pick color · `Shift+click` line · `` ` `` compare original · `Space`/middle-drag pan · `T` add text · `M` rectangular selection · `K` UV island selection · `L` lasso · `W` magic wand (Shift adds, Alt takes away, with any of them) · `V` UV island outlines · `Ctrl+A` select the whole sheet · `Esc` deselect · `H` hide / show the selection's marking · `Ctrl+'` pixel grid · `Ctrl+;` rulers and guides (`Ctrl` while dragging places freely). All shortcuts use physical key positions, so they work with any keyboard layout.
 
 ## Finding a vehicle
 
@@ -964,6 +1187,20 @@ skin ▸ My own pattern…** makes one and opens it:
   the hangar's two sliders, 20 %–200 % and ±180°, so you can see how the pattern holds up at the
   sizes a player might pick. They are only a preview: **the player owns scale and rotation**, and
   nothing about them is exported.
+- **Is the scale right? — the Calibration grid.** Under *Preview*, **Scale check ▸ Calibration grid**
+  fills the tile with a mid-grey grid of 16 numbered cells (1–16 from the top left), a red frame on
+  the tile's edge — one red square is one repeat — and a yellow arrow in cell 1 pointing toward +v,
+  which is down the picture, the way a DDS's rows run. While the grid is in, the same button reads
+  **Remove grid** and puts back the pattern it covered, even after other edits (the pattern is kept
+  until you close the page; after a reload it puts back the tile's start instead, and says so). The
+  pre-export check reminds you while it is in. Any paint layers already on the tile still draw over
+  it, so hide them for the check. The line under the button says,
+  for the vehicle that is loaded, how long one repeat is at the default scale and how many fit along
+  its hull — measured from the model's own camouflage UV against its own positions, and different
+  for every vehicle (the Leopard 2A4 comes to about 12.8 m, the M1A2 about 14.5 m). To check it
+  against the game, export the skin under a new name, put it on the same tank in the hangar with the
+  camouflage scale and rotation at their defaults, and compare which cell numbers sit on the nose, the
+  rear and the turret in the game and in the app: the same cells means the preview is right.
 - **Export** writes the tile as `wtss_camo_tile.dds` (or `.tga`, following its format in *Textures
   out*) and one `replace_tex` pin naming it for each camouflage the vehicle's own skins replace. The
   pin list under the menu shows them, and says which of the model's other camouflage sheets — a
@@ -1008,6 +1245,7 @@ Restore the stock coverage mask*, or start from the game's own textures instead 
   cannot be moved.
 - Projection paints only the **first surface each ray meets**, so it no longer prints through a fin onto whatever is behind it. To reach a surface that is inside the vehicle, **hide the part in front of it** — a hidden part does not block the beam. (Part scope and protected parts do not: a part you have scoped a layer away from is still solid, so it still blocks.)
 - UV-space (floating) decals still distort across seams — use projection for anything near a seam.
+- A `.dds` sheet in a skin larger than 8192 px — the largest the editor holds — is loaded at 8192 (the status line names it), and so is it when a project carrying it is reopened; the editor works on, and exports, that size, and the game still reads the skin's own file as it is. A `.tga` or `.png` that large, or one picked with *Replace texture*, still loads at its own size.
 - Part stencils (selection masking, per-layer part scope) are rasterized at up to 2048², so on a 4096²/8192² sheet a part boundary is accurate to a texel or two rather than exactly.
 - A **Copy** taken off a smoothness, metalness or normal layer that is smaller than the colour sheet — the `_n` usually is half its size — lands at twice its size, centred where it came from. Off the colour sheet, or a layer its size, it lands exactly where it was taken.
 - On your own camouflage tile a **selection stops at the tile's edge**: a rectangle, a lasso, a wand's patch or a path's selection that runs onto one of the repeats around it keeps only the part on the tile itself, although strokes and a path's Fill wrap. A wand click on a repeat does take the colour under the pointer.
@@ -1204,9 +1442,13 @@ time. Where one disagrees with the sections above, the sections above describe t
   panel detail, the coverage mask and in-game decals survive — this is the same mechanism the game's
   own camouflages use.
 - **Every byte of the texture is reachable.** *Textures ▸ Channels* shows both sheets as what they
-  actually are — `_c` = colour in RGB, coverage in alpha; `_n` = inverted roughness, normal X,
-  metalness, normal Y — with a thumbnail and mean for each. Click one to see it flat on the model,
+  actually are — `_c` = colour in RGB, coverage in alpha; `_n` = inverted roughness, normal Y (up/down),
+  metalness, normal X (left/right) — with a thumbnail and mean for each. Click one to see it flat on the model,
   right-click for fill / invert / brightness-contrast / restore-stock-mask. All undoable.
+  Until 2026-10-25 the app had the two slopes the other way round, so a decal's relief and anything
+  painted on the normal channel reached the game turned across the diagonal and the 3-D view lit
+  them upside down; the vehicle's own surface was never affected. A project saved before then opens
+  with its surface sheet put right, and is saved as version 8, which older builds refuse.
 - **The preview does the game's blend.** `mix(camo, skin, alpha)` with the real camouflage texture
   bound, instead of an approximation from its average colour. A sheet whose mask has been flattened
   now *looks* flattened.
@@ -1270,13 +1512,24 @@ time. Where one disagrees with the sections above, the sections above describe t
   sheet that is the glowing ring inside the nozzle; the long afterburner plume you
   see in flight is a separate volumetric effect of the game's, which no skin can change and the
   preview does not draw.
+- **The jet flame has a slot of its own.** On a jet, the slot list has a row marked *jet flame*
+  (`jet_flame_diamonds`, or `jet_flame` on older aircraft) and one marked *gun flash*. Paint the
+  flame in the 2D view, or load a skin that carries its own flame sheet, and the flame on the model
+  shows it as you go — turn *Jet flames & gun flashes* on to see it. The colour counts where the
+  sheet's alpha does, as in the game. The game shows a skin's own flame sheet from UserSkins (many
+  community skins do this), but WT Live refuses a skin that changes it, so the sheet stays out of
+  the export until you open its ⊘ mark and tick it; it is then written with the same
+  `replace_tex { from:t="jet_flame_diamonds*" … }` those skins use. The flame sheet is always
+  written as DXT5 (BC3), whatever the format preset says, because that is the form the game takes
+  for it.
 - **One painting switch** — the button under the brush, either view's button, or `B` — covers both
   views. The tool row is only tools; picking one up turns painting on. With painting off, a drag in
   the 2D view pans.
 - **A brush ring is projected on the surface**, sized from the hit triangle's texels-per-metre, so
   it shows the brush's real footprint rather than a fixed screen circle. The 2D view draws the same
   circle; the inner ring is where a soft brush stops being opaque. *(Since v0.22's brush tips, the 2D
-  view outlines a Square tip as its square; the ring stays the circle the Size spans — see Brushes.)*
+  view outlines a Square tip as its square; since 3.41 (2) both views draw every tip's own outline — see
+  Brushes.)*
 - **Painting across a UV island border no longer streaks or gaps.** A real seam crossing is
   recognised from the geometry (each triangle's own texel density), and the pointer's travel is
   walked in small steps that are each raycast for their own surface point.

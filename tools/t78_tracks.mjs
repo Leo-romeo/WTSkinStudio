@@ -25,7 +25,7 @@ import { fileURLToPath } from "url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\\/g, "/").replace(/\/+$/, "");
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };

@@ -20,11 +20,12 @@ import { A, grp, WT } from "./arms.mjs";
 import { installOodle } from "./oodle_lift.mjs";
 import { makeReport } from "./headless.mjs";
 import { fileURLToPath } from "url";
+import { isDirEntry } from "./wtdir.mjs";
 
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url)).replace(/\\/g, "/");
 const src = fs.readFileSync(HTML, "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + n + " not in the page");
   return src.slice(a + 1, b);
 };
@@ -68,15 +69,15 @@ const seat = Cockpit.seatFrom(f4head);
 // ---- 3. geometry: the F-4E's two bodies ----
 globalThis.ZSTD_WASM_B64 = /const ZSTD_WASM_B64 = "([^"]*)";/.exec(src)[1];
 const MOD = new Function(section("MODEL") + "\nreturn { grpParseFront, GRP_CLS, loadDynModelBytes, loadSkeletonBytes, buildDynModelGeometry, grpDecompress };")();
-const BLK = new Function(section("ZSTD") + "\n" + section("BLK") + "\n" + section("VROMFS") + "\nreturn { loadGameResDesc, descGetModel, buildDescBind, zstdDec, zstdDict };")();
-globalThis.zstdDec = BLK.zstdDec; globalThis.zstdDict = BLK.zstdDict;
+const BLK = new Function(section("ZSTD") + "\n" + section("BLK") + "\n" + section("VROMFS") + "\nreturn { loadGameResDesc, descGetModel, buildDescBind, zstdDec: Zstd.zstdDec, zstdDict: Zstd.zstdDict };")();
+globalThis.Zstd = { zstdDec: BLK.zstdDec, zstdDict: BLK.zstdDict };   // the sections reach it as Zstd.* (ROADMAP 2.3)
 installOodle(src);
 function walkDesc(dir, out = [], depth = 0) {
   if (depth > 7) return out;
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walkDesc(p, out, depth + 1); }
+    if (isDirEntry(e, p)) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walkDesc(p, out, depth + 1); }
     else if (/Desc\.bin$/i.test(e.name)) out.push(p);
   }
   return out;

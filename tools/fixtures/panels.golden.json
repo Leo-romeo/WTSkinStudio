@@ -38,133 +38,158 @@
     },
     "layers-panel-props-fill-value": {
       "what": "layers panel: a smoothness fill takes a value and no colour picker, and says what the numbers mean",
-      "chars": 8636,
-      "sha256": "46abed06467e8c7903f6958d635811713cdc6ad9bf101a34c3f6228238d23113"
+      "chars": 8746,
+      "sha256": "5b50260323f6cef7487039fa8db401e3347baa8472b0b01bf52bef5f5ba95446"
     },
     "layers-panel-props-adjust": {
       "what": "layers panel: an adjustment layer's four parameters — the rows 4.28's D2 turns into an effect",
-      "chars": 6154,
-      "sha256": "4e4ce4512bb63d8cf7e19c79f2e3211826639f1f4e65904244fbd93244452f46"
+      "chars": 6268,
+      "sha256": "e9ead2a2588ba9118da5d1e6bc5816e2fab1643f15aeb965667f228877304355"
     },
     "layers-panel-props-group": {
       "what": "layers panel: a group selected — its properties, and the header button says Ungroup",
       "chars": 4787,
       "sha256": "3f30deb17408ef27c95c4f8b16bd830df59caf0803674601e2883b45fb2bd239"
     },
+    "layers-panel-props-levels": {
+      "what": "layers panel: a far-only layer with a soft edge — Shows at's three selects, its ✕, the level-0 hint, and mip 3+ on its row",
+      "chars": 11085,
+      "sha256": "375b69968614133c97a5c55e0b55c4ed2eb7324d33bc55fe414ef55847598ea7"
+    },
+    "layers-panel-props-levels-group": {
+      "what": "layers panel: a near-only group selected — Shows at on a group, no level-0 hint, and mip 0–2 on its row",
+      "chars": 6077,
+      "sha256": "bd1308f504783e4b2401e1b2a3cabe2b98a928eb8075998ae73b51eae61950f6"
+    },
+    "layers-panel-props-keys": {
+      "what": "layers panel: a fill keyed red at 0, green at 2 and blue at 4 with level 3 in hand — By distance, a bar per level, the level's colour, its ✕ and ✕ all, the plain colour read-only",
+      "chars": 11574,
+      "sha256": "1779c2a3febf6d85f75a6d04eb03440969de28871cf3a0dd5975f51b205a8f5e"
+    },
+    "level-effects-dialog": {
+      "what": "the level effects dialog: Holo foil's palette, first level, cycle and strength, then Distance camouflage on a texture with one group (the note, Add disabled), and the UserSkin line",
+      "chars": 3549,
+      "sha256": "0a06c7f06f862865e2d3e53f0fc9179544780cc641c22f64e1be847c4f59fe28"
+    },
     "layers-panel-props-gradient": {
       "what": "layers panel: a colour gradient fill — its shape rows and three stops with colour pickers",
-      "chars": 11731,
-      "sha256": "831068f8dca893f69b1e5aa9c0f062c5b263151519b226647253e0521f94888a"
+      "chars": 12323,
+      "sha256": "c4aac00dc069640b55f129c6bec285afde3c1794f52b0a4653fd566c7d56c783"
     },
     "layers-panel-props-gradient-grey": {
       "what": "layers panel: a smoothness gradient fill — value sliders instead of colour pickers",
-      "chars": 11496,
-      "sha256": "903b7cf8ad912faefa7cb3d6076c05f355054dc770903bd061bb26f1e78a30a8"
+      "chars": 11606,
+      "sha256": "7c1576affac0c24be87c60b6d8904c3895cc1c782188bfcb571a8ec08207f161"
     },
     "layers-panel-props-noise": {
       "what": "layers panel: a colour Perlin noise — its kind, scale, detail, roughness and seed, then levels and stops",
-      "chars": 12942,
-      "sha256": "0360397815d2baadb95c1b105bf99791ba9ab89f1b1f0080a04e5644edddc9cf"
+      "chars": 13534,
+      "sha256": "df8e9602c47d890b3bc4fee7efacbf7301ec329c3fd9d59ea9204521cceb9431"
     },
     "layers-panel-props-noise-streaks-grey": {
       "what": "layers panel: a streaks noise on smoothness — the stretch row, and value sliders for its stops",
-      "chars": 13157,
-      "sha256": "c05d389c740f0b3ee00558882909a60b82980f05bdbb38d319655be10959c655"
+      "chars": 13267,
+      "sha256": "3d32eee04e73c271e0705da258d3d0aade11bfd3b2384d8d585f4baa36a49c67"
     },
     "layers-panel-props-pattern-uv": {
       "what": "layers panel: a pattern on the sheet — the tile row, repeats, angle and offsets",
-      "chars": 9985,
-      "sha256": "75cd7fcf7a049b7f39cb20e2c7960523ac3c4a9a9b9ff6ebd79e3454380324ef"
+      "chars": 10095,
+      "sha256": "52c0243bd9b383e5e96c07a3c1d79186cbb46dc16250817a6e4e8dc6ed7f7d15"
+    },
+    "layers-panel-props-lattice-uv": {
+      "what": "layers panel: a lattice on the sheet — the cells, the fill and the border with their switches and colours, the border width, then the repeats",
+      "chars": 11156,
+      "sha256": "c75894cc70fbe4f946bb26fd71c1ec30f8159e4ebd7be4cddd93d30d74c808d7"
     },
     "layers-panel-props-pattern-model-normal": {
       "what": "layers panel: a pattern along the model on the normal map — the size in metres, the blend, and the warning",
-      "chars": 10579,
-      "sha256": "c1b5ea7c28cb99bf5effbbb63f09b71642c9d0188e6df77c0c2e71597da71d2d"
+      "chars": 10689,
+      "sha256": "32bf9a3c7a8db0920818b1339cc2abd19d7a4251d576453f92b9bc2d0c51cf9d"
     },
     "layers-panel-fx-levels": {
       "what": "layers panel: a colour Levels effect with its red channel in hand — the Channel select, five numbers, reset",
-      "chars": 7379,
-      "sha256": "bef6f77cef6887ed078536c817ee978a3ec6040811a631d81a43ab7d4fad2aea"
+      "chars": 7493,
+      "sha256": "c1ecf2a7334e2ac0734ed054e47e2571749bc8c719f8cdff91e64879f71250bf"
     },
     "layers-panel-fx-curves": {
       "what": "layers panel: a colour Curves effect — the box, reset and the hint",
-      "chars": 6554,
-      "sha256": "d87b2a2efb4d32856272513c28591a942e2bae5ad90c894cd547b68c81a6121b"
+      "chars": 6668,
+      "sha256": "0b183ca4a0e2181cee54a40fb46a47fda4937e01ca9a120c7364e7ce35a4e851"
     },
     "layers-panel-fx-balance": {
       "what": "layers panel: a Colour balance with its midtones shifted — the range select, three sliders, keep luminosity",
-      "chars": 6816,
-      "sha256": "7d2464b1fde7507b2425e93f29a5b7c25e94b4dc008f75befd8a2abd4f7b5cce"
+      "chars": 6930,
+      "sha256": "af99228431d3cc4a0baf5a775cd36fdf08ea24479e75c3d4227c7ce4ddec4da5"
     },
     "layers-panel-fx-gradmap": {
       "what": "layers panel: a Gradient map — the stop rows, pointed at the effect's own stops",
-      "chars": 7828,
-      "sha256": "484b291e1df801a3839c675be33f625cf174c444d9f93d73d1678389d1b138c4"
+      "chars": 8424,
+      "sha256": "5e5cb3a17fe7c24837e0b45fc7f18045f430c48a27523d539b877d53c9474860"
     },
     "layers-panel-fx-grey-levels": {
       "what": "layers panel: a Levels effect on smoothness — no Channel select, no colour-only kinds, the map's own hint",
-      "chars": 6888,
-      "sha256": "f42fd89f8fc91b2d477f023ccaf6434dffc128c4403714c92af148d9474e5cca"
+      "chars": 7002,
+      "sha256": "61d034c2ffb7f58dd2c37c02d4870e0f60c8fb75d59ed4383605fcc278036fa2"
     },
     "layers-panel-fx-grey-threshold": {
       "what": "layers panel: a Threshold on smoothness — one number and its hint",
-      "chars": 5875,
-      "sha256": "24daed67f634571c132e0972dc3c7ba19fac83ef5531e052a4ecc438c3355b4f"
+      "chars": 5989,
+      "sha256": "c10a22bdac20056a2ffaac5a26a6530c7bdd6e2c9dab0e942e17babaa395389d"
     },
     "layers-panel-fx-invert": {
       "what": "layers panel: an Invert effect — the kind select and its hint, and nothing to set",
-      "chars": 5824,
-      "sha256": "e01bfa3840d584a024f3ca323edb3f3d50d87a2d7cdec6302326ea07b2f8daad"
+      "chars": 5938,
+      "sha256": "2649db682fec9a12eeda64ef629691dd640acc5e9e61df360f12640dfab54f78"
     },
     "layers-panel-fx-posterize": {
       "what": "layers panel: a Posterize effect — one number and its hint",
-      "chars": 5995,
-      "sha256": "f1e538798b06129c0419531d080bb3fdb10cfbb7426fa9c95c847cb7a3b8b7fa"
+      "chars": 6109,
+      "sha256": "545f357f312405ca51c4fcd1572026ddd2e9dfdd4c3008a0e4a950e562681473"
     },
     "layers-panel-fx-unknown": {
       "what": "layers panel: an effect kind from a newer build — named as such, with no rows",
-      "chars": 5743,
-      "sha256": "fca57546f3399528f949a4227066f518c247fa45952eeb664355fc331e952f00"
+      "chars": 5859,
+      "sha256": "21a90f5983e9b3c842c975ebf5f3d57efc8d7588ac2143106fc52251cb927a7e"
     },
     "layers-panel-multichannel": {
       "what": "layers panel: one layer carrying three channels — the strip, the dots, and the rows describing the channel in hand",
-      "chars": 9267,
-      "sha256": "757d0db1ca9c3c11b51cbf1f153c2f54492ddff5b825b0c565e5d0c4252f3ae4"
+      "chars": 9377,
+      "sha256": "ebcf603093e62e9d4e5de71e036d32ed1fcc03b8dac4fc315aa944730d229b92"
     },
     "brush-no-slot": {
       "what": "brush panel: nothing loaded — every tool that needs a slot is off, and says so",
-      "chars": 14048,
-      "sha256": "278ed79222779031bcbbcf60ed08d73e411c62491518a4c4f7d06f447a9a3993"
+      "chars": 25138,
+      "sha256": "99e0fb02bcc044141ac31c8444ebb27be3368cf0fc207acfbde670139c4410a1"
     },
     "brush-air-paint": {
       "what": "brush panel: an aircraft with both sheets and a paint layer — the wear mask is not a concept here",
-      "chars": 14504,
-      "sha256": "9413d99019f537fc55ceeea8b576661cad14cedaddc8b796d87aa1cb5fc6b1fa"
+      "chars": 25782,
+      "sha256": "aae9606cedd10f9150f40c9db37e27737a810c83cb1aa1960bda06a94ab64d68"
     },
     "brush-tank-no-n": {
       "what": "brush panel: a tank with no _n — the wear mask appears, every surface tool goes off with the reason",
-      "chars": 15038,
-      "sha256": "fe4a8349326a2eee8dae3ec645b894420abeff5de6bfbea68be8e314ef3a4a67"
+      "chars": 26328,
+      "sha256": "2918877f2a81672cf546d072e0da7a2a247bd8f8667b018f8316c29c86805c3a"
     },
     "brush-wrong-channel": {
       "what": "brush panel: a smoothness layer selected — every tool that can make its own slot stays on, the Eraser does not",
-      "chars": 14446,
-      "sha256": "999063b0f782e24ef6ce70bb168bd733baec46a833a872b030277813bc97d4b3"
+      "chars": 25736,
+      "sha256": "6ef467cd03ffaaa5e5739a5d65e796f1b67582937320aa8153e30451eb69b709"
     },
     "brush-mask-target": {
       "what": "brush panel: the mask brush — the value row renames itself and Alt stops picking and starts revealing",
-      "chars": 14408,
-      "sha256": "57e6d751ace99e9c587d5616b7aea914eae0179bd314b3808f9d3708707c543a"
+      "chars": 25698,
+      "sha256": "f897c3c7c8963ff6fdad47a282de9ff9ff69cb6297d667e95adbc1f714d1f00a"
     },
     "brush-panel-line": {
       "what": "brush panel: Panel line — the value row reads Depth, and Flow and Build up are hidden because a height stroke always adds",
-      "chars": 14538,
-      "sha256": "859819b5ad08a1083328fb00fda5fae30de72c46ade7477a6377ccdff86b9c55"
+      "chars": 25851,
+      "sha256": "538bf0486ae336d8719b7f75836a80268a949d90fb23277a40d08423f9896bea"
     },
     "brush-camo-tile": {
       "what": "brush panel: a camouflage tile — the Wear mask brush is off and says the tile carries the camouflage's alpha",
-      "chars": 15016,
-      "sha256": "cd24c0895618ea6227eb12b1a5a4469f74045301e0d2f2b7ef3292bf3e66c6b6"
+      "chars": 26303,
+      "sha256": "fbed5654f23b9f7922155cd58d2691b5aad915ee004e53ead2f744ca1238b7a4"
     },
     "slots-list": {
       "what": "texture slots: one loaded and active, one missing, one runtime-built (2D only)",
@@ -173,23 +198,38 @@
     },
     "slots-list-camo-tile": {
       "what": "texture slots: the camouflage tile beside an ordinary slot, the tile's ⋮ menu open",
-      "chars": 1615,
-      "sha256": "79ed332b844dd76f65bb7093a322aa1d892dad9073f329d9d27cf7dfe7cbac1c"
+      "chars": 1840,
+      "sha256": "06d4c9c56686645da4b973b3d4a896a75e267d0dceea697b5204f04f0630fd32"
     },
     "slots-list-menu": {
       "what": "texture slots: an ordinary loaded texture with its ⋮ menu open",
-      "chars": 1991,
-      "sha256": "65dde0526fab195c109e27f1b8cd51eb9e7e96169b0ff53e04e114545623c6e6"
+      "chars": 2877,
+      "sha256": "719a71bbcd95c87253c918164733016f6778135934e4f6a186fadc11527e3509"
+    },
+    "slots-list-flame": {
+      "what": "texture slots: the vehicle's jet-flame sheet beside an ordinary loaded texture",
+      "chars": 1365,
+      "sha256": "62fd0e5feaf39d76c1a1fc0c2099a805d98aa83d0983f92ea4e84519c9ee3121"
     },
     "channels-panel": {
       "what": "the Channels panel: two sheets with their four raw channels, and the alpha line",
-      "chars": 6966,
-      "sha256": "d4061a2cf81af99ca7904021f70207c85929a2ca0d99c433e21c9f37dd35fe19"
+      "chars": 7067,
+      "sha256": "dbbf767a8b053a7f087d4922f6a8dee2c211a5fbffcd8fe27f4cbb52f81276aa"
     },
     "search-results": {
       "what": "vehicle search: a selected result, an unselected one, and a bare model with no unit record",
       "chars": 2279,
       "sha256": "c1db2531f01d60fb4626cffe9ea2b9203290c423d95318c5c3a5990de72e68eb"
+    },
+    "updates-panel": {
+      "what": "update panel: What's new, two newer builds with notes, and the newest-build answer",
+      "chars": 2123,
+      "sha256": "8ed87e1caecea1912a7edebdd49d3941606a4367ce13a3dd0146fc3ce620751a"
+    },
+    "search-texture-rows": {
+      "what": "texture search: a readable row, a readable $hq row, and a row in a format the editor does not read",
+      "chars": 1962,
+      "sha256": "217805ac24d82edd7bd48817823da75a2a38b006ae0f9a0addd33e06f3025aa0"
     },
     "search-empty-filtered": {
       "what": "vehicle search: a filter picked with an empty query lists what it lets through",
@@ -203,13 +243,13 @@
     },
     "search-control": {
       "what": "the search control over both lists: the box, reset, the type / nation / rank chips and the sort",
-      "chars": 5309,
-      "sha256": "0d5633781b5f43bef9a35ca3ea7952870fc39c9cc58415e38d976fd75362dac6"
+      "chars": 5594,
+      "sha256": "bcec7fdf814cc39ee081a4f1d7600181d328439cd8fc17d4add9746b87250302"
     },
     "search-outside-filters": {
       "what": "vehicle search: a query with the aircraft filter on — the T-34 it asked for, and a raw texture",
-      "chars": 1634,
-      "sha256": "81e53e5ea29bf1fcb6ddb6c4374c8461fdf9e15e068c495df9125e165f4062da"
+      "chars": 1800,
+      "sha256": "66acd9308076512a0b74fa05a64e2005041a8cb0301d49a42647cdf934eef181"
     },
     "search-forgiving": {
       "what": "vehicle search: a typo (abrahms) and a missing hyphen (f4e) still find the vehicle",
@@ -228,18 +268,28 @@
     },
     "export-camo-tile": {
       "what": "Camo under skin ▸ My own pattern: the preview row at 150 % / −30°, and the pin list naming the tile and the stem that keeps the game's own",
-      "chars": 1078,
-      "sha256": "a808677b0c1cf9ef54d44e7b72288aa27d18bd6ba6c583d42931bfbe743eea1b"
+      "chars": 1094,
+      "sha256": "5d56eedeeba2d57745b74fb0dee1d1754e2e5aea2c63301198b33770e1756b81"
+    },
+    "export-warnings": {
+      "what": "the pre-export warnings and the camo rows: tank replace_tex with alpha kept, set_tex with no camo found, Leave it, stock unread, My own pattern with and without the grid, aircraft set_tex",
+      "chars": 2225,
+      "sha256": "8a5a75121b563409c7e89c80cece9caadf3f930e9b167d4da29ecb4e2138f89f"
+    },
+    "export-notes": {
+      "what": "Export window: the one-line notes under Mode / Alpha / roughness, Applies to's notes, the tile's scale line and the DXT5 warning, with their tooltips",
+      "chars": 6310,
+      "sha256": "ac395fc996f2e7952ce993d19a2b00cb872759817168c64217d68edcf7b1d916"
     },
     "select-panel": {
       "what": "Selection tab: the wand with a patch picked (its row shown), a lasso with two corners down, then off and empty",
-      "chars": 21261,
-      "sha256": "1668a4c4184063c2b4b7aaea14e784830a1cd4b57d775f947fb15819f9629dd5"
+      "chars": 23928,
+      "sha256": "f6a280c845b9591f53170a184060814b607f9a3ea3d316d915c196d9b99b3d0c"
     },
     "shape-panel": {
       "what": "Shape tab: a closed path (Fill, Stamp along and → selection offered), then the same path open (→ selection refused)",
-      "chars": 4484,
-      "sha256": "9449ba95c8837395dfb3d85b3cd0b52d0e6843fe74b425cb4c3c90d66a5fdeb4"
+      "chars": 10994,
+      "sha256": "d68cfc50a9b626183ffeeabcf578d5a6cbd5c2f9fe9f52ccd928063bd746edad"
     },
     "mask-bake-dialog": {
       "what": "the model dialog: its two mask sources with no cockpit model, then From the cockpit on a sheet the body on screen does not use",
@@ -270,6 +320,16 @@
       "what": "moving parts: a model with no skeleton says why there is nothing to move",
       "chars": 132,
       "sha256": "f3ba14e82d245ad1eda34059ac7f23f6f8ca3e3e19d02d2d5d15f08f3acf1424"
+    },
+    "export-gear-chrome": {
+      "what": "Export button with its gear, and the export window's foot, where the folder API exists",
+      "chars": 2262,
+      "sha256": "850a29acf13b08066e39856be1d6dbc222c2b7c21f873f4913673d34e5e0a693"
+    },
+    "export-gear-firefox": {
+      "what": "the same where it does not (Firefox): the zip note, the button's zip tooltip, no To War Thunder",
+      "chars": 2495,
+      "sha256": "0aca1a2d839cb7f400f367539edb518410d48a405645f3dc20fcb614b654ef45"
     }
   }
 }

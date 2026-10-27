@@ -220,10 +220,16 @@ function applyPaintTint(m, t){
 // repack used to compute — only the place changed, which is why the render is unmoved:
 //
 //   * `normal_fragment_maps` reads all three bytes of the normal map and expects Z in blue. The
-//     game's `_n` has no Z: it packs normal X in green and Y in alpha, which the importer lands in
-//     red and green with blue left at a constant 128. So take .xy and derive Z the way a
+//     game's `_n` has no Z: it packs normal X in alpha and Y in green (`NSheet`), which the importer
+//     lands in red and green with blue left at a constant 128. So take .xy and derive Z the way a
 //     two-component normal map always is — sqrt(1 - x² - y²), which is exactly the line the repack
-//     ran per texel.
+//     ran per texel. And Y is turned: the game's high Y leans toward the sheet's BOTTOM row
+//     (DirectX's sense, ROADMAP 1.24), while three.js's tangent frame points +Y up the texture, the
+//     way the model's UVs run (`perturbNormal2Arb` takes it from dFdy of vUv). Measured in t169: a
+//     texel leaning toward the bottom row, lit from below, rendered 276 against 1236 lit from
+//     above before the turn — lit as if it leaned up. The frame comes from the screen-space
+//     derivatives, so a mirrored UV island turns with it, as the game's does (the owner's check
+//     of 2026-10-24 on the F-4E's shared under-wing strip).
 //   * `roughnessmap_fragment` multiplies by the green byte. The sheet holds SMOOTHNESS, and
 //     roughness is its inverse (CLAUDE.md §1) — the repack used to store `255 - smoothness`.
 //
@@ -257,7 +263,7 @@ function applySurfaceMaps(m, hasNormal, hasRough){
     if (hasNormal) patch("normal_fragment_maps",
       "vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;",
       "vec3 mapN = vec3( texture2D( normalMap, vUv ).xy * 2.0 - 1.0, 0.0 );" +
-      " mapN.z = sqrt( max( 0.0, 1.0 - dot( mapN.xy, mapN.xy ) ) );");
+      " mapN.y = -mapN.y; mapN.z = sqrt( max( 0.0, 1.0 - dot( mapN.xy, mapN.xy ) ) );");
     if (hasRough) patch("roughnessmap_fragment",
       "roughnessFactor *= texelRoughness.g;",
       "roughnessFactor *= 1.0 - texelRoughness.g;");
@@ -320,6 +326,26 @@ const Mats = {
     if (/rainbow|optic/.test(coat)) applyIridescence(gm, /lens|mirror/.test(coat) ? .55 : .4);
     return gm;
   },
+  // A see-through shader WITH a sheet (ROADMAP 1.26) — `empty_glass` on a cockpit canopy,
+  // `x_gauge_glass_c` over a gauge, `glass_dirt`: the sheet's colour through its own alpha.
+  // `rebindMaterials` marks these in App.matGlass with `tex`, by the transfer bake's rule for what is
+  // see-through (Transfer.GLASS), so the two cannot disagree. Measured on the F-16A's cockpit: its
+  // canopy is drawn twice by the game's own model — dynamic_glass_tone with no sheet, and
+  // dynamic_masked_glass_chrome with t0 = empty_glass, whose stock sheet is 64² at alpha 0
+  // everywhere — and drawn opaque, the second copy hid the cockpit; a skin's picture on 0.7 % of an
+  // otherwise alpha-0 empty_glass came up as an opaque canopy, and x_gauge_glass_c (512², mean alpha
+  // 23, the same class, 1 085 materials in the install) covered the gauge faces. The colour is the
+  // slot's live composite and the alpha its coverage sheet (fillSlotAlbedo keeps the albedo's alpha
+  // there, not in the canvas), both real texture slots, so a stroke on the glass shows with nothing
+  // rebuilt. No depth written, like the untextured glass above.
+  seeThrough(slot, on){
+    const m = new THREE.MeshStandardMaterial({
+      map: on.color ? slot.tex : null, color: on.color ? 0xffffff : 0x9aa0aa,
+      alphaMap: slot.texCov || null, transparent: true, depthWrite: false,
+      metalness: .1, roughness: .1, side: THREE.DoubleSide });
+    m.envMapIntensity = .5;
+    return m;
+  },
 };
 function makeMaterial(matName, meshName, geo){
   const lname = matBaseName(matName).toLowerCase();
@@ -328,6 +354,13 @@ function makeMaterial(matName, meshName, geo){
   const slot = stem ? App.slots.get(stem) : null;
   // Flat channel view: one map, unlit, across the whole model. Lighting and the camo preview
   // would both lie about what is actually stored in the texture, so neither applies here.
+  // The Levels view: which level the GPU samples, as a colour (4.58 (b)).
+  if (App.chanView === "levels") {
+    const t = slot && LevelView.levelsTex(slot);
+    if (!t) return new THREE.MeshBasicMaterial({ color: 0x1b1e24, side: THREE.DoubleSide, toneMapped: false });
+    const lm = new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide, toneMapped: false });
+    return LevelView.on ? LevelView.lodBias(lm, LevelView.bias()) : lm;
+  }
   if (App.chanView && App.chanView !== "shaded") {
     const t = slot && slot.chanTex && slot.chanTex[App.chanView];
     if (t) return new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide, toneMapped: App.chanView === "color" });
@@ -351,6 +384,7 @@ function makeMaterial(matName, meshName, geo){
   if ((glass || /glass|canopy|chrome/.test(lname)) && (!slot || slot.missing)) return Mats.glass(glass, lname, meshName);
   if (!slot || !slot.tex) return new THREE.MeshStandardMaterial({ color: 0x777c86, metalness: .2, roughness: .7 });
   const on = App.chanOn || (App.chanOn = { color: true, smooth: true, metal: true, normal: true });
+  if (glass && glass.tex && !App.manualBind.has(matName)) return Mats.seeThrough(slot, on);   // a hand bind is the user's sheet
   const p = { map: on.color ? slot.tex : null, metalness: 1, roughness: 1 };
   if (!on.color) p.color = 0x9aa0aa;
   // The game's three surface sheets, bound as they are. There is no repacked pair any more (see
@@ -380,6 +414,7 @@ function makeMaterial(matName, meshName, geo){
   const m = new THREE.MeshStandardMaterial(p);
   if (tint) applyPaintTint(m, tint);
   if (p.normalMap || p.roughnessMap) applySurfaceMaps(m, !!p.normalMap, !!p.roughnessMap);
+  if (LevelView.on) LevelView.lodBias(m, LevelView.bias());          // the game's screen (4.58 (b))
   m.side = THREE.DoubleSide;
   m.envMapIntensity = .5;
   return m;

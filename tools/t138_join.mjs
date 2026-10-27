@@ -21,7 +21,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { installOrExit } from "./wtdir.mjs";
+import { installOrExit, isDirEntry } from "./wtdir.mjs";
 
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url));
 // No install is a failure, not a SKIP: this test exists to read the real roster (tools/wtdir.mjs).
@@ -29,7 +29,7 @@ const WT = installOrExit();
 const argv = process.argv.slice(2);
 const src = fs.readFileSync(HTML, "utf8");
 const sec = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + n + " not in the page");
   return src.slice(a + 1, b);
 };
@@ -40,8 +40,8 @@ globalThis.App = { gameDir: null };
 const P = new Function(sec("ZSTD") + "\n" + sec("BLK") + "\n" + sec("VROMFS") + "\n" + sec("ACES") + "\n" +
   sec("ARMS") + "\n" + sec("REGISTRY") +
   "\nreturn { readVromfs, vromfsNameMap, loadSlimDataBlock, vromfsBlkBody, loadGameResDesc, parseUnitsCsv," +
-  " parseUnitRanks, parseShopTree, buildUnitIndex, GameUnits, buildModelUnitJoin, ensureAces, AcesDB, zstdDec };")();
-globalThis.zstdDec = P.zstdDec;
+  " parseUnitRanks, parseShopTree, buildUnitIndex, GameUnits, buildModelUnitJoin, ensureAces, AcesDB, zstdDec: Zstd.zstdDec };")();
+globalThis.Zstd = { zstdDec: P.zstdDec };   // the sections reach it as Zstd.zstdDec (ROADMAP 2.3)
 
 let checks = 0, fails = 0;
 const is = (c, m) => { checks++; if (!c) fails++; console.log((c ? "  ok   " : "  FAIL ") + m); };
@@ -60,7 +60,7 @@ const descs = [];
   if (depth > 7) return;
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
     const p = path.join(d, e.name);
-    if (e.isDirectory()) { if (!SKIP.test(e.name)) walk(p, depth + 1); }
+    if (isDirEntry(e, p)) { if (!SKIP.test(e.name)) walk(p, depth + 1); }
     else if (/Desc\.bin$/i.test(e.name)) descs.push(p);
   }
 })(WT, 0);

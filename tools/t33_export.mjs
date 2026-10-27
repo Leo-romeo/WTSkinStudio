@@ -141,7 +141,7 @@ R.is(!worst, worst
 console.log("  note  " + r.cases.map(c => c.label + " (" + c.len + "B)").join("\n        "));
 
 R.is(r.cases.every(c => c.detached === 0), "every job transferred its pixel buffer rather than cloning it");
-// The albedo and the surface map differ only by `renorm`, which buildMips applies to the mip
+// The albedo and the surface map differ only by `renorm`, which BCnEnc.buildMips applies to the mip
 // levels it generates. If that flag never reached the worker the two would come out identical and
 // every byte-equality check above would still pass — so assert the difference directly.
 {

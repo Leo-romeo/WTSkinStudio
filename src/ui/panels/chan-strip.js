@@ -166,10 +166,15 @@ const ChanStrip = {
         " on " + Tool.chanWord(to) + " — remove that first, or move this one somewhere else", "err");
       return;
     }
+    // A path layer's recipe was laid with a brush on `from` (4.52 (3)): on another map its next
+    // redraw would put colour into roughness. The move keeps the pixels and lets go of the recipe,
+    // as a duplicate does, and the undo gives it back (found in review, 2026-10-23).
+    const c = LayerNode.contentOn(L, from), sh = c && c.shape;
     ChanStrip.act(s, L, "move layer content to " + Tool.chanWord(to),
-      () => LayerNode.moveContent(L, to, from), () => LayerNode.moveContent(L, from, to));
+      () => { LayerNode.moveContent(L, to, from); if (sh) c.shape = sh; },
+      () => { LayerNode.moveContent(L, from, to); if (sh) c.shape = null; });
     setStatus("Moved this layer's " + Tool.chanWord(from) + " content onto " + Tool.chanWord(to) +
-      " — the same pixels, on a different map", "ok");
+      " — the same pixels, on a different map" + (sh ? "; it is no longer redrawn from its path" : ""), "ok");
   },
   // 4.20's first command. `fill -> paint` rasterises the colour and loses nothing; the other two
   // directions are lossy and are labelled as such in the menu above, because the honest answer to

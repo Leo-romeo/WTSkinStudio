@@ -52,7 +52,7 @@ const LayerNode = {
   // "a flat fill" — the one place the word is chosen, for the six sentences that say it. A noise
   // is a gradient record underneath and a pattern a tile image (4.50 (7), (8)); each says so.
   wordFor(c){
-    if (c && c.kind === "fill" && c.pat) return "a pattern";
+    if (c && c.kind === "fill" && c.pat) return c.lattice ? "a lattice" : "a pattern";
     if (c && c.kind === "fill" && c.grad) return c.grad.shape === "noise" ? "a noise" : "a gradient";
     return LayerNode.KIND_WORD[c && c.kind] || "content";
   },
@@ -61,9 +61,9 @@ const LayerNode = {
   // and everything else stays where it was on purpose: a field this list has never heard of is left
   // on the bundle, which is harmless, whereas moving an unknown field into a content that exposes
   // no accessor for it would make it silently disappear.
-  CONTENT: ["color", "grad", "pat", "patImg", "patName", "canvas", "proj", "projEmpty",
+  CONTENT: ["color", "grad", "pat", "patImg", "patName", "lattice", "canvas", "proj", "projEmpty",
             "bmp", "orig", "x", "y", "scale", "rot", "flip", "sym", "surf", "heightMap", "heightName", "text",
-            "hue", "sat", "bright", "contrast", "fx",
+            "hue", "sat", "bright", "contrast", "fx", "shape", "keys",
             "_mip", "_mipKey", "_mipSrc", "_gradSheet", "_gradKey"],
 
   // ---- the questions (c) is written against ----
@@ -129,7 +129,9 @@ const LayerNode = {
       const c = out.chans[ch] = Object.assign({}, n.chans[ch]);
       if (c.grad) c.grad = Gradient.clone(c.grad);         // a record, not pixels: the copy gets its own (4.44's fifth)
       if (c.pat) c.pat = Procedural.patClone(c.pat);        // ...and a pattern's (4.50 (7)); the tile image is shared, like a bitmap
+      if (c.lattice) c.lattice = Procedural.latticeClone(c.lattice);   // ...and a lattice's, the record its tile is drawn from (4.55)
       if (c.fx) c.fx = Effect.clone(c.fx);                 // ...and so does an effect's (4.50 (5))
+      if (c.keys) c.keys = Levels.keysClone(c.keys);       // ...and a number's keys by level (4.58 (c))
       if (c.text) c.text = { ...c.text };                  // ...and a text decal's (4.50 (3)): a flat record
       delete c._proc;                                       // the original's evaluation in flight is not the copy's
       delete c._maskC;                                      // ...nor the mask its pattern lends (GradFill.maskContent)

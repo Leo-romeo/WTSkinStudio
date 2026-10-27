@@ -32,10 +32,12 @@ function ensureStrokePart(name){
   if (stroke.maskParts.has(name)) return;
   stroke.maskParts.add(name);
   const w = stroke.t.canvas.width, h = stroke.t.canvas.height;
+  const t0 = Rec.clock();                                   // a part's first touch builds its stencil (recorder note 4)
   const pm = partMaskCanvas(App.activeSlot, w, h, name);
-  if (!pm) return;
+  if (!pm) return Rec.span("stencil", t0);
   ctx2d(strokeMaskCanvas()).drawImage(pm, 0, 0);
   stroke.maskData = null;                                     // invalidate point-sample cache
+  Rec.span("stencil", t0);
 }
 function strokeMaskData(){
   if (!stroke || !stroke.maskCanvas) return null;
@@ -122,6 +124,7 @@ const StrokeSetup = {
     // composited before it (see editor/clone.js). `paintTarget` has already refused a stroke with
     // no source, so this is never null here.
     if (App.brush.tool === "clone") stroke.clone = Clone.begin(t, s, App.brush.chan);
+    else if (App.brush.tool === "retouch") stroke.clone = Clone.retouch(t, s, App.brush);   // reads the sheet the Clone's way (4.50 (11))
   },
   // Where the stroke may land: five rules over one stencil, in this order. False means the stroke
   // is refused — the one case being a selection with nothing paintable on this sheet, where an
@@ -191,7 +194,14 @@ const StrokeSetup = {
 };
 // mask3d = the stroke originates in the 3-D view, so it should stay on the part(s) actually
 // painted (prevents bleed onto other parts that happen to share the same UV region).
-function beginStroke(alt, mask3d){
+// `projected`: a press on the model, which the projected brush may take (paint3d.js). A pattern brush
+// (4.55) reveals cells only there, so every other stroke — the sheet, a path's stamps — is refused
+// before it makes a layer, and in words (`ProjBrush.cellsWhy`).
+function beginStroke(alt, mask3d, projected){
+  if (Pen.cells(App.brush)) {
+    const why = ProjBrush.cellsWhy(!!projected);
+    if (why) { setStatus("Pattern brush: " + why, "err"); return false; }
+  }
   // A History walk that has yielded takes no further step under a stroke: the pre-stroke copies of
   // its tiles are taken from the sheet as it is NOW (UndoHistory.interrupt, core/undo.js). A press
   // says so already; this is for the strokes code begins.
@@ -352,6 +362,10 @@ function embossInto(H, W, Hh, cx, cy, r, depth){
 // opt.ang   which way the stroke is heading here, in radians on the sheet, for a dab laid on its own
 //           that has no previous dab to say so: the shape tool's Stamp along, a 3-D stroke's first dab
 //           past a UV seam, the sheet mirror's copy where it leaps. ROADMAP 4.50 (10).
+// opt.run   how far along its line this dab is, in texels, for Colour along (`Pen.inks`'s `at`): a
+//           dab laid alone has no previous dab to measure from, and every jump started at run 0 — a
+//           Hue Stamp along came out one colour (fix plan 2026-10-23, step 2). Stamp along knows it
+//           exactly, its walk's points being a step apart.
 //
 // Each dab carries the pressure it is laid at (ROADMAP 4.50 (4)): `stroke.p` is the pressure of the
 // sample being stamped, and `Pen.walk` runs it linearly from the previous dab's, spacing the dabs by
@@ -359,9 +373,11 @@ function embossInto(H, W, Hh, cx, cy, r, depth){
 // (scatter), its size and flow (pressure and jitter) and which way it faces (4.50 (10)) — and
 // `Tips` lays it in the brush's tip. A mouse is full pressure, which is the brush as set; a brush with
 // no dynamics and the round tip is the stroke it was before either, drawn by the same one drawImage.
+// `tints` is the colour along the stroke (ROADMAP 4.56, `Pen.inks`): a colour per dab, recoloured
+// where it is laid (`Tips.layIn`), or none when the brush does not cycle — and then nothing moved.
 function stampAt(px, py, ch, opt){
   if (!stroke) return;
-  ch = ch || 0;
+  ch = ch || 0; const t0 = Rec.clock();                     // t0: the "dab" phase (recorder note 4)
   const b = App.brush, t = stroke.t;
   const p = stroke.p == null ? 1 : stroke.p;
   const jump = !!(opt && opt.jump), last = jump ? null : stroke.lasts[ch];
@@ -396,21 +412,21 @@ function stampAt(px, py, ch, opt){
     // Once per frame, like the colour path — not once per stamp. The old line here also asked for
     // `scheduleChannels(slot)` with NO rectangle, which is a whole-sheet rebuild of every layered
     // channel per batch of stamps: the rectangle it had computed was assigned and never passed.
-    scheduleStrokeView();
+    scheduleStrokeView(); Rec.span("dab", t0);
     return;
   }
   const stamp = brushStamp(), spins = Tips.get(b.tip).turns;
   const bg = ctx2d(stroke.buf);
   bg.globalCompositeOperation = "source-over";
   const mk = stroke.maskCanvas ? strokeMaskScale() : null;
-  const rnd = Pen.dynamic(b) ? Pen.stream(stroke, ch) : null;
-  for (const q of pts) {
+  const rnd = Pen.dynamic(b) ? Pen.stream(stroke, ch) : null, tints = Pen.inks(b, pts, last, stroke.runs || (stroke.runs = []), ch, Gradient.holoLut, opt && opt.run);
+  for (const [i, q] of pts.entries()) {
     // The dab: where it lands, how big, how much it lays and which way it faces. A round tip is the
     // same at every angle, so it is never turned — its draw is the one it always was.
     const d = Pen.dab(b, q, head, rnd), sz = d.size, turn = spins ? d.angle : 0;
     // How far it reaches: a turned square's corners go past half its size, and the undo tiles and the
     // buffer's dirty rectangle must take them in or they are never applied and never cleared.
-    const D = 2 * Tips.reach(stamp, sz, turn);
+    const D = 2 * Tips.reach(stamp, sz, turn), tint = tints && tints[i];
     // Flow (6.4): what this dab lays down. Overlapping dabs build up in the buffer by its own
     // source-over, and refreshStrokeView still applies the whole buffer once.
     bg.globalAlpha = stroke.dep.dab * d.flow;
@@ -428,8 +444,8 @@ function stampAt(px, py, ch, opt){
         // scattered dab is stamped first: the source keeps step with the brush and the dashed ring.
         Clone.stamp(stroke.clone, bg, x, y, ch, cz / 2, cz, shape, stroke.maskCanvas, mk,
           tile ? { x: hq[0] + x - home[0], y: hq[1] + y - home[1] } : q, home && { x: x - home[0], y: y - home[1] });
-      } else if (stroke.maskCanvas) {                           // clip this stamp to the painted part(s)
-        Tips.layIn(bg, stamp, x, y, sz, turn, D, stroke.maskCanvas, mk);
+      } else if (stroke.maskCanvas || tint) {                   // clip this stamp to the painted part(s), and/or colour it
+        Tips.layIn(bg, stamp, x, y, sz, turn, D, stroke.maskCanvas, mk, tint);
       } else {
         Tips.lay(bg, stamp, x, y, sz, turn);                    // scaled at draw time: the stamp is the full size
       }
@@ -437,14 +453,18 @@ function stampAt(px, py, ch, opt){
     stroke.lasts[ch] = q;                                     // the walk's point, not the scattered one
   }
   bg.globalAlpha = 1;
-  scheduleStrokeView();
+  scheduleStrokeView(); Rec.span("dab", t0);
 }
 function endStroke(){
   if (!stroke) return;
-  recStrokeEnd();
+  // The stroke stays open on the recorder until its last composite and history entry are done, so
+  // what putting it down costs is a phase of it ("end") and not a stall attributed to nothing.
+  const t0 = Rec.clock();
+  ProjBrush.finish();                                         // a projected stroke's last queued dabs
   refreshStrokeView();
-  const depth = App.undoStack.length;
+  const depth = App.undoStack.length, tu = Rec.clock();
   stroke.undo.commit();
+  Rec.span("undo", tu);
   // A layer this stroke had to create is folded into the same history entry, so Ctrl+Z takes both
   // away and the stack never shows a bare "add layer" the user did not ask for. The entry starts
   // where the layer's own step did (ROADMAP 4.50(2)), so undoing it is back where the stroke began —
@@ -477,8 +497,12 @@ function endStroke(){
   // layered channel at the end of every stroke, which is the thing the paragraph above says cost
   // 40 ms for no visible change. It was invisible as a bug only because compositeChannel ignored
   // the rectangle anyway (ROADMAP 1.10); now that it honours one, passing none is the whole cost.
+  const tc = Rec.clock();
   flushComposites();
   if (stroke.t.chan) draw2D();
+  Rec.span("settle", tc);                                     // "end" holds "undo" and "settle"
+  Rec.span("end", t0);
+  recStrokeEnd();
   stroke = null;
 }
 

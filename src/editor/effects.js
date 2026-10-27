@@ -51,6 +51,12 @@ const Effect = {
     { id: "invert",    word: "Invert" },
     { id: "threshold", word: "Threshold" },
     { id: "posterize", word: "Posterize" },
+    // ROADMAP 4.50 (5), the second step: the three that are not a function of one texel. Blur and
+    // sharpen read their neighbours, and noise reads where the texel IS — so none of them is a table,
+    // and they run as `Effect.spatial` describes, below.
+    { id: "blur",      word: "Blur" },
+    { id: "sharpen",   word: "Sharpen" },
+    { id: "noise",     word: "Add noise" },
   ],
   kind(id){ return Effect.KINDS.find(k => k.id === id) || null; },
   typeOf(c){ return c && c.fx ? String(c.fx.type) : "hsbc"; },
@@ -70,6 +76,9 @@ const Effect = {
       case "invert":    return { type };
       case "threshold": return { type, level: 128 };
       case "posterize": return { type, levels: 4 };
+      case "blur":      return { type, radius: 4 };
+      case "sharpen":   return { type, radius: 2, amount: 100 };
+      case "noise":     return { type, amount: 24, mono: true, seed: 1 };
       default:          return null;
     }
   },
@@ -97,6 +106,9 @@ const Effect = {
       case "invert":    return { type: "invert" };
       case "threshold": return { type: "threshold", level: Math.round(n(fx.level, 0, 255, 128)) };
       case "posterize": return { type: "posterize", levels: Math.round(n(fx.levels, 2, 255, 4)) };
+      case "blur":      return { type: "blur", radius: Math.round(n(fx.radius, 1, Effect.MAX_R, 4)) };
+      case "sharpen":   return { type: "sharpen", radius: Math.round(n(fx.radius, 1, Effect.MAX_R, 2)), amount: Math.round(n(fx.amount, 0, 500, 100)) };
+      case "noise":     return { type: "noise", amount: Math.round(n(fx.amount, 0, 128, 24)), mono: fx.mono !== false, seed: Math.round(n(fx.seed, 0, 2147483647, 1)) };
       default:          return JSON.parse(JSON.stringify(fx));
     }
   },
@@ -223,6 +235,10 @@ const Effect = {
     if (c._fxKey !== key) { c._fxT = Effect.compile(Effect.clone(c.fx)); c._fxKey = key; }
     return c._fxT;
   },
+  // Tables that change nothing: what makes a copy opaque and nothing else — the GPU upload reads
+  // straight colour and the pass writes alpha 1 (`Composite.adjust`, for the four numbers).
+  _id: null,
+  identity(){ return Effect._id || (Effect._id = Effect.compile({ type: "levels", rgb: Effect.lv() })); },
   // A texel's luma as a byte: the Rec. 709 weights ×10⁴ (blend-if's integer), rounded. Exact.
   lum(r, g, b){ return Math.floor((r * 2126 + g * 7152 + b * 722 + 5000) / 10000); },
   // The pass on the CPU, in place over straight RGBA bytes; alpha is left alone. It is the reference
@@ -243,6 +259,149 @@ const Effect = {
       d[k] = r; d[k + 1] = g; d[k + 2] = b;
     }
     return d;
+  },
+
+  // ---- the kinds that read more than one texel (ROADMAP 4.50 (5), second step) ----
+  // Blur and sharpen read their neighbours out to `radius` texels, so a region composite has to be
+  // given that much more of the stack round it or its edge would blur against nothing — the
+  // compositor grows a dirty rectangle by `reach` (summed over every such effect on the channel,
+  // since one blur over another reaches twice) and writes back only the rectangle. Noise reads no
+  // neighbour, but it is seeded on the ABSOLUTE texel, the way a gradient's dither is, so a region
+  // lays exactly the noise the whole sheet does.
+  //
+  // How they run, here and on the GPU (`Composite.spaceGL`), in the same steps:
+  //   blur     a Gaussian of σ = radius / 2, out to `radius` either side, separable: across, then
+  //            down. On PREMULTIPLIED colour, so a transparent texel lends no black to its
+  //            neighbours inside a group, and the colour comes back straight (opaque, as every
+  //            adjusted copy is — `Composite.effect` says why). The across pass is kept as bytes,
+  //            as the GPU's framebuffer keeps it.
+  //   sharpen  an unsharp mask: the texel plus `amount` % of how far it stands from that blur.
+  //   noise    each channel moved by up to ±`amount` levels, by a 256² tile of bytes from `seed`
+  //            read at the texel's place on the sheet (wrapped), one byte for all three when mono.
+  //            An integer times a power of two: exact on both paths.
+  // The GPU's sums are float32 and these are doubles, so blur and sharpen agree to a level, not to
+  // the byte; noise agrees to the byte. Nothing here is a table, so `compile` answers null for them.
+  MAX_R: 32,
+  SPATIAL: ["blur", "sharpen", "noise"],
+  isSpatial(fx){ return !!fx && Effect.SPATIAL.includes(fx.type); },
+  // The four numbers untouched — every new effect layer, until something is set — change nothing,
+  // so the compositor runs no pass for them and the layered export does not count them.
+  atRest(c){ const R = Effect.HSBC_REST; return !!c && !c.fx && +c.hue === R.hue && +c.sat === R.sat && +c.bright === R.bright && +c.contrast === R.contrast; },
+  reach(fx){ return fx && (fx.type === "blur" || fx.type === "sharpen") ? Math.max(1, Math.min(Effect.MAX_R, Math.round(+fx.radius) || 1)) : 0; },
+  // The kernel's weights from the centre out, w[0] … w[r], summing to 1 over −r … r.
+  weights(r){
+    const s = r / 2, w = [];
+    let sum = 0;
+    for (let i = 0; i <= r; i++) { w.push(Math.exp(-i * i / (2 * s * s))); sum += i ? 2 * w[i] : w[i]; }
+    return w.map(v => v / sum);
+  },
+  // A 256 × 256 tile of RGBA noise bytes: mulberry32 from the seed, the same stream `Pen.rng` is
+  // (written out again here because this section stands alone under Node). Cached per seed.
+  _tile: null,
+  tile(seed){
+    if (Effect._tile && Effect._tile.seed === seed) return Effect._tile.px;
+    const px = new Uint8Array(256 * 256 * 4);
+    let a = seed >>> 0;
+    for (let i = 0; i < px.length; i++) {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), a | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      px[i] = ((t ^ (t >>> 14)) >>> 0) >>> 24;
+    }
+    Effect._tile = { seed, px };
+    return px;
+  },
+  // The pass on the CPU over a region `w` × `h` of straight RGBA bytes whose top-left texel is
+  // (sx, sy) on the sheet; `grey` is a single-value channel, where noise is mono whatever it says;
+  // `wrap` reads round the edges instead of clamping at them — a camouflage tile, which repeats.
+  // Returns new bytes, opaque. The reference the GPU pass is held to (t154) and the fallback.
+  //
+  // As a FALLBACK it is slow: on the UI thread, measured under Node by the review (2026-10-23) at
+  // 155 ms for 1024² at radius 4 and 735 ms at radius 32 — seconds at 4096². It runs only where the
+  // GPU pass is refused, the case 4.50 (5)'s open third bullet is about for the tables as well.
+  spatial(fx, d, w, h, sx, sy, grey, wrap){
+    const out = new Uint8ClampedArray(d.length);
+    if (fx.type === "noise") {
+      const T = Effect.tile(fx.seed), A = fx.amount, mono = grey || fx.mono;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const k = (y * w + x) * 4, t = ((((y + sy) & 255) << 8) | ((x + sx) & 255)) * 4;
+        for (let c = 0; c < 3; c++) out[k + c] = d[k + c] + Math.floor((T[t + (mono ? 0 : c)] - 128) * A / 128 + .5);
+        out[k + 3] = 255;
+      }
+      return out;
+    }
+    const r = Effect.reach(fx), W = Effect.weights(r), n = w * h;
+    const ix = wrap ? v => ((v % w) + w) % w : v => v < 0 ? 0 : v >= w ? w - 1 : v, iy = wrap ? v => ((v % h) + h) % h : v => v < 0 ? 0 : v >= h ? h - 1 : v;
+    // across, premultiplied, kept as bytes
+    const mid = new Uint8ClampedArray(n * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let p0 = 0, p1 = 0, p2 = 0, pa = 0;
+      for (let i = -r; i <= r; i++) {
+        const k = (y * w + ix(x + i)) * 4, a = d[k + 3], wt = W[i < 0 ? -i : i];
+        p0 += wt * d[k] * a / 255; p1 += wt * d[k + 1] * a / 255; p2 += wt * d[k + 2] * a / 255; pa += wt * a;
+      }
+      const k = (y * w + x) * 4;
+      mid[k] = Math.floor(p0 + .5); mid[k + 1] = Math.floor(p1 + .5); mid[k + 2] = Math.floor(p2 + .5); mid[k + 3] = Math.floor(pa + .5);
+    }
+    // down, back to straight colour; sharpen pushes the texel away from it
+    const amt = fx.type === "sharpen" ? fx.amount / 100 : 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let p0 = 0, p1 = 0, p2 = 0, pa = 0;
+      for (let i = -r; i <= r; i++) {
+        const k = (iy(y + i) * w + x) * 4, wt = W[i < 0 ? -i : i];
+        p0 += wt * mid[k]; p1 += wt * mid[k + 1]; p2 += wt * mid[k + 2]; pa += wt * mid[k + 3];
+      }
+      const k = (y * w + x) * 4, b = pa > 0 ? [p0 * 255 / pa, p1 * 255 / pa, p2 * 255 / pa] : [0, 0, 0];
+      for (let c = 0; c < 3; c++) out[k + c] = Math.floor((fx.type === "sharpen" ? d[k + c] + (d[k + c] - b[c]) * amt : b[c]) + .5);
+      out[k + 3] = 255;
+    }
+    return out;
+  },
+
+  // ---- the Retouch brush's arithmetic (ROADMAP 4.50 (11)) ----
+  // Blur, sharpen, smudge, dodge and burn under the brush. Here because the first two ARE the effect
+  // kinds above, and dodge and burn the same kind of per-texel arithmetic; the page half — the
+  // processed copy of the sheet and laying a dab from it — is `Clone.retouch`, which reads the sheet
+  // the Clone's way (editor/clone.js says why). Per kind, with Strength s in 0…1:
+  //   blur     the blur effect at radius s × Size / 8 (1 to MAX_R) — a bigger brush blurs further
+  //   sharpen  the sharpen effect at radius 2, Amount s × 200 %
+  //   dodge    each channel moved s × w of the way to 255 (dodge) or to 0 (burn), w weighting the
+  //   burn     chosen tones by the texel's luma l: shadows (1 − l)², midtones 4 l (1 − l), highlights l²
+  //   smudge   each dab lays the patch carried from the last one at s over what lies under it —
+  //            source-over, premultiplied, so a transparent carried texel lends nothing — and carries
+  //            the result on: at 100 % the first dab's colour is dragged the whole stroke
+  // None of the first four depends on where a dab is, only on the sheet as the stroke began, so the
+  // page makes each 256² tile of the result ONCE per stroke and every dab draws from it.
+  retouch: {
+    KINDS: [["blur", "Blur"], ["sharpen", "Sharpen"], ["smudge", "Smudge"], ["dodge", "Dodge (lighten)"], ["burn", "Burn (darken)"]],
+    RANGES: [["shadows", "Shadows"], ["mids", "Midtones"], ["highs", "Highlights"]],
+    // One stroke's settings, taken once at its start, every one held to its range.
+    of(b){
+      const R = Effect.retouch, has = (L, v) => L.some(K => K[0] === v);
+      const kind = has(R.KINDS, b && b.retouch) ? b.retouch : "blur", s = Math.max(0, Math.min(1, isFinite(+(b && b.strength)) ? +b.strength : .5));
+      return { kind, s, range: has(R.RANGES, b && b.range) ? b.range : "mids",
+        radius: kind === "blur" ? Math.max(1, Math.min(Effect.MAX_R, Math.round(s * (+b.size || 1) / 8))) : kind === "sharpen" ? 2 : 0,
+        amount: kind === "sharpen" ? Math.round(s * 200) : 0 };
+    },
+    // The effect record a blur or sharpen runs as, or null for the other kinds.
+    fx(Rt){ return Rt.kind === "blur" || Rt.kind === "sharpen" ? { type: Rt.kind, radius: Rt.radius, amount: Rt.amount } : null; },
+    weight(range, l){ return range === "shadows" ? (1 - l) * (1 - l) : range === "highs" ? l * l : 4 * l * (1 - l); },
+    // Dodge or burn over straight RGBA bytes, in place; alpha left alone.
+    tone(Rt, d){
+      const dodge = Rt.kind === "dodge";
+      for (let i = 0; i < d.length; i += 4) {
+        const w = Rt.s * Effect.retouch.weight(Rt.range, (d[i] * 2126 + d[i + 1] * 7152 + d[i + 2] * 722) / 2550000);
+        for (let c = 0; c < 3; c++) d[i + c] = dodge ? d[i + c] + (255 - d[i + c]) * w : d[i + c] * (1 - w);
+      }
+      return d;
+    },
+    // One texel of a smudge dab — the carried texel `c` laid at s over `u`, source-over — as straight
+    // RGBA. The canvas does this in the page; this is what a test holds it to.
+    smudge(s, c, u){
+      const ac = s * c[3] / 255, au = u[3] / 255, a = ac + au * (1 - ac);
+      if (!(a > 0)) return [0, 0, 0, 0];
+      return [0, 1, 2].map(k => (c[k] * ac + u[k] * au * (1 - ac)) / a).concat(a * 255);
+    },
   },
 
   // ---- the curve editor's rules, here so they can be held under Node ----

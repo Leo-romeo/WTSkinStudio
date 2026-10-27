@@ -64,16 +64,23 @@ const BODY = `async function(){
 
   // Dispatch a drop the window handler will actually see. DragEvent will not take a fake
   // dataTransfer, so the property is defined on a plain Event instead.
+  // Every drop ends in addFiles or in a status line (ui/drop.js), so that is what it waits for — not
+  // a fixed 250 ms, which stops being long enough on a loaded machine (the 2026-10-22 scan's (20)).
+  // Bounded, so a drop that ends in neither is the check after it failing, not a hang.
   async function drop(dt){
+    var said = statusCalls;
     var ev = new Event("drop", { bubbles: true, cancelable: true });
     Object.defineProperty(ev, "dataTransfer", { value: dt });
     window.dispatchEvent(ev);
-    await new Promise(function(r){ setTimeout(r, 250); });
+    var t = performance.now();
+    while (seen === null && statusCalls === said && performance.now() - t < 10000) await new Promise(function(r){ setTimeout(r, 10); });
   }
 
   // addFiles is what a successful drop of loose files ends in — stub it out and record the names.
   var realAdd = addFiles, seen = null;
   addFiles = function(fs){ seen = fs.map(function(f){ return f.name; }); };
+  var realSet = setStatus, statusCalls = 0;
+  setStatus = function(){ statusCalls++; return realSet.apply(this, arguments); };
   var status = function(){ var el = document.getElementById("status"); return el ? el.textContent : ""; };
 
   try {
@@ -105,13 +112,28 @@ const BODY = `async function(){
     await drop(d.dt);
     out.failedWalkStatus = status();
     out.failedWalkSeen = seen;
+
+    // ---- 5. a link dragged out of a web page is NOT fetched (ROADMAP 1.21 (8), CLAUDE.md §0.1) ----
+    var fetched = [], realFetch = window.fetch, realUse = useDroppedImage;
+    window.fetch = function(u){ fetched.push(String(u)); return Promise.reject(new Error("stub")); };
+    useDroppedImage = async function(bmp, name){ seen = ["image " + name + " " + bmp.width + "x" + bmp.height]; };
+    var uriDrop = function(u){ return { types: ["text/uri-list"], items: [], files: [], getData: function(t){ return t === "text/uri-list" ? u : ""; } }; };
+    try {
+      seen = null; await drop(uriDrop("https://example.invalid/roundel.png"));
+      out.linkFetched = fetched.slice(); out.linkStatus = status(); out.linkSeen = seen;
+      // ---- 6. an image dragged as a data: URI is decoded here, with no request at all ----
+      var cv = document.createElement("canvas"); cv.width = 3; cv.height = 2;
+      seen = null; fetched.length = 0; await drop(uriDrop(cv.toDataURL("image/png")));
+      out.dataFetched = fetched.slice(); out.dataSeen = seen;
+    } finally { window.fetch = realFetch; useDroppedImage = realUse; }
   } finally {
     addFiles = realAdd;
+    setStatus = realSet;
   }
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 700), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -141,6 +163,12 @@ R.is(!/Nothing usable in that drop/.test(r.failedWalkStatus || ""),
   "and does NOT claim the drop was empty, which is how the real error stayed invisible");
 eq(r.failedWalkSeen, null, "nothing was loaded from it");
 
+R.is(r.linkFetched.length === 0 && r.linkSeen === null,
+  `a link dragged out of a web page is not fetched — nothing leaves the machine (${r.linkFetched.length ? "fetched " + JSON.stringify(r.linkFetched) : "no request"})`);
+R.is(/not fetched/.test(r.linkStatus || "") && /Ctrl\+V/.test(r.linkStatus || ""),
+  `…and the status line says so, and what to do instead: "${(r.linkStatus || "").slice(0, 120)}"`);
+R.is(r.dataFetched.length === 0 && !!r.dataSeen && / 3x2$/.test(r.dataSeen[0]),
+  `an image dragged as a data: URI is decoded here with no request, and arrives as a picture (${r.dataFetched.length ? "fetched" : JSON.stringify(r.dataSeen)})`);
 const errs = (r.__errs || []).filter(e => !/three|jszip|cdnjs|net::|Failed to load/i.test(e));
 R.is(errs.length === 0, errs.length ? "uncaught errors during the run:\n        " + errs.join("\n        ") : "no uncaught errors during the run");
 R.finish();

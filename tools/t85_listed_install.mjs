@@ -22,6 +22,7 @@
 // aircraft's own slots.
 //
 // Usage: node tools/t85_listed_install.mjs [--keep] [--chrome <path>]   (finds the install itself; WT_DIR overrides)
+import fs from "node:fs";
 import path from "node:path";
 import { findBrowser, evalInPage, makeReport } from "./headless.mjs";
 import { installOrExit } from "./wtdir.mjs";
@@ -35,6 +36,18 @@ if (!browser) { console.log("SKIP: no Chrome or Edge found. Pass --chrome <path>
 const VEHICLE = "f_4e";
 const PROP_VEHICLE = "bf_109f_4";          // four utility sheets on the live install: two propeller masks, the side blur, their _n
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// An install with folders moved to another drive and left as links (2026-10-24, the owner's: content/base
+// and three more junctioned to C:\WT). Chrome lists none of what they point at, so the app asks for the
+// folder the links point at (ListedDir.withLinks); this hands it over the way the install itself is —
+// a real folder through a real chooser — and answers the question with "pick". The linked root is the
+// target of content/base with "content/base" taken off, which is how the move script lays it out.
+const LINKED = (() => {
+  try {
+    const p = path.join(WT, "content", "base");
+    if (!fs.lstatSync(p).isSymbolicLink()) return null;
+    return path.dirname(path.dirname(fs.realpathSync(p)));
+  } catch { return null; }                   // the throw IS the answer: no content/base link here
+})();
 // What the scan left on screen: its closing message (the newest one — later messages push it down),
 // Advanced, the list's header count, and the numbers they are made of.
 const SUMMARY = `(() => {
@@ -56,6 +69,17 @@ const r0 = await evalInPage({
       // capture phase on the document: it runs before the page's own handler, which empties the input
       document.addEventListener("change", e => { if (e.target.id !== "gameDirPick") return; __t85.listed = performance.now(); __t85.n = e.target.files.length; }, true);
       true`);
+    if (LINKED) {
+      await evaluate(`(() => { const i = document.createElement("input"); i.type = "file"; i.webkitdirectory = true; i.id = "__t85linked";
+        i.style.display = "none"; document.body.appendChild(i); return true; })()`);
+      const li = await cdp.send("Runtime.evaluate", { expression: `document.getElementById("__t85linked")`, contextId });
+      await cdp.send("DOM.setFileInputFiles", { files: [LINKED], objectId: li.result.objectId });
+      await evaluate(`(() => { __t85.linkedFiles = document.getElementById("__t85linked").files.length;
+        const ask = choiceDialog;
+        window.choiceDialog = (msg, c) => /will not open/.test(msg) ? (__t85.asked = msg, Promise.resolve("pick")) : ask(msg, c);
+        window.showDirectoryPicker = async () => ListedDir.handle(ListedDir.tree([...document.getElementById("__t85linked").files]));
+        return true; })()`);
+    }
     const input = await cdp.send("Runtime.evaluate", { expression: `document.getElementById("gameDirPick")`, contextId });
     await cdp.send("DOM.setFileInputFiles", { files: [WT.replace(/\//g, path.sep)], objectId: input.result.objectId });
     // The scan is over when its closing sentence is up (GameScan.finish) or it has said why not.
@@ -69,6 +93,7 @@ const r0 = await evalInPage({
     }
     const scan = await evaluate(`({ status: (StatusLog.entries[0] || {}).msg || $("status").textContent, ms: Math.round(performance.now() - __t85.t0),
       listMs: Math.round(__t85.listed - __t85.t0), files: __t85.n,
+      linked: !!(App.gameDir && App.gameDir._linked), linkedFiles: __t85.linkedFiles || 0, asked: __t85.asked || "",
       via: App.gameDir && App.gameDir._via, legacy: !!(App.gameDir && App.gameDir._legacy), dirName: App.gameDir && App.gameDir.name,
       models: GameDB.models.length, stems: GameDB.stems.size, packs: GameDB.packs, units: GameUnits.loaded ? GameUnits.list.length : 0,
       search: $("rowGameSearch").style.display, open: $("rowGameOpen").style.display })`);
@@ -157,6 +182,11 @@ const { scan: S, veh: V, errs: E } = r0.result;
 
 console.log("\n=== the chooser, handed " + WT + " ===");
 console.log(`   ${S.files} files listed in ${S.listMs} ms · scan done ${S.ms} ms after the pick`);
+if (LINKED) {
+  console.log(`   linked: ${LINKED} (${S.linkedFiles} files), asked: “${S.asked.split("\n")[0]}”`);
+  R.is(S.linked && /content\\base/.test(S.asked),
+    `an install with content/base linked away asks for the linked folder, and the scan reads the two as one (${S.linkedFiles} files from ${LINKED})`);
+}
 console.log(`   "${S.status}"`);
 R.is(S.files > 1000 && S.listMs > 0, `the page's own change handler got the whole install from file:// (${S.files} files)`);
 R.is(S.via === "list" && S.legacy && S.dirName === path.basename(WT),

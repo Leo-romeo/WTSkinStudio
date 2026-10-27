@@ -25,26 +25,26 @@ function decodePool(){
     // No BCNENC: a decode worker has no use for the encoders, and since the codecs became separate
     // modules it no longer has to carry them. Every section named here has all of its callees in
     // one of the others — that is the rule a section list has to satisfy, and it is why WTLZ is
-    // here exactly when the build carries it: OODLE's ensureOodle calls into it in that build, and
+    // here exactly when the build carries it: OODLE's Oodle.ensureOodle calls into it in that build, and
     // in the other three builds there is no such section to lift.
-    sections: ["DDS", "BCNDEC", "ZSTD", "OODLE"].concat(oodleImpl() === "wtlz" ? ["WTLZ"] : []),
+    sections: ["DDS", "BCNDEC", "ZSTD", "OODLE"].concat(Oodle.oodleImpl() === "wtlz" ? ["WTLZ"] : []),
     // An absent blob crosses as "" rather than throwing here, so a build without one degrades
-    // exactly as the main thread does: zstdAvailable()/oodleAvailable() say no and the decoder
+    // exactly as the main thread does: Zstd.zstdAvailable()/Oodle.oodleAvailable() say no and the decoder
     // reports "not embedded in this build" (ROADMAP 5.2).
-    ops: "var ZSTD_WASM_B64 = " + JSON.stringify(zstdAvailable() ? ZSTD_WASM_B64 : "") + ";\n" +
-         "var OODLE_WASM_B64 = " + JSON.stringify(oodleAvailable() ? OODLE_WASM_B64 : "") + ";\n" +
+    ops: "var ZSTD_WASM_B64 = " + JSON.stringify(Zstd.zstdAvailable() ? ZSTD_WASM_B64 : "") + ";\n" +
+         "var OODLE_WASM_B64 = " + JSON.stringify(Oodle.oodleAvailable() ? OODLE_WASM_B64 : "") + ";\n" +
          // which decoder, not just which bytes — the failure text differs between them and a
          // worker that could not tell would explain a public build's refusal as a corrupt file
-         "var OODLE_IMPL = " + JSON.stringify(oodleImpl()) + ";\n" + `
+         "var OODLE_IMPL = " + JSON.stringify(Oodle.oodleImpl()) + ";\n" + `
 var WT_OPS = {
   // One DDSx entry: decompress it, decode its top level, and re-wrap the still-compressed blocks
   // as a plain .dds. Both results cross back as transferables — 67 MB of pixels at 4096².
   gameTexture: async function(a){
     var raw;
     if (a.comp === 0 || a.packedSz === 0) raw = new Uint8Array(a.body);
-    else if (a.comp === 0x20) raw = zstdDec(new Uint8Array(a.body));
+    else if (a.comp === 0x20) raw = Zstd.zstdDec(new Uint8Array(a.body));
     else if (a.comp === 0x80) raw = new Uint8Array(await new Response(new Blob([a.body]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
-    else if (a.comp === 0x60) raw = oodleDecompress(await ensureOodle(), new Uint8Array(a.body), a.memSz);
+    else if (a.comp === 0x60) raw = Oodle.oodleDecompress(await Oodle.ensureOodle(), new Uint8Array(a.body), a.memSz);
     else throw new Error(a.compName + "-compressed — not supported yet");
     var fmt = a.fmt, w = a.w, h = a.h;
     var blockBytes = (fmt === "DXT1" || fmt === "ATI1") ? 8 : 16;
@@ -59,23 +59,28 @@ var WT_OPS = {
     if (topSize > raw.length) throw new Error("decompressed to " + raw.length + " bytes, need " + topSize + " for " + w + "×" + h + " " + fmt);
     var top = raw.subarray(off0, off0 + topSize);
     var rgba;
-    if (fmt === "BC7") rgba = decodeBC7(top, w, h);
-    else if (fmt === "ATI1") rgba = decodeBC4Tex(top, w, h);
-    else if (fmt === "ATI2" || fmt === "BC5U") rgba = decodeBCn(top, w, h, "BC5");
-    else rgba = decodeBCn(top, w, h, fmt);
+    if (fmt === "BC7") rgba = BCnDec.decodeBC7(top, w, h);
+    else if (fmt === "ATI1") rgba = BCnDec.decodeBC4Tex(top, w, h);
+    else if (fmt === "ATI2" || fmt === "BC5U") rgba = BCnDec.decodeBCn(top, w, h, "BC5");
+    else rgba = BCnDec.decodeBCn(top, w, h, fmt);
     // keep the ORIGINAL compressed mip0 for project embedding (lossless, ~10× smaller than
     // re-encoding to RGBA — an 8192² uhq texture would otherwise cost 256 MB)
-    var dds = writeBCnDDS(fmt, w, h, top);
+    var dds = DDS.writeBCnDDS(fmt, w, h, top);
     return { __t: 1, result: { rgba: rgba.buffer, dds: dds.buffer }, transfer: [rgba.buffer, dds.buffer] };
   },
   // A user-supplied .dds: its header and level 0. The source buffer goes back WITH the result,
   // because the main thread rebuilds the lazy mip chain over it and because every caller keeps
   // the original bytes to embed in the .wtproj. Returning the chain itself is not an option —
   // structured clone invokes getters, which would force every level eagerly.
+  // With a.max (ROADMAP 1.26), a file larger than that on either side is held at most that size:
+  // its first own mip level that fits, if it ships one, else level 0 fitted by DDS.fitRGBA — here,
+  // so the UI thread never holds the full-size pixels. w and h say what came back.
   ddsLevel0: function(a){
-    var info = ddsInfo(a.buf);
-    var rgba = ddsDecodeLevel(a.buf, info, 0);
-    return { __t: 1, result: { info: info, level0: rgba.buffer, buf: a.buf }, transfer: [rgba.buffer, a.buf] };
+    var info = DDS.ddsInfo(a.buf), lvl = 0;
+    if (a.max) while (lvl + 1 < info.levels.length && Math.max(info.levels[lvl].w, info.levels[lvl].h) > a.max) lvl++;
+    var L = info.levels[lvl], rgba = DDS.ddsDecodeLevel(a.buf, info, lvl);
+    var f = a.max ? DDS.fitRGBA(rgba, L.w, L.h, a.max) : { w: L.w, h: L.h, rgba: rgba };
+    return { __t: 1, result: { info: info, level0: f.rgba.buffer, buf: a.buf, w: f.w, h: f.h }, transfer: [f.rgba.buffer, a.buf] };
   }
 };`,
   });
@@ -130,8 +135,14 @@ async function decodeGameEntries(entries, onDone, isCancelled){
 }
 // A user-supplied .dds, decoded in the pool. `buf` is TRANSFERRED and handed back attached to the
 // result as `.raw` — the caller must read it from there, not from the variable it passed in.
-async function parseDDSAsync(buf){
-  const r = await decodePool().call("ddsLevel0", { buf }, [buf]);
+// `max` (optional): the largest side to hold. A file past it comes back smaller, as one level, with
+// `fitFrom` saying the file's own size — `raw` is still the file, byte for byte (ROADMAP 1.26).
+async function parseDDSAsync(buf, max){
+  const r = await decodePool().call("ddsLevel0", { buf, max: max || 0 }, [buf]);
+  const px = new Uint8ClampedArray(r.level0);
+  if (r.w !== r.info.width || r.h !== r.info.height)
+    return { width: r.w, height: r.h, format: r.info.format, mips: [{ w: r.w, h: r.h, rgba: px }], raw: r.buf,
+      fitFrom: { w: r.info.width, h: r.info.height } };
   return { width: r.info.width, height: r.info.height, format: r.info.format,
-    mips: ddsMips(r.buf, r.info, new Uint8ClampedArray(r.level0)), raw: r.buf };
+    mips: DDS.ddsMips(r.buf, r.info, px), raw: r.buf };
 }

@@ -34,11 +34,11 @@ function restoreStockSheet(slot, isN){
   const d = stem && App.decoded.get(stem);
   if (!d) return false;
   if (d.stockRaw) {
-    const st = /\.tga$/i.test(d.stockName || "") ? parseTGA(d.stockRaw) : parseDDS(d.stockRaw);
+    const st = /\.tga$/i.test(d.stockName || "") ? TGA.parseTGA(d.stockRaw) : DDS.parseDDS(d.stockRaw);
     d.width = st.width; d.height = st.height; d.mips = st.mips;
     d.raw = d.stockRaw; d.rawName = d.stockName; d.fileName = d.stockName;
   }
-  if (isN) { slot.smooth = slot.metal = slot.normal = null; initSlotSurface(slot, d); slot.nEdited = false; }
+  if (isN) { slot.smooth = slot.metal = slot.normal = null; NSheet.init(slot, d); slot.nEdited = false; }
   else { slot.wearC = null; slot.wearEdited = false; slot._cov = null; fillSlotAlbedo(slot, d, slot.cStem); slot.cEdited = false; }
   return true;
 }
@@ -114,7 +114,7 @@ const ReplaceTex = {
   // ---- the surface half ----
   adoptSurface(s, dec, srcName){
     s.nStem = s.nStem || s.id.replace(/_c$/, "") + "_n";
-    initSlotSurface(s, dec);
+    NSheet.init(s, dec);
     s.nEdited = true;
     ReplaceTex.adopt(s.nStem, dec, srcName);
     ReplaceTex.refresh(s, "Surface (_n) loaded into " + s.id + " from " + srcName);
@@ -123,7 +123,7 @@ const ReplaceTex = {
   // than squeezing it into whatever the stock texture happened to be.
   resizeSurface(s, dec, srcName){
     const was = s.smooth.width;
-    initSlotSurface(s, dec);
+    NSheet.init(s, dec);
     s.nEdited = true;
     ReplaceTex.restamp(s.nStem, dec, srcName, true);
     UndoHistory.clear();                        // old snapshots are the wrong size now
@@ -134,13 +134,7 @@ const ReplaceTex = {
     const w = s.smooth.width, h = s.smooth.height;
     const src = scaleRGBA(dec.mips[0].rgba, dec.width, dec.height, w, h);
     ReplaceTex.bake("replace surface texture", [s.smooth, s.metal, s.normal], () => {
-      const sm = new ImageData(w, h), mt = new ImageData(w, h), nr = new ImageData(w, h);
-      for (let i = 0; i < w * h; i++) {
-        const R = src[i*4], G = src[i*4+1], B = src[i*4+2], A = src[i*4+3];
-        sm.data[i*4] = sm.data[i*4+1] = sm.data[i*4+2] = R; sm.data[i*4+3] = 255;
-        mt.data[i*4] = mt.data[i*4+1] = mt.data[i*4+2] = B; mt.data[i*4+3] = 255;
-        nr.data[i*4] = G; nr.data[i*4+1] = A; nr.data[i*4+2] = 128; nr.data[i*4+3] = 255;
-      }
+      const { sm, mt, nr } = NSheet.split(src, w, h);          // the one place the slope bytes are named (1.24)
       ctx2d(s.smooth).putImageData(sm, 0, 0);
       ctx2d(s.metal).putImageData(mt, 0, 0);
       ctx2d(s.normal).putImageData(nr, 0, 0);
@@ -236,7 +230,7 @@ $("replacePick").onchange = async e => {
     const name = f.name.toLowerCase();
     let dec;
     if (name.endsWith(".dds")) { dec = await parseDDSAsync(await f.arrayBuffer()); dec.rawName = f.name; }   // .raw comes back from the worker
-    else if (name.endsWith(".tga")) { const buf = await f.arrayBuffer(); dec = parseTGA(buf); dec.raw = buf; dec.rawName = f.name; }
+    else if (name.endsWith(".tga")) { const buf = await f.arrayBuffer(); dec = TGA.parseTGA(buf); dec.raw = buf; dec.rawName = f.name; }
     else {
       const bmp = await createImageBitmap(f);
       const c = mkCanvas(bmp.width, bmp.height);

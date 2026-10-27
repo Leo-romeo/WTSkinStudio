@@ -62,7 +62,7 @@ const argv = process.argv.slice(2);
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -177,14 +177,16 @@ console.log("\n=== records ===");
 {
   const c = Effect.clone({ type: "levels", rgb: { inLo: -5, inHi: 999, gamma: 0, outLo: "x", outHi: 255 }, r: null });
   R.is(c.rgb.inLo === 0 && c.rgb.inHi === 255 && c.rgb.gamma === .1 && c.rgb.outLo === 0 && !("r" in c), "a record read from a file is put back in range");
-  const u = { type: "blur", radius: 4, deep: { a: [1, 2] } }, cu = Effect.clone(u);
+  // "emboss": a kind this build does not know. It was "blur" until blur became one (2026-10-23, t154).
+  const u = { type: "emboss", radius: 4, deep: { a: [1, 2] } }, cu = Effect.clone(u);
   R.is(JSON.stringify(cu) === JSON.stringify(u) && cu !== u && cu.deep !== u.deep, "a kind this build does not know is kept exactly, as a copy");
   R.is(Effect.compile(cu) === null, "…and compiles to nothing, so it draws nothing");
   const cc = { fx: { type: "invert" } };
   const t1 = Effect.table(cc), t2 = Effect.table(cc);
   cc.fx = { type: "posterize", levels: 3 };
   R.is(t1 === t2 && Effect.table(cc) !== t1, "the tables are cached on the content under the record, and remade when it changes");
-  R.is(Effect.make("hsbc") === null && Effect.KINDS.every(k => k.id === "hsbc" || !!tab(Effect.make(k.id))), "every kind but the four numbers makes a record that compiles");
+  R.is(Effect.make("hsbc") === null && Effect.KINDS.every(k => k.id === "hsbc" || (Effect.SPATIAL.includes(k.id) ? !!Effect.make(k.id) && !tab(Effect.make(k.id)) : !!tab(Effect.make(k.id)))),
+    "every kind but the four numbers makes a record, and every one but blur, sharpen and noise (which read more than one texel — t154) compiles to tables");
   R.is(Effect.KINDS.filter(k => k.colour).map(k => k.id).join() === "balance,gradmap", "only colour balance and the gradient map are held to the colour channel");
   const tl = Effect.tidy(Effect.clone({ type: "levels", rgb: Effect.lv(), g: Effect.lv(), r: lv({ inLo: 1 }) }));
   R.is(!("g" in tl) && tl.r && tl.r.inLo === 1 && tl.rgb, "a channel's own Levels back at no change is no setting at all, and goes; one that changes anything stays, and so does all channels'");
@@ -452,7 +454,7 @@ const BODY = `async function(){
   duplicateLayer(ds, L);
   var dup = ds.layers.filter(function(x){ return x !== L; })[0];
   out.dup = { has: !!(dup && dup.fx), shared: !!(dup && dup.fx === L.fx), deep: !!(dup && dup.fx && dup.fx.rgb === L.fx.rgb) };
-  var U = fxLayer({ type: "blur", radius: 3 }, "color");
+  var U = fxLayer({ type: "emboss", radius: 3 }, "color");
   var ub = await ProjNode.load(await ProjNode.save(U, ctx), ctx);
   var us = mkSlot(); us.layers = [ub]; compositeSlot(us, null);
   out.unknown = { kept: JSON.stringify(ub.fx), drawn: worstOf(data(us.composite), data(us.baseC)).worst };
@@ -598,7 +600,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 120000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 120000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -647,10 +649,10 @@ R.is(JSON.stringify(r.save.fx) === JSON.stringify(r.save.back) && r.save.back &&
   "a Levels record survives save and load whole — channel levels included (the format stays at version 5)");
 R.is(r.save.rest.join() === "0,100,100,100", `…with the four numbers written at rest beside it, so an older build draws no effect instead of a stale hue shift (${r.save.rest.join(", ")})`);
 R.is(r.dup.has && !r.dup.shared && !r.dup.deep, "a duplicate gets a record of its own, not a shared one");
-R.is(r.unknown.kept === JSON.stringify({ type: "blur", radius: 3 }) && r.unknown.drawn === 0, "a kind from a newer build survives the trip verbatim and draws nothing");
+R.is(r.unknown.kept === JSON.stringify({ type: "emboss", radius: 3 }) && r.unknown.drawn === 0, "a kind from a newer build survives the trip verbatim and draws nothing");
 
 console.log("\n=== the panel ===");
-R.is(r.panel.options === "hsbc,levels,curves,balance,gradmap,invert,threshold,posterize" && r.panel.initial === "hsbc",
+R.is(r.panel.options === "hsbc,levels,curves,balance,gradmap,invert,threshold,posterize,blur,sharpen,noise" && r.panel.initial === "hsbc",
   `the Effect select lists every kind, starting at the four numbers (${r.panel.options})`);
 R.is(r.panel.after === "levels" && r.panel.undone === "none" && r.panel.redone === "levels", "choosing Levels is one undo step, both ways");
 R.is(r.panel.numsAfter === "0,100,100,100" && r.panel.numsUndone === "30,150,100,100" && r.panel.numsRedone === "0,100,100,100",
@@ -672,7 +674,7 @@ R.is(cu.draggedOut === "[[0,0],[255,255]]", `a point dragged well out of the box
 R.is(cu.dblclicked === "[[0,0],[255,255]]" && cu.dblSteps === 1, `…and so does one double-clicked, in one step (${cu.dblclicked}, ${cu.dblSteps} step)`);
 R.is(cu.dblEmpty === "[[0,0],[153,51],[255,255]]" && cu.dblEmptySteps === 1,
   `a double-click on empty space is a click: the point its first press put down stays, in one step — not added and removed as two (${cu.dblEmpty}, ${cu.dblEmptySteps} step)`);
-R.is(r.panel.grey === "hsbc,levels,curves,invert,threshold,posterize", `on a smoothness layer the colour-only kinds are not offered (${r.panel.grey})`);
+R.is(r.panel.grey === "hsbc,levels,curves,invert,threshold,posterize,blur,sharpen,noise", `on a smoothness layer the colour-only kinds are not offered (${r.panel.grey})`);
 R.is(r.thumb.worst === 0, `the layer's thumbnail is the base through the kind's own table (worst ${r.thumb.worst})`);
 
 const errs = (r.__errs || []).concat(r.__rejs || []).filter(e => !/three|jszip|cdnjs|net::|Failed to load/i.test(e));

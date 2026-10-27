@@ -1,13 +1,27 @@
 $("btnGameFolder").onclick = () => openGameFolder(false);
 
 // ---------- Remember the game folder between visits (IndexedDB stores the handle) ----------
+// One connection for the page, opened on first use and reused (ROADMAP 1.25). It used to open a new
+// one per call and nobody closed them: measured 2026-10-24, a page with only the boot's calls behind
+// it made `deleteDatabase("wtss")` wait 29 s, and a version upgrade would wait the same way. The
+// cached connection steps aside on `versionchange` (a delete or an upgrade, from any tab) and the
+// next call reopens; `close` is the browser dropping it. Callers never close it. Kept on the function,
+// not in a binding of its own (CLAUDE.md §2: no new globals). tools/t168.
 function idb(){
-  return new Promise((res, rej) => {
+  if (idb.conn) return idb.conn;
+  const p = idb.conn = new Promise((res, rej) => {
     const rq = indexedDB.open("wtss", 1);
     rq.onupgradeneeded = () => rq.result.createObjectStore("kv");
-    rq.onsuccess = () => res(rq.result);
-    rq.onerror = () => rej(rq.error);
+    rq.onsuccess = () => {
+      const db = rq.result;
+      const drop = () => { if (idb.conn === p) idb.conn = null; };
+      db.onversionchange = () => { db.close(); drop(); };
+      db.onclose = drop;
+      res(db);
+    };
+    rq.onerror = () => { if (idb.conn === p) idb.conn = null; rej(rq.error); };
   });
+  return p;
 }
 // A miss and a failure are different answers and used to be the same one. `idbGet` still returns
 // null for both — every caller treats that as "nothing stored", which is the right recovery — but a

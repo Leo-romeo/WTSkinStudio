@@ -156,6 +156,7 @@ function setChannelView(ch, auto){
   if (!auto) App.chanAuto = false;
   App.chanView = ch;
   for (const s of App.slots.values()) refreshChannelTextures(s);
+  if (ch !== "levels") LevelView.dropLevelsTex();            // a sheet-sized chain each: only while shown (4.58 (b))
   rebuildMaterials();
   const b = $("chanViewSel"), want = App.chanAuto ? "auto" : ch;
   if (b && b.value !== want) b.value = want;
@@ -184,6 +185,7 @@ function applyAutoChanView(){
   if (App.chanView !== want) setChannelView(want, true);
 }
 function chanViewLabel(ch){
+  if (ch === "levels") return "Mip levels — each level one colour, so the colour is the level the GPU samples there";
   if (RAW_CHANS[ch]) return RAW_CHANS[ch].label;
   return CHAN_LABEL[ch] ? CHAN_LABEL[ch] + " channel" : null;
 }
@@ -194,7 +196,8 @@ function chanViewLabel(ch){
 // means what is fixed by the shader, not by us:
 //
 //     <name>_c   R,G,B = colour            A = coverage over the scalable camouflage
-//     <name>_n   R = inverted roughness    G = normal X    B = metalness    A = normal Y
+//     <name>_n   R = inverted roughness    G = normal Y    B = metalness    A = normal X
+//                (X left/right, Y up/down with high G toward the bottom row: ROADMAP 1.24, NSheet)
 //
 // Every one of those is reachable here on its own: viewable flat, measurable, and directly
 // fillable / invertible / adjustable. The albedo's ALPHA is the one that matters most and the one
@@ -207,9 +210,9 @@ const RAW_CHANS = {
   "c:b": { sheet: "c", i: 2, label: "Albedo B",      meaning: "Blue" },
   "c:a": { sheet: "c", i: 3, label: "Albedo A",      meaning: "Paint mask — white is painted, black is the bare material showing through" },
   "n:r": { sheet: "n", i: 0, label: "Surface R",     meaning: "Inverted roughness (gloss)" },
-  "n:g": { sheet: "n", i: 1, label: "Surface G",     meaning: "Normal X" },
+  "n:g": { sheet: "n", i: 1, label: "Surface G",     meaning: "Normal Y — the up/down slope, lighter leaning toward the bottom" },
   "n:b": { sheet: "n", i: 2, label: "Surface B",     meaning: "Metalness" },
-  "n:a": { sheet: "n", i: 3, label: "Surface A",     meaning: "Normal Y" },
+  "n:a": { sheet: "n", i: 3, label: "Surface A",     meaning: "Normal X — the left/right slope, lighter leaning right" },
 };
 // Where each raw channel really lives in this app's per-slot storage, so reading and writing one
 // touches the same pixels the exporter will pack.
@@ -226,7 +229,7 @@ function rawChanStore(slot, key){
   const W = slot.smooth.width, H = slot.smooth.height;
   if (r.i === 0) return { kind: "canvas", canvas: slot.smooth, at: 0, grey: true, w: W, h: H };
   if (r.i === 2) return { kind: "canvas", canvas: slot.metal, at: 0, grey: true, w: W, h: H };
-  return { kind: "canvas", canvas: slot.normal, at: r.i === 1 ? 0 : 1, w: W, h: H };
+  return { kind: "canvas", canvas: slot.normal, at: r.i === NSheet.X ? 0 : 1, w: W, h: H };   // the sheet is X red, Y green
 }
 function rawChanBytes(slot, key){
   const st = rawChanStore(slot, key);

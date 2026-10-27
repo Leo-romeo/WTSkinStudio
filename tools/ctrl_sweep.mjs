@@ -21,21 +21,21 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { installOrExit } from "./wtdir.mjs";
+import { installOrExit, isDirEntry } from "./wtdir.mjs";
 
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url)).replace(/\\/g, "/");
 const WT = installOrExit();   // tools/wtdir.mjs: WT_DIR, else Steam's library list, else the usual folders
 const argv = process.argv.slice(2);
 const src = fs.readFileSync(HTML, "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + n + " missing");
   return src.slice(a + 1, b);
 };
 if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: (await import("node:crypto")).webcrypto });
 globalThis.ZSTD_WASM_B64 = /const ZSTD_WASM_B64 = "([^"]*)";/.exec(src)[1];
-const Z = new Function(section("ZSTD") + "\nreturn { zstdDec };")();
-globalThis.zstdDec = Z.zstdDec;
+const Z = new Function(section("ZSTD") + "\nreturn { zstdDec: Zstd.zstdDec };")();
+globalThis.Zstd = { zstdDec: Z.zstdDec };   // the sections reach it as Zstd.zstdDec (ROADMAP 2.3)
 const MOD = new Function(section("MODEL") + "\nreturn { grpParseFront, GRP_CLS, loadSkeletonBytes };")();
 
 // The app's own table, lifted out of the built page rather than copied — a sweep that measures a
@@ -75,7 +75,7 @@ function walk(dir, out = [], depth = 0) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) {
+    if (isDirEntry(e, p)) {
       if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue;
       walk(p, out, depth + 1);
     } else if (/\.grp$/i.test(e.name)) out.push(p);

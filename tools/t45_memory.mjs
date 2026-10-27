@@ -8,7 +8,9 @@
 // What it exercises is the hot path §3 cares about: an encode through the export worker pool. That
 // one operation touches every mechanism where a leak would actually hurt — the pool, transferable
 // ArrayBuffers, the WASM instances, and megabyte-scale pixel buffers — and it is the loop a user
-// runs dozens of times in a session. Every few rounds the pool is cancelled, which terminates the
+// runs dozens of times in a session. Since ROADMAP 4.58 each round also carries a level the author
+// made, and runs the job that takes a restart's full-size sheet down to its level beside the encode
+// (docs/MIP_LEVELS.md §4: one full-size sheet per restart, freed once it is used). Every few rounds the pool is cancelled, which terminates the
 // workers and respawns them on the next call, because a pool that leaks a worker per cancel is the
 // classic version of this bug.
 //
@@ -68,8 +70,17 @@ const BODY = `async function(){
     for (var i = 0; i < px.length; i += 4) {
       px[i] = (i * 7) & 255; px[i + 1] = (i * 13) & 255; px[i + 2] = (i * 3) & 255; px[i + 3] = 255;
     }
-    return { op: "encodeTexture", transfer: [buf],
-      args: { rgba: buf, mask: null, w: SIDE, h: SIDE, fmt: "bc3", useMips: true, renorm: false, padDist: 0 } };
+    // ...and one level the author made (ROADMAP 4.58): the encode takes it as level 2.
+    var lvl = new Uint8ClampedArray((SIDE >> 2) * (SIDE >> 2) * 4).fill(200);
+    return { op: "encodeTexture", transfer: [buf, lvl.buffer],
+      args: { rgba: buf, mask: null, w: SIDE, h: SIDE, fmt: "bc3", useMips: true, renorm: false, padDist: 0,
+              restarts: [{ level: 2, rgba: lvl.buffer }] } };
+  }
+  // A restart's own job (4.58): a full-size sheet taken down to its level, every round beside the encode.
+  function makeLevelJob(){
+    var buf = new ArrayBuffer(SIDE * SIDE * 4);
+    new Uint8ClampedArray(buf).fill(90);
+    return { op: "levelOf", transfer: [buf], args: { rgba: buf, mask: null, w: SIDE, h: SIDE, level: 3, renorm: false, padDist: 32 } };
   }
 
   var pool = exportPool();
@@ -77,7 +88,7 @@ const BODY = `async function(){
   var retained = [];        // the control phase's deliberate leak
   try {
     for (var r = 0; r < WARMUP + ROUNDS; r++) {
-      var out = await pool.map([makeJob()]);
+      var out = await pool.map([makeJob(), makeLevelJob()]);
       if (out && out[0]) bytesOut = (out[0].bytes || out[0].data || out[0]).byteLength || bytesOut;
       out = null;
       // Force a worker respawn periodically: a pool that leaks a worker per cancel shows up here

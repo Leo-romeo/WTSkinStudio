@@ -47,13 +47,16 @@ function readVromfs(u8){
     let total = 0; for (const p of parts) total += p.length;
     const joined = new Uint8Array(total);
     let o = 0; for (const p of parts) { joined.set(p, o); o += p.length; }
-    plain = zstdDec(joined);
+    plain = Zstd.zstdDec(joined);
   } else throw new Error("vromfs compression 0x" + type.toString(16) + " not supported");
   return vromfsFileTable(plain);
 }
 function vromfsFileTable(b){
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const nameTableOfs = dv.getUint32(0, true), filesCount = dv.getUint32(4, true), dataTableOfs = dv.getUint32(16, true);
+  // 16 bytes a file in the data table, so the count is bounded by the bytes there: a crafted one of
+  // 2^32 - 1 walked four billion empty names out of a 64-byte table (ROADMAP 1.21 (2), t144).
+  if (dataTableOfs + filesCount * 16 > b.length) throw new Error("vromfs file table is truncated or corrupt — " + filesCount + " files claimed in " + b.length + " bytes");
   const td = new TextDecoder();
   const names = [];
   let p = dv.getUint32(nameTableOfs, true);
@@ -71,7 +74,7 @@ function vromfsFileTable(b){
   return out;
 }
 // A vromfs entry holding a BLK, by leading payload byte: 1/3 = stored, 2/4 = zstd,
-// 5 = zstd against the archive's own dictionary (pass its handle from zstdDict()).
+// 5 = zstd against the archive's own dictionary (pass its handle from Zstd.zstdDict()).
 // The byte says how the payload is *packed*, not how it is laid out: aces.vromfs.bin's 1 858
 // type-3 entries are stored SLIM, so the layout must come from the decoded bytes instead —
 // see vromfsBlkIsSlim.
@@ -79,11 +82,11 @@ function vromfsBlkBody(data, ddict){
   if (!data.length) return null;
   const t = data[0];
   if (t === 1 || t === 3) return data.subarray(1);
-  if (t === 2) { const sz = data[1] | (data[2] << 8) | (data[3] << 16); return zstdDec(data.subarray(4, 4 + sz)).subarray(1); }
-  if (t === 4) return zstdDec(data.subarray(1));
+  if (t === 2) { const sz = data[1] | (data[2] << 8) | (data[3] << 16); return Zstd.zstdDec(data.subarray(4, 4 + sz)).subarray(1); }
+  if (t === 4) return Zstd.zstdDec(data.subarray(1));
   if (t === 5) {
     if (!ddict) throw new Error("BLK needs the archive's zstd dictionary");
-    return zstdDec(data.subarray(1), ddict);
+    return Zstd.zstdDec(data.subarray(1), ddict);
   }
   return data;
 }
@@ -101,7 +104,7 @@ function loadVromfsBlk(data, sharedNames, ddict, rootOnly){
 }
 // `nm`: 40-byte header, then zstd → VLQ(count) VLQ(size) then NUL-separated names.
 function vromfsNameMap(data){
-  const plain = zstdDec(data.subarray(40));
+  const plain = Zstd.zstdDec(data.subarray(40));
   const r = new BlkReader(plain);
   blkVLQ(r, 1, 5, 7);
   const size = blkVLQ(r, 1, 5, 7);
@@ -158,7 +161,8 @@ function blkParamReader(paramsData, pv, sharedNames, bias){
 function loadSlimDataBlock(u8, sharedNames, rootOnly){
   const r = new BlkReader(u8);
   r.byte();                                           // 0x00 = names live in the shared map
-  const blocksCount = blkVLQ(r, 7, 0x23), paramsCount = blkVLQ(r, 7, 0x23), dataSize = blkVLQ(r, 7, 0x23);
+  const blocksCount = BlkReader.count(blkVLQ(r, 7, 0x23), "block count"), paramsCount = BlkReader.count(blkVLQ(r, 7, 0x23), "param count"),
+        dataSize = BlkReader.count(blkVLQ(r, 7, 0x23), "data size");
   const paramsData = r.read(dataSize);
   const paramsBuf = r.read(paramsCount * 8);
   const pv = new DataView(paramsBuf.buffer, paramsBuf.byteOffset, paramsBuf.byteLength);
@@ -171,7 +175,7 @@ function loadSlimDataBlock(u8, sharedNames, rootOnly){
     blocks.push({ nameId, pCount, bCount, firstBlockId, ofs: offset, children: [] });
     offset += 8 * pCount;
   }
-  for (const blk of blocks) for (let i = 0; i < blk.bCount; i++) if (blocks[blk.firstBlockId + i]) blk.children.push(blocks[blk.firstBlockId + i]);
+  BlkReader.link(blocks);
   const nameOf = b => (b.nameId >= 0 ? sharedNames[b.nameId] : "(root)");
   return { root: blocks[0], blocks, sharedNames, nameOf, slim: true,
     param: blkParamReader(paramsData, pv, sharedNames, 0),

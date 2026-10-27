@@ -1,5 +1,12 @@
 "use strict";
 /*==BCNENC==*/
+// One scope per module (ROADMAP 2.3): the body below is private, `BCnEnc` — returned at the end — is
+// the only name this module puts into the shared scope. Not re-indented; see `codecs/dds.js`.
+const BCnEnc = (() => {
+// Bound once, at load: the BC1 endpoint search unpacks a 565 per block through it, and a
+// namespace lookup per block is what 2.3's "fast" rules out. So BCNDEC loads before this —
+// in the page and in every pool that lifts BCNENC (the export pool lists it first).
+const { c565 } = BCnDec;
 // Level 0 is the sheet the user authored and is passed through untouched — `mips[0].rgba` IS the
 // caller's array, not a copy. Only the levels generated here are renormalised, because box-filtering
 // two opposing normals shortens the result and that is the error being corrected; the authored
@@ -7,24 +14,53 @@
 // level, leave the source alone) and is asserted both ways in tools/t29_encode.mjs. The CDK wiki
 // says nothing about mip chains at all — checked 2026-08-04 — and War Thunder accepts a skin with
 // no mip chain, which is what the game's own extracted textures ship.
-function buildMips(rgba, w, h, renorm){
+//
+// `restarts` (ROADMAP 4.58, docs/MIP_LEVELS.md §4) lists `{ level, rgba }`: a level the author made,
+// already at that level's size — the export builds it from that level's layers at full size, pads it
+// and takes it down with `reduce`, which is these same steps. The chain takes it as that level and
+// generates the levels below it from it, exactly as it generates them from level 0. With no restarts
+// this is the function it always was, byte for byte (t29's goldens; t163 against the export).
+function buildMips(rgba, w, h, renorm, restarts){
   const mips = [{ w, h, rgba }];
+  const own = new Map();
+  for (const r of restarts || []) own.set(r.level, r.rgba);
   let cw = w, ch = h, cur = rgba;
   while (cw > 1 || ch > 1) {
     const nw = Math.max(1, cw >> 1), nh = Math.max(1, ch >> 1);
-    const nxt = new Uint8ClampedArray(nw * nh * 4);
-    for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
-      const x0 = Math.min(x*2, cw-1), x1 = Math.min(x*2+1, cw-1);
-      const y0 = Math.min(y*2, ch-1), y1 = Math.min(y*2+1, ch-1);
-      for (let c = 0; c < 4; c++) {
-        nxt[(y*nw+x)*4+c] = (cur[(y0*cw+x0)*4+c] + cur[(y0*cw+x1)*4+c] + cur[(y1*cw+x0)*4+c] + cur[(y1*cw+x1)*4+c] + 2) >> 2;
-      }
-    }
-    if (renorm) renormalizeWTNormal(nxt);
+    let nxt = own.get(mips.length);
+    if (nxt) {
+      if (nxt.length !== nw * nh * 4) throw new Error("level " + mips.length + " holds " + (nxt.length >> 2) + " texels; the chain's is " + nw + "×" + nh);
+      own.delete(mips.length);
+    } else nxt = half(cur, cw, ch, renorm);
     mips.push({ w:nw, h:nh, rgba:nxt });
     cw = nw; ch = nh; cur = nxt;
   }
+  if (own.size) throw new Error("level " + [...own.keys()].join(", ") + " is past the end of a " + w + "×" + h + " chain");
   return mips;
+}
+// One step down the chain: a 2×2 box, and an `_n`'s slopes renormalised (above).
+function half(cur, cw, ch, renorm){
+  const nw = Math.max(1, cw >> 1), nh = Math.max(1, ch >> 1);
+  const nxt = new Uint8ClampedArray(nw * nh * 4);
+  for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+    const x0 = Math.min(x*2, cw-1), x1 = Math.min(x*2+1, cw-1);
+    const y0 = Math.min(y*2, ch-1), y1 = Math.min(y*2+1, ch-1);
+    for (let c = 0; c < 4; c++) {
+      nxt[(y*nw+x)*4+c] = (cur[(y0*cw+x0)*4+c] + cur[(y0*cw+x1)*4+c] + cur[(y1*cw+x0)*4+c] + cur[(y1*cw+x1)*4+c] + 2) >> 2;
+    }
+  }
+  if (renorm) renormalizeWTNormal(nxt);
+  return nxt;
+}
+// Level `r` of the chain a full-size sheet generates — what a restart's sheet becomes (4.58). The
+// steps are `buildMips`' own, so a restart whose sheet is level 0's is the level the chain would have.
+function reduce(rgba, w, h, renorm, r){
+  let cw = w, ch = h, cur = rgba;
+  for (let k = 0; k < r && (cw > 1 || ch > 1); k++) {
+    cur = half(cur, cw, ch, renorm);
+    cw = Math.max(1, cw >> 1); ch = Math.max(1, ch >> 1);
+  }
+  return { w: cw, h: ch, rgba: cur };
 }
 function renormalizeWTNormal(rgba){
   for (let i = 0; i < rgba.length; i += 4) {
@@ -54,7 +90,7 @@ function writeDDS(mips, opts){
   }
   const head = new ArrayBuffer(128);
   const dv = new DataView(head);
-  dv.setUint32(0, DDS_MAGIC, true);
+  dv.setUint32(0, DDS.DDS_MAGIC, true);
   dv.setUint32(4, 124, true);
   let flags = 0x1 | 0x2 | 0x4 | 0x1000;
   if (mips.length > 1) flags |= 0x20000;
@@ -171,4 +207,6 @@ function encodeBC1ColorBlock(px, out, o){
   }
   out[o+4] = bits & 255; out[o+5] = (bits >>> 8) & 255; out[o+6] = (bits >>> 16) & 255; out[o+7] = (bits >>> 24) & 255;
 }
+return { buildMips, reduce, renormalizeWTNormal, writeDDS, encodeBC3, encodeBC4AlphaBlock, to565, from565, encodeBC1ColorBlock };
+})();
 /*==ENDBCNENC==*/

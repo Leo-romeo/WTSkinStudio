@@ -145,34 +145,102 @@ function ensureBrushRing(){
   };
   brushRing.add(mk(0.94, 0.95));       // the edge
   brushRing.add(mk(0.965, 0.4));       // the hardness falloff, scaled below
+  // Every other tip's own outline, and the Square's hardness line (ROADMAP 3.41 (2)): segments in the
+  // tip's frame, x right and y down, its longer side −1 … 1 — `Tips.outline`'s — rebuilt when the tip
+  // changes and scaled to the brush.
+  const line = opacity => {
+    const l = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x7fe0ff, transparent: true, opacity,
+      depthTest: false, depthWrite: false, toneMapped: false }));
+    l.renderOrder = 999; l.visible = false;
+    return l;
+  };
+  brushRing.add(line(.95), line(.4));
   brushRing.visible = false;
   scene.add(brushRing);
   return brushRing;
 }
 function hideBrushRing(){ if (brushRing && brushRing.visible) { brushRing.visible = false; needsRender(); } }
 const RING_Z = new THREE.Vector3(0, 0, 1);
+// The ring is drawn in the frame the dab is (ROADMAP 3.41 (2)). The projected brush's dab is a circle
+// on the SCREEN at the depth it lands (12), so its ring faces the camera there: x right, y down the
+// screen. The UV-space brush draws its dabs on the sheet, so its ring lies on the surface with x along
+// the hit triangle's +u and y down the sheet (−v) — a turned or one-sided tip shows on the model the
+// way it will paint there. During a projected stroke the point under the pointer is read off the
+// stroke's own pre-pass (`ProjBrush.under`), not raycast: a raycast is 13 ms a move (1.19a).
 function updateBrushRing(e){
   if (!App.paint3d || !modelGroup || cam.fly || App.placing) { hideBrushRing(); return; }
   const s = App.activeSlot;
   if (!s || !s.composite) { hideBrushRing(); return; }
-  const hit = ray3d(e);                       // paintable targets only: it shows where paint lands
-  if (!hit || !hit.uv || !hit.face) { hideBrushRing(); return; }
-  const dens = faceTexelDensity(hit, s.composite.width, s.composite.height);
-  if (!dens) { hideBrushRing(); return; }
-  const r = (App.brush.size / 2) / dens;      // texels → world units
+  const b = App.brush, pj = stroke && stroke.pj, T = Tips.of(b);
+  let at, r, hit = null;
+  if (pj) { at = ProjBrush.under(pj, e.clientX, e.clientY); r = (b.size / 2) / pj.dens; }
+  else {
+    hit = ray3d(e);                             // paintable targets only: it shows where paint lands
+    if (!hit || !hit.uv || !hit.face) { hideBrushRing(); return; }
+    const dens = faceTexelDensity(hit, s.composite.width, s.composite.height);
+    if (!dens) { hideBrushRing(); return; }
+    r = (b.size / 2) / dens;                    // texels → world units
+    at = hit.point;
+  }
   const ring = ensureBrushRing();
-  const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-  ring.position.copy(hit.point).addScaledVector(n, Math.max(r * .02, cam.dist * 4e-4));
-  ring.quaternion.setFromUnitVectors(RING_Z, n);
+  let fr = null;
+  if (pj || (!stroke && ProjBrush.would())) {
+    camera.updateMatrixWorld();
+    fr = { X: new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), Y: new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).negate() };
+    ring.position.copy(at);
+  } else {
+    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+    ring.position.copy(at).addScaledVector(n, Math.max(r * .02, cam.dist * 4e-4));
+    fr = updateBrushRing.sheetFrame(hit, n);
+    if (!fr) ring.quaternion.setFromUnitVectors(RING_Z, n);
+  }
+  if (fr) ring.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(fr.X, fr.Y, new THREE.Vector3().crossVectors(fr.X, fr.Y)));
+  const hard = Math.max(0, Math.min(1, b.hardness)), soft = T.hard && hard > .02 && hard < .98, round = T.id === "round";
   ring.children[0].scale.set(r, r, 1);
-  const hard = Math.max(0, Math.min(1, App.brush.hardness));
   ring.children[1].scale.set(r * hard, r * hard, 1);
+  ring.children[0].visible = round;
   // Only for a tip Hardness shapes: a rivet, a chip or a loaded image carries its own edge (4.50 (10)).
-  ring.children[1].visible = hard > .02 && hard < .98 && Tips.of(App.brush).hard;
+  ring.children[1].visible = round && soft;
+  const [out, inner] = [ring.children[2], ring.children[3]];
+  if (!round) {
+    if (out.userData.key !== T.key) {
+      const S = T.id === "square" ? new Float32Array([-1, -1, 1, -1, 1, -1, 1, 1, 1, 1, -1, 1, -1, 1, -1, -1]) : Tips.outline(T);
+      const xyz = new Float32Array(S.length / 2 * 3);
+      for (let i = 0, j = 0; i < S.length; i += 2, j += 3) { xyz[j] = S[i]; xyz[j + 1] = S[i + 1]; }
+      for (const l of [out, inner]) { l.geometry.dispose(); l.geometry = new THREE.BufferGeometry(); l.geometry.setAttribute("position", new THREE.BufferAttribute(xyz, 3)); }
+      out.userData.key = T.key;
+    }
+    // turned as Pen.dab turns a dab: by the frame's own heading, the screen's or the sheet's
+    const turn = Tips.cursorTurn(T, b, pj ? pj.head : stroke && stroke.dirs ? stroke.dirs[0] : null);
+    out.scale.set(r, r, 1); inner.scale.set(r * hard, r * hard, 1);
+    out.rotation.z = inner.rotation.z = turn;
+  }
+  out.visible = !round; inner.visible = !round && soft;
   ring.visible = true;
   brushStamp.warm();                            // a stroke may be about to start: have its stamp ready
   needsRender();
 }
+// The hit triangle's sheet frame on the surface: x along +u, y down the sheet (the sheet's row 0 is
+// v = 1, as `stamp3d` reads a hit), both in the tangent plane of normal `n` — y taken square to x, on
+// the side −v lies, so a mirrored island draws its tip mirrored, as it paints. Null where the UVs are
+// degenerate.
+updateBrushRing.sheetFrame = (hit, n) => {
+  const f = hit.face, geo = hit.object.geometry, P = geo.attributes.position, U = geo.attributes.uv;
+  if (!f || !P || !U) return null;
+  const p = i => new THREE.Vector3(P.getX(i), P.getY(i), P.getZ(i)).applyMatrix4(hit.object.matrixWorld);
+  const p0 = p(f.a), e1 = p(f.b).sub(p0), e2 = p(f.c).sub(p0);
+  const du1 = U.getX(f.b) - U.getX(f.a), dv1 = U.getY(f.b) - U.getY(f.a), du2 = U.getX(f.c) - U.getX(f.a), dv2 = U.getY(f.c) - U.getY(f.a);
+  const det = du1 * dv2 - du2 * dv1;
+  if (!(Math.abs(det) > 1e-12)) return null;
+  const dPu = e1.clone().multiplyScalar(dv2).addScaledVector(e2, -dv1).divideScalar(det);
+  const dPv = e2.clone().multiplyScalar(du1).addScaledVector(e1, -du2).divideScalar(det);
+  const X = dPu.addScaledVector(n, -dPu.dot(n));
+  if (!(X.lengthSq() > 1e-20)) return null;
+  X.normalize();
+  const Y = new THREE.Vector3().crossVectors(n, X);
+  if (Y.dot(dPv) > 0) Y.negate();
+  return { X, Y };
+};
 // Both brush indicators — the ring laid on the model and the circle on the sheet — are drawn
 // where the pointer last was, and both were only ever recomputed by a pointermove. Anything else
 // that changes the mapping from pointer to surface left them stale: resizing the viewport (window,

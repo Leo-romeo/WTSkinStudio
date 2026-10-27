@@ -28,6 +28,10 @@
 //              dab alike
 //   square     a picture loaded as the tile's pattern keeps the tile square, and ⋮ ▸ resolution…
 //              keeps it square
+//   calibration the Calibration grid read back as pixels (ground, frame, sixteen distinct numbers a
+//              quarter of a cell high, the arrow toward +v) and pinned by hash — the bytes are a
+//              function of the size alone, so a change to the grid is a change to the golden here;
+//              the repeat length against plates of known UV density; the button and its undo
 //
 // No stored golden: every expectation is a colour the test painted itself or a number it can work
 // out by hand. Usage: node tools/t106_camotile.mjs [--keep] [--chrome <path>]
@@ -192,7 +196,7 @@ const BODY = `async function(){
       var nm = names[k];
       if (/\\.blk$/.test(nm)) o.blk = await zip.file(nm).async("string");
       if (/wtss_camo_tile\\.(dds|tga)$/.test(nm)) {
-        var buf = await zip.file(nm).async("arraybuffer"), d = /\\.dds$/.test(nm) ? parseDDS(buf) : parseTGA(buf), m = d.mips[0].rgba, seen = {};
+        var buf = await zip.file(nm).async("arraybuffer"), d = /\\.dds$/.test(nm) ? DDS.parseDDS(buf) : TGA.parseTGA(buf), m = d.mips[0].rgba, seen = {};
         for (var q2 = 3; q2 < m.length; q2 += 4) seen[m[q2]] = 1;
         var at = function(x, y){ var i = (y * d.width + x) * 4; return [m[i], m[i + 1], m[i + 2]]; };
         o.tile = { w: d.width, h: d.height, alphas: Object.keys(seen), at250: at(250, 128), at3: at(3, 128), mid: at(128, 150) };
@@ -410,6 +414,120 @@ const BODY = `async function(){
   doUndo(); flushComposites();
   out.undo = { B: B, before: undoBefore, after: [px(big.composite, B - 6, 100), px(big.composite, 3, 100)] };
 
+  // ---- the calibration grid (4.50 (6)): the camouflage's scale made checkable ----
+  // Read back as pixels, never through the function's own geometry: the ground, the frame, what the
+  // digits are and how tall, and which way the arrow points.
+  var CN = 256, cal = CamoTile.calibration(CN), cdat = ctx2d(cal).getImageData(0, 0, CN, CN).data;
+  var cpx = function(x, y){ var i = (y * CN + x) * 4; return [cdat[i], cdat[i+1], cdat[i+2], cdat[i+3]]; };
+  var isRed = function(p){ return p[0] > 200 && p[1] < 60 && p[2] < 60; };
+  var isWhite = function(p){ return p[0] > 240 && p[1] > 240 && p[2] > 240; };
+  var isYel = function(p){ return p[0] > 200 && p[1] > 180 && p[2] < 80; };
+  var cellSz = CN / 4, redN = 0, ink = [], arrow = { x0: 1e9, y0: 1e9, x1: -1, y1: -1, rows: {} }, arrowOutside = 0;
+  for (var k = 0; k < 16; k++) ink.push({ x0: 1e9, y0: 1e9, x1: -1, y1: -1, n: 0, bits: [] });
+  for (var y = 0; y < CN; y++) for (var x = 0; x < CN; x++) {
+    var q = cpx(x, y), cell = Math.floor(y / cellSz) * 4 + Math.floor(x / cellSz);
+    if (isRed(q)) redN++;
+    if (isWhite(q)) { var b = ink[cell]; b.n++; b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x); b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y); b.bits.push([x, y]); }
+    if (isYel(q)) {
+      if (cell !== 0) arrowOutside++;
+      arrow.x0 = Math.min(arrow.x0, x); arrow.x1 = Math.max(arrow.x1, x); arrow.y0 = Math.min(arrow.y0, y); arrow.y1 = Math.max(arrow.y1, y);
+      arrow.rows[y] = (arrow.rows[y] || 0) + 1;
+    }
+  }
+  // a glyph's shape, relative to the ink's own top-left, as a string — one per cell, and per digit
+  var shape = function(b, xa, xb){ return b.bits.filter(function(t){ return t[0] >= xa && t[0] <= xb; })
+    .map(function(t){ return (t[0] - xa) + "," + (t[1] - b.y0); }).join(";"); };
+  var rowsY = Object.keys(arrow.rows).map(Number).sort(function(a, b){ return a - b; });
+  var widest = rowsY.reduce(function(m, y){ return arrow.rows[y] > arrow.rows[m] ? y : m; }, rowsY[0]);
+  var fnv = function(a){ var h = 2166136261; for (var i = 0; i < a.length; i++) { h ^= a[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+  var cal2 = ctx2d(CamoTile.calibration(CN)).getImageData(0, 0, CN, CN).data;
+  var bigCal = ctx2d(CamoTile.calibration(1024)).getImageData(0, 0, 1024, 1024).data;
+  var e11 = ink[10], e11w = e11.x1 - e11.x0 + 1, e11half = (e11w - 1) / 2;
+  out.cal = {
+    ground: [cpx(150, 180), cpx(60, 200), cpx(200, 100)],
+    edges: [cpx(0, 100), cpx(1, 100), cpx(2, 100), cpx(254, 100), cpx(255, 100), cpx(253, 100), cpx(100, 0), cpx(100, 1), cpx(100, 2), cpx(100, 254), cpx(100, 255), cpx(100, 253)],
+    redN: redN, alpha: cpx(100, 100)[3],
+    ink: ink.map(function(b){ return { n: b.n, w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1,
+      inCell: b.n > 0 && Math.floor(b.x0 / cellSz) === Math.floor(b.x1 / cellSz) && Math.floor(b.y0 / cellSz) === Math.floor(b.y1 / cellSz) }; }),
+    shapes: ink.map(function(b){ return shape(b, b.x0, b.x1); }),
+    // "11": its two digits are one glyph twice, and that glyph is the 1 of cell 1 (the cell's arrow is yellow, not ink)
+    one: shape(ink[0], ink[0].x0, ink[0].x1), ones: [shape(e11, e11.x0, e11.x0 + (ink[0].x1 - ink[0].x0)), shape(e11, e11.x1 - (ink[0].x1 - ink[0].x0), e11.x1)],
+    arrow: { w: arrow.x1 - arrow.x0 + 1, h: arrow.y1 - arrow.y0 + 1, outside: arrowOutside,
+      top: arrow.rows[arrow.y0], bottom: arrow.rows[arrow.y1], widestAt: (widest - arrow.y0) / (arrow.y1 - arrow.y0), widest: arrow.rows[widest] },
+    same: fnv(cdat) === fnv(cal2), hash: fnv(cdat), hash1024: fnv(bigCal), cell: cellSz,
+  };
+
+  // ---- the repeat length, from the model's own tc1 against its positions ----
+  // A 10 × 4 m plate at exactly 0.08 UV a metre (12.5 m a repeat), a small nuisance part at 1 UV a
+  // metre (the median is by AREA, so it cannot move it), an effect card and a bone-driven net far
+  // away (neither is hull, so neither may stretch its length), a part whose material has no camouflage stem (tracks, fittings drawn from the same vertex format), and a part with no tc1 at all.
+  var plate = function(x0, z0, w, d, dens, y){ var P = [x0, y, z0, x0 + w, y, z0, x0 + w, y, z0 + d, x0, y, z0, x0 + w, y, z0 + d, x0, y, z0 + d], T = [];
+    for (var i = 0; i < 6; i++) T.push(P[i*3] * dens, P[i*3+2] * dens);
+    return { pos: new Float32Array(P), uv: new Float32Array(T) }; };
+  var fake = function(part, ud){ return { name: "p", geometry: { attributes: { position: { array: part.pos } } },
+    userData: Object.assign({ camoUv0: part.uv, mat: "hull" }, ud || {}) }; };
+  var hull1 = plate(0, 0, 10, 4, .08, 0), nuis = plate(2, 1, .3, .3, 1, 1);
+  out.measure = { plate: CamoTile.measure([hull1, nuis]), none: CamoTile.measure([]) };
+  var meshesWas = App.meshes;
+  App.meshes = new Map([["hull", fake(hull1)], ["nuis", fake(nuis)],
+    ["flame", fake(plate(100, 0, 50, 1, .08, 0), { effect: true })],
+    ["net", fake(plate(-90, 0, 50, 1, .08, 0), { unposed: true })],
+    ["decor", fake(plate(0, 0, 60, 1, .08, 0), { mat: "tracks" })],
+    ["plain", { name: "plain", geometry: { attributes: { position: { array: plate(0, 0, 80, 1, .08, 0).pos } } }, userData: {} }]]);
+  out.measure.hull = CamoTile.scaleInfo();
+  updateExportWarnings();
+  out.measure.row = $("rowCamoCal").style.display;
+  out.measure.text = $("camoTileInfo").textContent;
+  // the button: the grid goes in as the tile's base, in one undo step
+  var tileSl = CamoTile.slot(), TB = tileSl.baseC.width;
+  var bpx = function(x, y){ var d = ctx2d(tileSl.baseC).getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; };
+  var calBefore = bpx(0, 500);
+  $("btnCamoTileCal").click(); flushComposites();
+  out.measure.button = { TB: TB, before: calBefore, edge: bpx(0, 500), edgeR: bpx(TB - 1, 500), ground: bpx(Math.round(TB * .6), Math.round(TB * .55)),
+    status: $("status").textContent };
+  doUndo(); flushComposites();
+  out.measure.button.undone = bpx(0, 500);
+  // ---- the same button takes the grid out again (ROADMAP 3.45) ----
+  // "Exactly the base the tile had before, even after other edits": read whole, as an FNV hash of
+  // its bytes, and the edit between is a redo that brings the grid back with no click at all — the
+  // button has to see it from the pixels, not from a flag the click set.
+  var baseHash = function(){ var d = ctx2d(tileSl.baseC).getImageData(0, 0, TB, TB).data, h = 2166136261;
+    for (var i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619) >>> 0; return h; };
+  var calLabel = function(){ updateExportWarnings(); return $("btnCamoTileCal").textContent; };
+  var tg = out.measure.toggle = { before: baseHash(), outLabel: calLabel() };
+  doRedo(); flushComposites();
+  tg.redoLabel = calLabel();
+  var calRows = function(){ return validateExport(buildExportPlan(collectExports(true).filter(function(it){ return !it.off; }), { estimate: true }))
+    .filter(function(r){ return r.id === "calgrid"; }).map(function(r){ return r.level + ": " + r.title; }); };
+  tg.rowIn = calRows();
+  Autosave.changed();                                            // another edit, with no step of its own
+  $("btnCamoTileCal").click(); flushComposites();
+  tg.removed = baseHash(); tg.removedStatus = $("status").textContent; tg.removedLabel = calLabel(); tg.rowOut = calRows();
+  doUndo(); flushComposites();
+  tg.undoneRemove = calLabel();
+  // After a reload the kept base is gone (memory only, by decision): the tile goes back to its start.
+  CamoTile.calBase = null;
+  $("btnCamoTileCal").click(); flushComposites();
+  tg.lost = { label: calLabel(), status: $("status").textContent, hash: baseHash(),
+    start: (function(){ var d = ctx2d(CamoTile.startSheet(TB)).getImageData(0, 0, TB, TB).data, h = 2166136261;
+      for (var i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619) >>> 0; return h; })() };
+  doUndo(); doUndo(); flushComposites();
+  // A tile resized with the grid in still wears the grid (drawn at the new size, not resampled), and
+  // Remove grid then puts the kept base back at that size — the review's case: resampled, the grid
+  // was no longer recognised and the next click kept the grid as "the base before".
+  var keptPx = function(x, y){ var d = ctx2d(tileSl.baseC).getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; };
+  var mid = keptPx(TB >> 1, TB >> 1);
+  $("btnCamoTileCal").click(); flushComposites();
+  resizeSlot(tileSl, 2 * TB, 2 * TB); flushComposites();
+  tg.resized = { label: calLabel(), w: tileSl.baseC.width };
+  $("btnCamoTileCal").click(); flushComposites();
+  tg.resized.after = calLabel(); tg.resized.mid = keptPx(TB, TB); tg.resized.was = mid; tg.resized.edge = keptPx(0, 3);
+  resizeSlot(tileSl, TB, TB); flushComposites();
+  App.meshes = new Map();
+  updateExportWarnings();
+  out.measure.empty = $("camoTileInfo").textContent;
+  App.meshes = meshesWas;
+
   // ---- the tile goes with its vehicle, and the menu back to the vehicle's own camouflage ----
   CamoTile.view.scale = 1.4; CamoTile.view.rot = 12;
   clearVehicleState();
@@ -422,7 +540,7 @@ const BODY = `async function(){
 }`;
 
 // Two real exports and a real project round trip go through the worker pools: minutes under load.
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep"), timeoutMs: 240000 });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep"), timeoutMs: 240000 });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 600)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -571,6 +689,53 @@ R.is(!o.pattern.errors.length, `the export takes it (${o.pattern.errors.join("; 
 R.is(o.resized.w === 512 && o.resized.h === 512, `⋮ ▸ resolution… makes a tile that is not square square again (${o.resized.w}×${o.resized.h})`);
 R.is(JSON.stringify(o.resized.offered) === JSON.stringify(["128", "256", "512", "1024", "2048", "4096"]),
   `offering only a ground vehicle's sizes (${(o.resized.offered || []).join(", ")})`);
+
+console.log("\n=== the calibration grid ===");
+const grey = a => a && Math.abs(a[0] - 128) <= 4 && Math.abs(a[1] - 128) <= 4 && Math.abs(a[2] - 128) <= 4 && a[3] === 255;
+R.is(o.cal.ground.every(grey), `a mid-grey ground (${o.cal.ground.map(rgb).join(" ")}), opaque`);
+const E = o.cal.edges;
+R.is([0, 1, 3, 4].every(i => red(E[i])) && [6, 7, 9, 10].every(i => red(E[i])) && !red(E[2]) && !red(E[5]) && !red(E[8]) && !red(E[11]),
+  "a red frame two texels wide on every edge of the tile, and not a third");
+R.is(o.cal.redN === 256 * 256 - 252 * 252, `and no red anywhere else (${o.cal.redN} red texels of 256²; the frame alone is ${256 * 256 - 252 * 252})`);
+const cellH = o.cal.cell / 4;
+R.is(o.cal.ink.every(b => b.n > 0 && b.inCell && b.h <= cellH && b.h >= .8 * cellH),
+  `sixteen cells, each with its number inside it, a quarter of a cell high (${o.cal.ink.map(b => b.h).join(" ")} texels of ${cellH})`);
+R.is(new Set(o.cal.shapes).size === 16, "no two numbers are the same picture, so 1–16 are sixteen different cells");
+R.is(o.cal.ink.slice(0, 9).every(b => b.w <= 5 * b.h / 7 + .5) && o.cal.ink.slice(9).every(b => b.w > 5 * b.h / 7 + .5),
+  "1–9 are one digit wide and 10–16 are two");
+R.is(o.cal.ones[0] === o.cal.one && o.cal.ones[1] === o.cal.one, "11 is the 1 of cell 1 twice");
+const A = o.cal.arrow;
+R.is(A.w > 0 && A.outside === 0 && A.h >= .3 * o.cal.cell, `an arrow in cell 1 and nowhere else (${A.w}×${A.h} texels)`);
+R.is(A.widestAt > .5 && A.bottom < A.widest / 2 && A.top < A.widest, `pointing toward +v, down the picture, the way a DDS's rows run: head at the bottom (widest ${A.widest} at ${Math.round(A.widestAt * 100)} % down, tip ${A.bottom}, tail ${A.top})`);
+R.is(o.cal.same && o.cal.hash === 1400297300 && o.cal.hash1024 === 303050066, `deterministic: the same bytes every time (256²: ${o.cal.hash}, 1024²: ${o.cal.hash1024})`);
+
+console.log("\n=== the repeat length ===");
+const M = o.measure.plate;
+R.is(M && Math.abs(M.repeat - 12.5) < .1 && Math.abs(M.length - 10) < 1e-6 && Math.abs(M.fit - .8) < .01,
+  `a 10 m plate at 0.08 UV a metre: one repeat ${M && M.repeat.toFixed(2)} m, ${M && M.fit.toFixed(2)} of it along the plate — and a small part at 1 UV a metre does not move the median`);
+R.is(o.measure.none === null, "no triangles, no answer");
+R.is(o.measure.hull && Math.abs(o.measure.hull.repeat - 12.5) < .1 && o.measure.hull.length === 10,
+  "the model's own camouflaged parts, minus an effect card, a bone-driven net, a part whose material wears no camouflage and a part with no tc1, so none of them stretches the hull");
+R.is(o.measure.row !== "none" && /12\.5 m/.test(o.measure.text) && /10\.0 m/.test(o.measure.text) && /0\.8 repeats/.test(o.measure.text),
+  `the tile panel says it: "${o.measure.text}"`);
+R.is(/no camouflaged part with a camouflage UV/.test(o.measure.empty), `and says so when the model has none: "${o.measure.empty}"`);
+const B = o.measure.button;
+R.is(!red(B.before) && red(B.edge) && red(B.edgeR) && grey(B.ground) && /[Cc]alibration grid/.test(B.status),
+  `the button puts the grid in as the tile's base (${rgb(B.before)} → ${rgb(B.edge)} at the left edge, ${rgb(B.ground)} inside; "${B.status.slice(0, 60)}")`);
+R.is(!red(B.undone), "and one undo takes it back");
+const T = o.measure.toggle;
+R.is(T.outLabel === "Calibration grid" && T.redoLabel === "Remove grid",
+  `the button names what it will do: "${T.outLabel}" with the grid out, "${T.redoLabel}" once a redo brought it back with no click (ROADMAP 3.45)`);
+R.is(T.rowIn.length === 1 && /^info: /.test(T.rowIn[0]) && !T.rowOut.length,
+  `while the grid is in, the pre-export check carries an info row ("${T.rowIn[0] || "none"}"), and it goes with the grid`);
+R.is(T.removed === T.before && T.removedLabel === "Calibration grid" && /back as it was/.test(T.removedStatus),
+  `Remove grid puts back exactly the base it covered, after another edit in between (${T.before} → ${T.removed}): "${T.removedStatus.slice(0, 70)}"`);
+R.is(T.undoneRemove === "Remove grid", "and that is one undo step of its own");
+R.is(T.resized.label === "Remove grid" && T.resized.after === "Calibration grid" &&
+  T.resized.mid.every((v, i) => Math.abs(v - T.resized.was[i]) <= 2) && !red(T.resized.edge),
+  `a tile resized with the grid in is still seen as wearing it ("${T.resized.label}" at ${T.resized.w}²), and Remove grid puts the kept base back at the new size (${rgb(T.resized.was)} → ${rgb(T.resized.mid)} in the middle, no frame left)`);
+R.is(T.lost.hash === T.lost.start && T.lost.label === "Calibration grid" && /not kept across the reload/.test(T.lost.status),
+  `with the kept base gone (a reload), it puts back the tile's start and says so: "${T.lost.status.slice(0, 90)}…"`);
 
 console.log("\n=== nothing to pin is never quiet ===");
 R.is(JSON.stringify(o.stemsNone) === JSON.stringify(["us_camo_olive", "ger_camo_inside_elfebein"]),

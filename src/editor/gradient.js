@@ -81,6 +81,43 @@ const Gradient = {
     }
     return out;
   },
+  // ---- holographic presets (ROADMAP 4.56) ----
+  // Named stop sets for the iridescent look the owner painted by hand on the Ho 229's wing. The game
+  // has no view-dependent shader for a skin, so a holo is baked colour, and these are its usual
+  // palettes: the spectrum, the pastel shift of a foil sticker, the dark bands of oil on water, a
+  // pearl's near-white, and the straw-to-blue of heat-tinted titanium round an exhaust. Every stop
+  // here is opaque; a preset replaces a gradient's COLOURS, and the panel gives each stop the alpha
+  // the gradient had at its place (`holoOver`), so a fade stays a fade. The brush's colour cycle
+  // (`Pen.ink`) runs along the same sets, through `holoLut`.
+  HOLO: [
+    { id: "rainbow", name: "Rainbow", stops: [[0, "#ff0000"], [.17, "#ff8000"], [.33, "#ffff00"], [.5, "#00ff00"], [.67, "#00c0ff"], [.83, "#4000ff"], [1, "#ff00c0"]] },
+    { id: "foil",    name: "Holographic foil", stops: [[0, "#ff9ad5"], [.2, "#c7a6ff"], [.4, "#8fd3ff"], [.6, "#9effc5"], [.8, "#fff59a"], [1, "#ff9ad5"]] },
+    { id: "oil",     name: "Oil slick", stops: [[0, "#1b1446"], [.2, "#5a1e78"], [.4, "#1f6f8b"], [.6, "#2f9e5a"], [.8, "#c9a227"], [1, "#8a1e4b"]] },
+    { id: "pearl",   name: "Pearl", stops: [[0, "#f4eef0"], [.25, "#e8f0ff"], [.5, "#f2ffef"], [.75, "#fff3e6"], [1, "#f6eaf6"]] },
+    { id: "heat",    name: "Heat tint", stops: [[0, "#c8b07a"], [.2, "#b07a3a"], [.4, "#7a3e8a"], [.6, "#3a5ac8"], [.8, "#5ab0d0"], [1, "#c8d8a0"]] },
+  ],
+  // A preset's stops as records a gradient carries — a fresh copy each time — or null for a name no
+  // preset has.
+  holo(id){
+    const P = Gradient.HOLO.find(p => p.id === id);
+    return P ? P.stops.map(([t, color]) => ({ t, color, alpha: 1 })) : null;
+  },
+  // A preset's colours over an existing gradient's stops: each new stop takes the alpha `old` has
+  // where it sits, so picking a holo for a colour fading to nothing keeps the fade. Null for a
+  // name no preset has.
+  holoOver(id, old){
+    const S = Gradient.holo(id);
+    if (!S) return null;
+    const lut = Gradient.lut(old || []), N = Gradient.N;
+    if (old && old.length) for (const s of S) s.alpha = lut[Math.round(s.t * (N - 1)) * 4 + 3] / 255;
+    return S;
+  },
+  // …and as a table, made once per preset: a stroke asks for it on every dab.
+  _holoLut: new Map(),
+  holoLut(id){
+    if (!Gradient._holoLut.has(id)) { const s = Gradient.holo(id); Gradient._holoLut.set(id, s ? Gradient.lut(s) : null); }
+    return Gradient._holoLut.get(id);
+  },
   // ---- model space ----
   // Where a box reaches along a direction: the least and greatest projection of its eight corners.
   // Exact for the axis directions, a little generous on a diagonal — a predictable extent, which is
@@ -674,6 +711,43 @@ var WT_OPS = {
     g.fillStyle = pt; g.fillRect(0, 0, W, H);
     c._gradSheet = out; c._gradKey = key;
     return out;
+  },
+  // A lattice's tile (4.55): one period of it, LATTICE_W px wide and as tall as its aspect asks, drawn
+  // from its record — a new canvas each time, which is what the pattern's caches key on. The fill is
+  // ONE path of every cell, and the border one stroke over every outline: cells drawn one by one
+  // would seam along each shared edge, two antialiased edges never summing to full coverage
+  // (wt-canvas). Scales overlap, so each is filled and stroked in its turn.
+  // `W` × `H` draws it at another size, stretched to it: the pattern brush's GPU tile is a power of two
+  // each way, so it can repeat and mipmap, and a tile drawn at that size is sharper than one resampled
+  // to it — canvas scaling clamps at a tile's edge (wt-canvas). Drawn in cell units through the
+  // canvas's own transform (composed, never set: t151 slides the tile by translating the context), so a border stretched with its tile keeps its width in cells both ways.
+  LATTICE_W: 512,
+  latticeTile(rec, W = GradFill.LATTICE_W, H = 0){
+    const l = Procedural.latticeClone(rec), C = Procedural.latticeCells(l.kind);
+    H = H || Math.max(1, Math.round(W * C.h / C.w));
+    const kx = W / C.w, ky = H / C.h, c = mkCanvas(W, H), g = ctx2d(c);
+    g.scale(kx, ky);
+    g.lineJoin = "miter"; g.lineWidth = l.width;
+    g.fillStyle = l.fill; g.strokeStyle = l.border;
+    const stroke = l.borderOn && l.width > 0;
+    if (C.circles) {
+      for (const [x, y, r] of C.circles) {
+        g.beginPath(); g.ellipse(x, y, r, r, 0, 0, Math.PI * 2);
+        if (l.fillOn) g.fill();
+        else { g.save(); g.globalCompositeOperation = "destination-out"; g.fill(); g.restore(); }   // a scale hides the one above it
+        if (stroke) g.stroke();
+      }
+      return c;
+    }
+    g.beginPath();
+    for (const p of C.cells) {
+      g.moveTo(p[0], p[1]);
+      for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
+      g.closePath();
+    }
+    if (l.fillOn) g.fill();
+    if (stroke) g.stroke();
+    return c;
   },
   // The single-value maps a pattern is drawn onto as its luminance: the export packs their RED
   // channel alone (export/collect.js `surfPixels`), so a red tile would be all gloss and a blue one

@@ -28,19 +28,24 @@ const SlotList = {
     const held = slot.missing && slot.cStem
       ? GameDB.unreadOf(GameDB.stems.get(slot.cStem) || GameDB.stems.get(String(slot.cStem).toLowerCase())) : null;
     const utility = held && GameDB.blockKind(held) === "format";
+    const effect = slot.camoTile ? null : EffectMat.kindOf(slot);
     szEl.textContent = (held
-      ? (utility ? "utility sheet · " + GameDB.fmtName(held) + " · not opened" : "not opened: " + entryBlockReason(held)) +
+      ? (utility ? "utility sheet · " + GameDB.fmtName(held) + " · not opened" : "not opened: " + Oodle.entryBlockReason(held)) +
         (slot.layers.length ? " · " + slot.layers.length + "L" : "")
       : slot.missing
       ? "wants: " + guessSlotTexNames(slot) + (slot.layers.length ? " · " + slot.layers.length + "L" : "")
       : slot.size + "px" + (slot.smooth ? " · _n" : "") + (slot.layers.length ? " · " + slot.layers.length + "L" : "")) +
-      (slot.camoTile ? " · camouflage tile" : slot.noGeom ? " · 2D only" : "");
-    if (slot.noGeom) d.title = slot.camoTile
+      (slot.camoTile ? " · camouflage tile" : effect ? " · " + effect : slot.noGeom ? " · 2D only" : "");
+    // An effect sheet's slot (ROADMAP 4.13): the desc's flame or gun-flash material names it, so it
+    // is the vehicle's own and it shows on the model — but on the effect quads, not the airframe.
+    if (effect) d.title = "The vehicle's " + (effect === "jet flame" ? "jet-flame" : effect) + " sheet. Paint it in the 2-D view; it shows on the " +
+      effect + " in 3-D with View ▸ Jet flames & gun flashes on. A skin of your own can carry it: the game shows a UserSkin's own flame sheet.";
+    else if (slot.noGeom) d.title = slot.camoTile
       ? "Your scalable camouflage (Export ▸ Camo under skin ▸ My own pattern). It repeats over the whole vehicle, so the 2-D view shows it 3 × 3 and every stroke wraps at its edges; the model shows it through its own camouflage UV."
       : "This texture belongs to a part the game builds at runtime (tank tracks and the like) — it is not in the model file, so edit it in the 2D view. It still exports with the skin.";
     if (slot.missing) {
       szEl.style.color = "var(--muted)";
-      szEl.title = held ? slot.cStem + ": " + entryBlockReason(held) + "." +
+      szEl.title = held ? slot.cStem + ": " + Oodle.entryBlockReason(held) + "." +
           (utility ? " It is a utility sheet — a propeller mask or the like — and not part of the paint scheme." : "")
         : "Likely texture names for this slot — find them via ⋮ → from game files";
     }
@@ -50,7 +55,8 @@ const SlotList = {
     // is visible where the painting starts and not only in the export list at the end.
     if (!slot.missing && Gate.bites.protected(slot)) {
       d.appendChild(Gate.mark("protected", () => { refreshSlotList(); }));
-      d.title = "Cockpit or engine-flame sheet — " + Gate.WHY.protected;
+      d.title = effect ? d.title + "\nNot for a published skin — " + Gate.WHY.protected + "."
+        : "Cockpit or engine-flame sheet — " + Gate.WHY.protected;
     }
     const menuBtn = document.createElement("button");
     menuBtn.textContent = "⋮";
@@ -245,7 +251,7 @@ function openRawChanMenu(slot, key, anchor){
       let sw = d.width, sh = d.height, rgba = d.mips && d.mips[0] && d.mips[0].rgba;
       if (d.stockRaw) {
         try {
-          const st = /\.tga$/i.test(d.stockName || "") ? parseTGA(d.stockRaw) : parseDDS(d.stockRaw);
+          const st = /\.tga$/i.test(d.stockName || "") ? TGA.parseTGA(d.stockRaw) : DDS.parseDDS(d.stockRaw);
           sw = st.width; sh = st.height; rgba = st.mips[0].rgba;
         } catch (e) { console.warn("stock coverage", e); }
       }

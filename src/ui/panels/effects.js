@@ -180,6 +180,36 @@ const FxUI = {
       FxUI.slider(P, row, fx => fx.levels, (n, v) => { n.levels = v; }, "posterize levels", fx => fx.levels);
       FxUI.hint(P, "Each channel keeps only this many evenly spaced values: flat bands, the way a stencilled camouflage reads.");
     },
+    // ROADMAP 4.50 (5), the second step. Each radius is in texels of the sheet it is on.
+    blur(P){
+      const v = P.C.fx.radius;
+      const row = P.mk(`<label title="How far each texel is averaged with its neighbours, in texels of this sheet">Radius</label><input type="range" min="1" max="${Effect.MAX_R}" step="1" value="${v}"><span class="val">${v}</span>`);
+      FxUI.slider(P, row, fx => fx.radius, (n, v) => { n.radius = v; }, "blur radius", fx => fx.radius);
+      FxUI.hint(P, "Softens everything beneath it on this channel — a Gaussian blur. Confine it with a mask or a Limit, fade it with the layer's opacity.");
+    },
+    sharpen(P){
+      const r = P.C.fx.radius, a = P.C.fx.amount;
+      const rr = P.mk(`<label title="How wide the detail it brings out is, in texels of this sheet">Radius</label><input type="range" min="1" max="${Effect.MAX_R}" step="1" value="${r}"><span class="val">${r}</span>`);
+      FxUI.slider(P, rr, fx => fx.radius, (n, v) => { n.radius = v; }, "sharpen radius", fx => fx.radius);
+      const ar = P.mk(`<label title="How strongly: at 100 % each texel moves as far again from its blurred neighbourhood as it already stands">Amount</label><input type="range" min="0" max="500" step="5" value="${a}"><span class="val">${a}%</span>`);
+      FxUI.slider(P, ar, fx => fx.amount, (n, v) => { n.amount = v; }, "sharpen amount", fx => fx.amount + "%");
+      FxUI.hint(P, "An unsharp mask: each texel pushed away from the blur of its neighbourhood, so edges and fine detail stand out.");
+    },
+    noise(P){
+      const fx = P.C.fx;
+      const ar = P.mk(`<label title="How far each texel can move, in levels (out of 255), up or down">Amount</label><input type="range" min="0" max="128" step="1" value="${fx.amount}"><span class="val">${fx.amount}</span>`);
+      FxUI.slider(P, ar, f => f.amount, (n, v) => { n.amount = v; }, "noise amount", f => f.amount);
+      const r = P.mk(`<label title="The same seed is the same noise every time">Seed</label><span class="val" style="margin-left:0">${fx.seed}</span>`);
+      FxUI.button(r, "new", "Roll a different noise", () => { const n = Effect.clone(P.C.fx); n.seed = (Math.random() * 2147483647) | 0; FxUI.step(P, "new noise seed", n); });
+      if (P.ch === "color") {
+        const mr = P.mk(`<label title="The same shift on red, green and blue — grain. Off: each channel its own, coloured speckle">Mono</label>`);
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.checked = fx.mono !== false;
+        cb.onchange = () => { const n = Effect.clone(P.C.fx); n.mono = cb.checked; FxUI.step(P, cb.checked ? "mono noise" : "colour noise", n); };
+        mr.appendChild(cb);
+      }
+      FxUI.hint(P, "Grain over everything beneath it: each texel moved up or down at random, the same noise wherever the sheet is redrawn.");
+    },
   },
 
   // ---- the Curves box ----

@@ -58,6 +58,11 @@ const Tool = {
     clone:   { label: "Clone",      chans: ["color", "normal"], mask: false, needsSource: true,
                sourceErr: "Alt-click the spot to copy from first, then paint where it should go",
                instead: "It copies the sheet the rivets and panel lines live on — the colour, or the normal map." },
+    // ROADMAP 4.50 (11): blur, sharpen, smudge, dodge and burn, one tool with its kind on the panel.
+    // Colour only: each reads the sheet's colour under the brush, and on a single-value map blur and
+    // smudge would be a second way to do what the effects do — added when someone asks.
+    retouch: { label: "Retouch",    chans: ["color"],  mask: false,
+               instead: "It reads the colour under the brush; for the other maps, an effect layer (Blur, Sharpen) does the same over the whole sheet." },
     height:  { label: "Panel line", chans: ["normal"], mask: false,
                instead: "It carves into the surface, so the normal map is the only sheet it means anything on." },
     flatten: { label: "Flatten",    chans: ["normal"], mask: false,
@@ -78,6 +83,7 @@ const Tool = {
     height:  { tool: "height",  chan: "normal", target: "content" },
     clone:   { tool: "clone",   chan: "color",  target: "content" },
     cloneN:  { tool: "clone",   chan: "normal", target: "content" },
+    retouch: { tool: "retouch", chan: "color",  target: "content" },
     mask:    { tool: "brush",   chan: null,     target: "mask" },
     none:    { tool: "none",    chan: null,     target: "content" },
   },

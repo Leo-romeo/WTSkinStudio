@@ -58,7 +58,7 @@ const argv = process.argv.slice(2);
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -492,6 +492,8 @@ const browser = findBrowser(argv.includes("--chrome") ? argv[argv.indexOf("--chr
 if (!browser) { console.log("\nSKIP (page half): no Chrome or Edge found. Pass --chrome <path> or set CHROME."); R.finish(); }
 
 const BODY = `async function(){
+  // The one-shot Fill and Stamp along, which these checks are about; a path LAYER is t147's (4.52 (3)).
+  document.getElementById("pathAsLayer").checked = false;
   var out = {}, N = 512, seq = 0;
   function fnv(u8){ var h = 0x811c9dc5; for (var i = 0; i < u8.length; i++) { h ^= u8[i]; h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
   function hash(c){ return fnv(ctx2d(c).getImageData(0, 0, c.width, c.height).data); }
@@ -928,10 +930,12 @@ const BODY = `async function(){
   await new Promise(function(r){ setTimeout(r, brushStamp.WARM_MS + 200); });
   out.warm.midStroke = brushStamp._key === brushStamp.key(App.brush, Tips.get("chip"));
   endStroke();
-  // The 2-D outline is the Square's square, at its Angle; every other tip's is the circle its Size
-  // spans. (The 3-D ring is that circle for every tip — the guide says so.)
+  // The 2-D outline is the Square's square, at its Angle; the Chip's is its own flake traced at half
+  // (3.41 (2); t160 holds every tip's outline to the dab it lays, in both views).
   function outlineAt(tip, x, y){ set({ tip: tip, size: 40 }); var oc2 = mkCanvas(200, 200); Draw2D.ring(ctx2d(oc2)); return al(oc2, x, y); }
-  out.outline = { squareCorner: outlineAt("square", 119, 119), chipCorner: outlineAt("chip", 119, 119), squareEdge: outlineAt("square", 120, 100), chipEdge: outlineAt("chip", 120, 100) };
+  var chipS = Tips.outline(Tips.get("chip")), chipOn = [100 + (chipS[0] + chipS[2]) / 2 * 20, 100 + (chipS[1] + chipS[3]) / 2 * 20];
+  out.outline = { squareCorner: outlineAt("square", 119, 119), chipCorner: outlineAt("chip", 119, 119), squareEdge: outlineAt("square", 120, 100),
+                  chipEdge: outlineAt("chip", Math.floor(chipOn[0]), Math.floor(chipOn[1])) };
   v2.cursor = was.cursor; v2.lazy = was.lazy; v2.sc = was.sc;
   // The ring on the model shows its inner circle — where a soft edge stops being opaque — only for
   // the two tips Hardness shapes. ray3d is handed the seam case's own hit and a group stands in
@@ -939,7 +943,7 @@ const BODY = `async function(){
   var keepRay = window.ray3d, keepMG = modelGroup;
   window.ray3d = function(){ return seamHit; };
   if (!modelGroup) modelGroup = new THREE.Group();
-  function innerRing(tip){ set({ tip: tip, size: 40, hardness: .5 }); updateBrushRing({ clientX: 0, clientY: 0 }); return !!(brushRing && brushRing.visible && brushRing.children[1].visible); }
+  function innerRing(tip){ set({ tip: tip, size: 40, hardness: .5 }); updateBrushRing({ clientX: 0, clientY: 0 }); return !!(brushRing && brushRing.visible && (brushRing.children[1].visible || brushRing.children[3].visible)); }
   try { out.ring = { round: innerRing("round"), square: innerRing("square"), chip: innerRing("chip"), image: innerRing(barId) }; }
   finally { window.ray3d = keepRay; modelGroup = keepMG; hideBrushRing(); }
 
@@ -960,7 +964,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 800), timeoutMs: 180000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 180000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -1057,9 +1061,9 @@ R.is(!r.warm.before && r.warm.after && !r.warm.midStroke,
   `drawing the brush outline asks for the stamp, and it is made once the brush has been still for a moment — not at once, and not in the middle of a stroke (${JSON.stringify(r.warm)})`);
 const OL = r.outline;
 R.is(OL.squareCorner > 0 && OL.chipCorner === 0 && OL.squareEdge > 0 && OL.chipEdge > 0,
-  `the 2-D outline is the Square's square — through its corner (${OL.squareCorner}) — and every other tip's circle, which passes nowhere near that corner (${OL.chipCorner})`);
+  `the 2-D outline is the Square's square — through its corner (${OL.squareCorner}) — and the Chip's own flake, which passes nowhere near that corner (${OL.chipCorner}) and through its traced edge (${OL.chipEdge})`);
 R.is(r.ring.round && r.ring.square && !r.ring.chip && !r.ring.image,
-  `the ring on the model shows its inner circle at Hardness 50 for Round and Square only — not for a Chip or an image tip, which carry their own edge (${JSON.stringify(r.ring)})`);
+  `the ring on the model shows its inner line at Hardness 50 for Round and Square only — not for a Chip or an image tip, which carry their own edge (${JSON.stringify(r.ring)})`);
 
 const errs = (r.__errs || []).filter(e => !/net::|Failed to load/i.test(e));
 R.is(errs.length === 0, errs.length ? "uncaught errors during the run:\n        " + errs.join("\n        ") : "no uncaught errors during the run");

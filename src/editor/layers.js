@@ -280,6 +280,8 @@ const LayerList = {
     } else if (L.proj) bits.push("projected");
     if (L.blend !== "normal") bits.push(L.blend);
     if (!Scope.empty(Scope.of(L))) bits.push("▤ " + Scope.label(L));
+    if (L.levels) bits.push(Levels.short(L.levels));             // limited to some mip levels (4.58)
+    if (!isGroup(L) && LayerNode.channelsOf(L).some(ch => Levels.keyed(L.chans[ch]))) bits.push("by distance");   // a number keyed by level (4.58 (c))
     if (L.mask) bits.push("mask");
     const sibs = L.proj ? projSiblings(L.proj.id) : L.link ? linkSiblings(L.link) : [];
     if (sibs.length > 1) bits.push("×" + sibs.length + " tex");
@@ -409,6 +411,7 @@ function ungroupNode(s, G){
   if (G.blend && G.blend !== "normal") lost.push("blend “" + G.blend + "”");
   if (G.mask || G.maskRef) lost.push("its mask");
   if (!Scope.empty(Scope.of(G))) lost.push("its part limit");
+  if (G.levels) lost.push("mip levels (" + Levels.label(G.levels) + ")");      // 4.58
   const apply = () => {
     const o = nodeOwner(s.layers, G);
     if (o) o.list.splice(o.i, 1);
@@ -523,6 +526,16 @@ function layerMenu(ev, s, L){
     App.selParts.size ? { label: "Limit to " + App.selParts.size + " selected part(s)", run: () => setLayerScope(L, [...App.selParts]) } : null,
     scoped ? { label: "Select its parts in 3D", run: () => selectScopeParts(L) } : null,
     scoped ? { label: "Remove part limit", run: () => setLayerScope(L, null) } : null,
+    { sep: true },
+    // Which mip levels it shows at (ROADMAP 4.58): one click, split at Levels.CROSS, with how far that
+    // is on this layer's own parts when a model is loaded. The Shows at row moves the split.
+    ...Levels.menu(s, L),
+    // ...and a number that varies from level to level (4.58 (c)): the panel's By distance row, opened
+    !grouped && Levels.params(LayerNode.contentOn(L, LayerNode.workingChan(L))).length
+      ? { label: "Vary with distance…", run: () => {
+          LayerProps.keySel = { uid: L.uid, param: Levels.params(LayerNode.contentOn(L, LayerNode.workingChan(L)))[0].id, level: Levels.CROSS };
+          App.activeLayer = L; refreshLayerList(); refreshLayerProps();
+        } } : null,
     { sep: true },
     L.mask ? { label: "Paint on the mask", run: () => editMaskWithBrush() } : null,
     L.mask ? { label: "Invert mask", run: () => maskInvert(s, L) } : null,
@@ -653,7 +666,8 @@ function duplicateLayer(s, L){
   // so editing the copy never reaches back into the original's other sheets.
   // A duplicate of a projected layer becomes an ordinary paint layer — that is the way to keep a
   // projection's pixels and then paint on them without a re-projection wiping the work.
-  if (L.type === "paint") { copy.canvas = snapCanvas(L.canvas); copy.proj = null; copy.projEmpty = false; }
+  // So does a path layer's (4.52 (3)): the copy keeps the pixels and lets go of the recipe.
+  if (L.type === "paint") { copy.canvas = snapCanvas(L.canvas); copy.proj = null; copy.projEmpty = false; copy.shape = null; }
   // A duplicate stops being rebuilt from its decal: the derived contents keep the gloss and the
   // emboss exactly as they stand and become ordinary paint (4.28(f) — the `derived` marker is what
   // a refresh is allowed to replace, so dropping it IS "detach this copy"). That is the answer to
@@ -661,6 +675,7 @@ function duplicateLayer(s, L){
   // original apart is not a thing that can happen.
   for (const ch of Object.keys(copy.chans || {})) {
     const c = copy.chans[ch];
+    if (c && c.shape) { c.shape = null; c.canvas = snapCanvas(c.canvas); }   // a path content off the primary slot too
     if (c && c.derived) copy.chans[ch] = LayerNode.content("paint", { canvas: snapCanvas(c.canvas) });
   }
   if (L.type === "decal" && L.bmp) { copy.bmp = snapCanvas(toCanvas(L.bmp)); copy.orig = L.orig || null; }

@@ -15,9 +15,11 @@ function exportPool(){
   if (ExportPool) return ExportPool;
   ExportPool = makeWorkerPool({
     name: "export",
-    // BCNDEC is here for `from565`, which the BC1 endpoint search calls — the encoder shares the
+    // BCNDEC is here for `BCnEnc.from565`, which the BC1 endpoint search calls — the encoder shares the
     // decoder's 565 unpack rather than keeping a second copy of it.
     sections: ["DDS", "BCNDEC", "BCNENC", "ENCODE"],
+    // `restarts` are the levels the author made (ROADMAP 4.58), each already at its level's size —
+    // `levelOf` made it: that level's sheet at full size, padded for its level, and taken down to it.
     ops: `var WT_OPS = {
   encodeTexture: function(a){
     var rgba = new Uint8ClampedArray(a.rgba);
@@ -25,10 +27,17 @@ function exportPool(){
     var out;
     if (a.fmt === "tga") out = writeTGA(rgba, a.w, a.h);
     else {
-      var mips = a.useMips ? buildMips(rgba, a.w, a.h, a.renorm) : [{ w: a.w, h: a.h, rgba: rgba }];
-      out = writeDDS(mips, { bc3: a.fmt === "bc3" });
+      var own = (a.restarts || []).map(function(r){ return { level: r.level, rgba: new Uint8ClampedArray(r.rgba) }; });
+      var mips = a.useMips ? BCnEnc.buildMips(rgba, a.w, a.h, a.renorm, own) : [{ w: a.w, h: a.h, rgba: rgba }];
+      out = BCnEnc.writeDDS(mips, { bc3: a.fmt === "bc3" });
     }
     return { __t: 1, result: out.buffer, transfer: [out.buffer] };
+  },
+  levelOf: function(a){
+    var rgba = new Uint8ClampedArray(a.rgba);
+    if (a.mask) padSeams(rgba, a.w, a.h, new Uint8Array(a.mask), a.padDist);
+    var m = BCnEnc.reduce(rgba, a.w, a.h, a.renorm, a.level);
+    return { __t: 1, result: { w: m.w, h: m.h, rgba: m.rgba.buffer }, transfer: [m.rgba.buffer] };
   }
 };`,
   });
@@ -36,21 +45,23 @@ function exportPool(){
 }
 // Everything the encoder needs, gathered on the main thread (the DOM reads and the UV mask) so
 // the worker call itself is pure data.
-function encodeJob(it, fmt){
+// `own` is the texture's restarts from `ExportRun.levels`, or null. A texture that has them carries
+// its chain whatever the Mipmaps tick says — they ARE levels (ROADMAP 4.58).
+function encodeJob(it, fmt, own){
   const isPow2 = v => (v & (v - 1)) === 0;
   if (!isPow2(it.w) || !isPow2(it.h)) setStatus("Warning: " + it.fileName + " is not power-of-two (" + it.w + "×" + it.h + ")", "err");
-  const useMips = $("optMips").checked;
+  const useMips = $("optMips").checked || !!(own && own.length);
   const mask = $("optPad").checked ? getUVMask(it.slot, it.w, it.h) : null;
   // `rgba` came fresh out of getImageData in collectExports and nothing reads it again, so it is
   // safe to hand over. The mask is cached on the slot, so that one is copied rather than moved.
   // Hand over the buffer only when the view covers all of it — transferring the buffer behind a
   // subarray would give the worker neighbouring data and silently encode the wrong pixels.
-  const exact = it.rgba.byteOffset === 0 && it.rgba.byteLength === it.rgba.buffer.byteLength;
-  const buf = exact ? it.rgba.buffer : it.rgba.slice().buffer;
+  const buf = ExportRun.handOver(it.rgba);
   const maskCopy = mask ? mask.slice().buffer : null;
   const transfer = maskCopy ? [buf, maskCopy] : [buf];
+  const restarts = (own || []).map(r => { const b = ExportRun.handOver(r.rgba); transfer.push(b); return { level: r.level, rgba: b }; });
   return { op: "encodeTexture", transfer,
-    args: { rgba: buf, mask: maskCopy, w: it.w, h: it.h, fmt, useMips,
+    args: { rgba: buf, mask: maskCopy, w: it.w, h: it.h, fmt, useMips, restarts,
       renorm: it.kind === "n", padDist: useMips ? 32 : 8 } };
 }
 // Kept for any caller that still wants one texture synchronously (and as the reference the worker
@@ -64,25 +75,25 @@ function encodeItem(it, fmt){
   }
   if (fmt === "tga") return writeTGA(it.rgba, it.w, it.h);
   const useMips = $("optMips").checked;
-  const mips = useMips ? buildMips(it.rgba, it.w, it.h, it.kind === "n") : [{ w: it.w, h: it.h, rgba: it.rgba }];
-  return writeDDS(mips, { bc3: fmt === "bc3" });
+  const mips = useMips ? BCnEnc.buildMips(it.rgba, it.w, it.h, it.kind === "n") : [{ w: it.w, h: it.h, rgba: it.rgba }];
+  return BCnEnc.writeDDS(mips, { bc3: fmt === "bc3" });
 }
 // Encode every edited texture in parallel. Returns null when the user cancelled — the caller's
 // only job then is to say so. File names are assigned before any encoding starts, because the .blk
 // and the validator both need them and neither may depend on the order the encoders finish in.
 async function encodeAllTextures(items){
   const fmts = exportFormats();
-  const jobs = [];
-  for (const it of items) {
-    const fmt = it.fmtOverride || (it.kind === "c" ? fmts.c : fmts.n);
-    it.fileName = it.fileNameBase + (fmt === "tga" ? ".tga" : ".dds");
-    jobs.push(encodeJob(it, fmt));
-  }
+  const fmtOf = items.map(it => ExportCollect.formatFor(it, fmts));
+  items.forEach((it, i) => { it.fileName = it.fileNameBase + (fmtOf[i] === "tga" ? ".tga" : ".dds"); });
   const pool = exportPool();
   progress(items.length === 1 ? "Encoding " + items[0].fileName + "…" : "Encoding " + items.length + " textures…", 0);
   await progTick(true);
   let encoded;
   try {
+    // The levels authors made come first, a texture at a time (4.58); a texture without is null here.
+    const own = [];
+    for (const it of items) own.push(await ExportRun.levels(it, pool, fmtOf[own.length]));
+    const jobs = items.map((it, i) => encodeJob(it, fmtOf[i], own[i]));
     encoded = await pool.map(jobs,
       (done, n) => progress("Encoded " + done + "/" + n + " textures…", done / n),
       progCancelled);
@@ -143,12 +154,13 @@ async function getUserSkinsHandle({ ask = true, find = true } = {}){
   // order (ROADMAP 3.21). `usable()` above already relies on being inside the click for its
   // requestPermission, so this is the same contract, not a new one.
   if (!ask || !window.showDirectoryPicker) return null;
-  setStatus("Pick your War Thunder/UserSkins folder — this is asked once and remembered…");
+  setStatus("Choose your War Thunder/UserSkins folder — asked once, then remembered…");
   // It opens in the game folder when one is known — this session's, or the one remembered from the
   // last (a handle needs no permission to be a starting point) — so UserSkins is one click away
   // instead of wherever the picker was last used. An IndexedDB read is milliseconds; the click's
   // activation lasts seconds (3.21).
-  const home = App.gameDir && !App.gameDir._legacy ? App.gameDir : await idbGet("gameDir");
+  // The install's own handle: a picker's startIn takes a real handle, never GameScan.merge's stand-in.
+  const home = App.gameDir && !App.gameDir._legacy ? (App.gameDir._primary || App.gameDir) : await idbGet("gameDir");
   let picked;
   try {
     picked = await showDirectoryPicker({ mode: "readwrite", id: "wtuserskins",
@@ -259,8 +271,14 @@ const ExportRun = {
   // what it is), and a picker that threw because the click's activation had run out before it went
   // up — 3.21's "Must be handling a user gesture", reachable after a slow `GradFill.ensure`. Not
   // after a plain cancel or refusal: the user has just answered that one.
+  //
+  // **A browser with no picker at all (Firefox) is not asked anything (ROADMAP 4.57 (1)).** The zip
+  // is its only answer, so the dialog that offered it on every export was a click for nothing; the
+  // window and the button's tooltip already said so before the click (`TopWin.browserNote`), and
+  // the zip's status line says where to extract it.
   async folder(R){
-    const picker = !!window.showDirectoryPicker, legacy = picker && !!(App.gameDir && App.gameDir._legacy);
+    if (!window.showDirectoryPicker) { R.toDir = false; return true; }
+    const legacy = !!(App.gameDir && App.gameDir._legacy);
     let err = null, chose = false;
     const ask = async o => {
       try { App.dirHandle = await getUserSkinsHandle(o); }
@@ -268,12 +286,11 @@ const ExportRun = {
     };
     if (!App.dirHandle) await ask({ ask: !legacy });
     while (!App.dirHandle) {
-      const again = picker && (legacy && !chose || !!err && /^(NotUserSkins|SecurityError|NotAllowedError)$/.test(err.name));
-      const c = await ExportRun.offerZip(ExportRun.noFolder(legacy && !chose, err), again);
+      const again = legacy && !chose || !!err && /^(NotUserSkins|SecurityError|NotAllowedError)$/.test(err.name);
+      const c = await ExportRun.offerZip(ExportRun.noFolder(legacy && !chose, err), again, R.skin);
       if (c === "zip") { R.toDir = false; return true; }
       if (c !== "choose" || !again) {
-        setStatus(!picker ? "Folder access needs Chrome/Edge — use Download .zip instead"
-          : !err && (chose || !legacy) ? "Export cancelled — no folder chosen" : "Export cancelled", picker ? "" : "err");
+        setStatus(!err && (chose || !legacy) ? "Export cancelled — no folder chosen" : "Export cancelled");
         return false;
       }
       chose = true; err = null;
@@ -281,21 +298,59 @@ const ExportRun = {
     }
     return true;
   },
-  // Why there is no folder to write into — the first half of the zip question.
+  // Why there is no folder to write into — the first half of the zip question. One or two short
+  // sentences each (ROADMAP 3.42 (3)): what happened, and what the user can do about it.
   noFolder(legacy, err){
-    if (!window.showDirectoryPicker) return "This browser cannot save into a folder on your PC — writing straight into UserSkins needs Chrome or Edge.";
-    if (legacy) return "Your War Thunder folder was opened another way, which can only read it. If the install is under Program Files, Windows or AppData, Chrome will not give write access to its UserSkins folder either — if it is somewhere else, you can choose that UserSkins folder.";
+    if (legacy) return "This game folder was opened another way, so it can only be read. If the install is under Program Files, Windows or AppData, Chrome will not let this page write to it; if it is elsewhere, choose its UserSkins folder.";
     if (err && err.name === "NotUserSkins") return err.message;
     if (err) return "The UserSkins folder could not be opened for writing (" + (err.message || err) + ").";
-    return "No folder was chosen. If Chrome said the folder “contains system files” — every install under Program Files does — it will not let this page write there.";
+    return "No folder was chosen. If Chrome said it “contains system files”, as it does for every install under Program Files, this page cannot write there.";
+  },
+  // Where a zip goes and how, in one sentence — the dialog, the zip's status line, the export
+  // window's Firefox note and the button's tooltip all say it in these words (4.57 (1)). The folder
+  // is the game folder the user opened, by its name; *Extract here* puts the zip's one `<skin>/`
+  // folder straight into UserSkins, where an "extract to <name>" would nest it a level too deep.
+  zipHint(skin){
+    const game = (App.gameDir && App.gameDir.name) || "War Thunder";
+    return skin ? "Put " + skin + ".zip in " + game + "/UserSkins and choose Extract here — its " + skin + " folder lands in place."
+                : "Put the .zip in " + game + "/UserSkins and choose Extract here — the skin's folder inside lands in place.";
   },
   // → "zip", "choose" (only offered when `choose`), or anything else for no.
-  async offerZip(why, choose){
-    return await choiceDialog(why + "\n\nDownload it as a .zip instead? Unzip it into War Thunder/UserSkins/ and it is installed.",
+  async offerZip(why, choose, skin){
+    return await choiceDialog(why + "\n\nDownload it as a .zip instead? " + ExportRun.zipHint(skin),
       [{ label: "Download .zip", value: "zip", primary: true },
        ...(choose ? [{ label: "Choose UserSkins folder…", value: "choose" }] : []),
        { label: "Cancel", value: "cancel" }]);
   },
+  // ---- the levels an author made (ROADMAP 4.58, docs/MIP_LEVELS.md §4) ----
+  // Each restart is built on this thread — the walk draws on canvases — at full size, then padded for
+  // its level (`Levels.pad`) and taken down to it in the pool, and waits there as a small array for
+  // the encode. Two in flight at most, so a level ruler's dozen restarts at 4096² hold two 64 MB
+  // sheets at a time and not twelve; each build ends in a whole-sheet readback (wt-canvas), so the bar
+  // moves and Cancel is asked between them. A texture set to TGA by hand writes one level: none.
+  async levels(it, pool, fmt){
+    const L = it.levels;
+    if (!L || fmt === "tga") return null;
+    const mask = $("optPad").checked ? getUVMask(it.slot, it.w, it.h) : null;
+    const at = L.at.filter(r => r > 0), out = [], busy = [];
+    for (let i = 0; i < at.length; i++) {
+      const r = at[i];
+      if (progCancelled()) throw new Error("cancelled");
+      progress("Building " + it.fileName + "'s own level " + r + "…", i / at.length);
+      await progTick(true);
+      const buf = ExportRun.handOver(L.build(r)), m = mask ? mask.slice().buffer : null;
+      const job = pool.call("levelOf", { rgba: buf, mask: m, w: it.w, h: it.h, level: r, renorm: it.kind === "n", padDist: Levels.pad(r) },
+        m ? [buf, m] : [buf]).then(res => { out.push({ level: r, rgba: new Uint8ClampedArray(res.rgba) }); });
+      job.catch(() => {});             // awaited below; a cancel rejects the one still in flight too, and that is not news
+      busy.push(job);
+      if (busy.length >= 2) await busy.shift();
+    }
+    await Promise.all(busy);
+    return out.sort((a, b) => a.level - b.level);
+  },
+  // A typed array's buffer to transfer — the whole buffer only when the view covers all of it, or a
+  // worker would be handed neighbouring bytes and encode the wrong pixels.
+  handOver(a){ return a.byteOffset === 0 && a.byteLength === a.buffer.byteLength ? a.buffer : a.slice().buffer; },
   async encode(R){
     progBegin("Encoding textures…", true);
     const done = await encodeAllTextures(R.items);
@@ -363,12 +418,14 @@ const ExportRun = {
     // the common case and the one being asked about.
     try { await App.dirHandle.getDirectoryHandle(R.skin, { create: false }); exists = true; } catch { /* absent */ }
     if (exists) {
-      const choice = await choiceDialog("A skin folder “" + R.skin + "” already exists in " + App.dirHandle.name + ".", [
+      const choice = await choiceDialog("A skin folder “" + R.skin + "” already exists in " + App.dirHandle.name + "." +
+        " Replace writes this export into it and removes the .blk and texture files in it that this export does not write.", [
         { label: "Replace", value: "replace", primary: true }, { label: "Save as new", value: "rename" }, { label: "Cancel", value: "cancel" }]);
       if (choice === "cancel" || choice == null) { setStatus("Export cancelled"); return; }
       if (choice === "rename") { let i = 2; while (true) { const n = R.skin + "_" + i; let taken = false; try { await App.dirHandle.getDirectoryHandle(n, { create: false }); taken = true; } catch { /* free */ } if (!taken) { targetName = n; break; } i++; } }
     }
     const sub = await App.dirHandle.getDirectoryHandle(targetName, { create: true });
+    const replacing = exists && targetName === R.skin;
     progBegin("Writing skin files…", false);
     for (let i = 0; i < R.files.length; i++) {
       const f = R.files[i];
@@ -379,11 +436,28 @@ const ExportRun = {
       await ws.write(f.data);
       await ws.close();
     }
+    const removed = replacing ? await ExportRun.prune(sub, R) : [];
     progEnd();
     setStatus("Exported to " + App.dirHandle.name + "/" + targetName + " — " +
       (R.items.length ? R.items.length + " texture(s)" : "base colour only") + " + " +
       R.blkCount + " .blk, " + (R.total / 1048576).toFixed(1) + " MB" + R.sizeNote + R.unitNote +
+      (removed.length ? " · removed " + removed.length + " file(s) the earlier export left: " + removed.slice(0, 3).join(", ") +
+        (removed.length > 3 ? " and " + (removed.length - 3) + " more" : "") : "") +
       " — now press “Update custom camouflage list” in the hangar", "ok");
+    return true;
+  },
+  // Replace replaces: after the new files are written, the .blk and texture files in the skin's
+  // folder that THIS export did not write are removed — a .blk an earlier export left kept its unit
+  // pointing at sheets that were gone or old (ROADMAP 1.21 (7)). Only files, only directly inside
+  // UserSkins/<name>/, only the kinds an export writes; anything else there is the user's and stays.
+  // Names compare without case, because Windows does: "Hull.dds" IS the "hull.dds" just written.
+  // After the writes, so an export that fails part-way leaves the old skin whole. t40 reads every call.
+  async prune(sub, R){
+    const wrote = new Set(R.files.map(f => f.name.toLowerCase())), stale = [];
+    for await (const h of sub.values())
+      if (h.kind === "file" && /\.(blk|dds|tga)$/i.test(h.name) && !wrote.has(h.name.toLowerCase())) stale.push(h.name);
+    for (const n of stale) await sub.removeEntry(n);
+    return stale;
   },
   async toZip(R){
     const zip = new JSZip();
@@ -399,7 +473,53 @@ const ExportRun = {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     setStatus("Zip ready (" + (blob.size / 1048576).toFixed(1) + " MB)" + R.sizeNote + R.unitNote +
-      " — unzip into War Thunder/UserSkins/", "ok");
+      ". " + ExportRun.zipHint(R.skin), "ok");
+    return true;
+  },
+  // ---- A package for WT Live (ROADMAP 4.50 (13)) ----
+  // The Market's rules that a file can show, applied to the archive itself rather than to the skin:
+  // exactly one `.blk` per archive, only the textures that `.blk` names, and English letters and
+  // digits in the archive's and the folder's names. The UserSkins zip above is none of those on a
+  // model several vehicles share — one `.blk` per vehicle is right for UserSkins (`ruleBlkCount`)
+  // and wrong for an upload — and its name keeps `_` and `-`, which the game matches but the CDK's
+  // "letters and digits" does not list. So this is one archive PER `.blk`, each holding a folder of
+  // the same name. The `.blk`'s own name is the unit id and stays as the game needs it.
+  liveName(s){ return String(s || "").replace(/[^A-Za-z0-9]/g, "") || "skin"; },
+  livePacks(R){
+    const blks = R.files.filter(f => /\.blk$/i.test(f.name)), base = ExportRun.liveName(R.skin);
+    const dec = new TextDecoder(), used = new Set();
+    return blks.map(b => {
+      const refd = new Set([...dec.decode(b.data).matchAll(/\bto:t\s*=\s*"([^"]*)"/g)].map(m => m[1]));
+      // Two unit ids that differ only in "-", "_" or "." strip to one name: the second gets a number.
+      let name = blks.length > 1 ? base + ExportRun.liveName(b.name.replace(/\.blk$/i, "")) : base;
+      const n0 = name;
+      for (let k = 2; used.has(name.toLowerCase()); k++) name = n0 + k;
+      used.add(name.toLowerCase());
+      return { name, blk: b, tex: R.files.filter(f => refd.has(f.name)) };
+    });
+  },
+  async toLive(R){
+    const packs = ExportRun.livePacks(R), names = [];
+    for (let i = 0; i < packs.length; i++) {
+      const P = packs[i], zip = new JSZip(), folder = zip.folder(P.name);
+      for (const f of P.tex) folder.file(f.name, f.data);
+      folder.file(P.blk.name, P.blk.data);
+      progBegin("Packing " + P.name + ".zip for WT Live (" + (i + 1) + "/" + packs.length + ")…", false);
+      const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" },
+        st => progress("Packing " + P.name + ".zip… " + (st.currentFile || ""), st.percent / 100));
+      progEnd();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = P.name + ".zip";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      names.push(P.name + ".zip (" + (blob.size / 1048576).toFixed(1) + " MB)");
+    }
+    setStatus("For WT Live: " + names.join(", ") + (packs.length > 1 ? " — one archive per vehicle, each with its own .blk" : "") +
+      R.sizeNote + R.unitNote + ". Upload " + (packs.length > 1 ? "each" : "it") +
+      " with a 16:9 preview (the screenshot button's Market preview)" +
+      ($("optInvRough").checked ? " and tick “inverted roughness” — these textures carry it" : "") + ".", "ok");
+    return true;
   },
   async recover(R, e, toDir){
     progEnd();
@@ -414,12 +534,14 @@ const ExportRun = {
     // says "if": a game folder opened another way may be on another drive, where writing works (`folder`).
     const blocked = !App.gameDir || App.gameDir._legacy;
     if (await ExportRun.offerZip(blocked
-      ? "The skin could not be written into that folder. If it is under Program Files, Windows or AppData, Chrome will not give this page write access to it."
-      : "Export cancelled.") !== "zip") { setStatus("Export cancelled"); return; }
-    try { await ExportRun.toZip(R); } catch (err) { progEnd(); setStatus("Export failed: " + err.message, "err"); console.error(err); }
+      ? "The skin could not be written into that folder. If it is under Program Files, Windows or AppData, Chrome will not let this page write there."
+      : "Export cancelled.", false, R.skin) !== "zip") { setStatus("Export cancelled"); return; }
+    try { return await ExportRun.toZip(R); } catch (err) { progEnd(); setStatus("Export failed: " + err.message, "err"); console.error(err); }
   },
 };
-async function doExport(toDir){
+// Answers `true` once the skin is written or the zip handed over, and nothing else on every other
+// way out — a refusal, a cancel, a failure — so the Export window knows to close (ROADMAP 3.43).
+async function doExport(toDir, live){
   // A gradient along the model reads a bake that lands asynchronously (editor/gradient.js); an
   // export fired before the first one has landed would read the sheet with a hole where the fade
   // is. Ordinarily nothing to wait for — the sheet has been on screen — and refused, not shipped,
@@ -444,9 +566,9 @@ async function doExport(toDir){
   ExportRun.camo(R);
   ExportRun.blks(R);
   ExportRun.sized(R);
-  try { await (R.toDir ? ExportRun.toDir(R) : ExportRun.toZip(R)); }
-  catch (e) { await ExportRun.recover(R, e, R.toDir); }
+  try { return await (R.toDir ? ExportRun.toDir(R) : live ? ExportRun.toLive(R) : ExportRun.toZip(R)); }
+  catch (e) { return ExportRun.recover(R, e, R.toDir); }
 }
-// "Export as…" opens the Export window (ui/panels/topwin.js, ROADMAP 3.29); the three ways out
-// that used to be a popover here are the window's foot, under the settings they act on.
+// Export runs `doExport(true)` in one click and its gear opens the Export window (ui/panels/topwin.js,
+// ROADMAP 3.42 and 3.29); the three ways out that used to be a popover here are the window's foot.
 

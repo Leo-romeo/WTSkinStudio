@@ -43,6 +43,9 @@ function rectFromSlot(slot, r, w, h){                        // composite space 
 let texRegionOk = true;
 function uploadTexRegion(tex, src, R){
   if (!tex) return true;                                   // nothing to upload
+  // Texture quality has dropped level 0 from the GPU (4.58 (b)): there is no rectangle of it to
+  // update, and the chain it is drawn from follows at idle (`LevelView`).
+  if (tex._lv && tex._lv.detached) return true;
   if (!R || !texRegionOk || !renderer || typeof renderer.copyTextureToTexture !== "function"
       || tex.image !== src                                  // holding Compare: the texture is showing the original
       || R.w * R.h > src.width * src.height * .5) {         // more than half the sheet: plain upload wins
@@ -97,9 +100,10 @@ function refreshSurfaceTextures(slot, rect){
       t = slot.texCh[ch] = new THREE.CanvasTexture(src);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.encoding = THREE.LinearEncoding;                      // data, not colour — never sRGB
-    } else if (t.image !== src) { t.image = src; t.needsUpdate = true; }
+    } else if (t.image !== src && !(t._lv && t._lv.detached)) { t.image = src; t.needsUpdate = true; }   // a detached chain is LevelView's (4.58 (b))
     // `rect` is composite space; this sheet came out of the `_n` and need not be that size.
     else uploadTexRegion(t, src, rect ? rectClamp(rectFromSlot(slot, rect, src.width, src.height), src.width, src.height) : null);
+    LevelView.touched(slot, ch, rect || null);                // its own levels follow at idle (4.58 (b))
   }
   if (made) rebuildMaterials();                               // the maps exist now; rebind them
   needsRender();
@@ -227,23 +231,75 @@ const Composite = {
     // have to be there already, so the first pass on any sheet is whole however small the rectangle
     // is: without that, adding a layer and then stroking it leaves everything outside the stroke
     // transparent.
-    const R = (rect && out._full) ? rectClamp(rectFromSlot(slot, rect, W, H), W, H) : null;
-    if (rect && out._full && !R) return { live: true, wrote: false };   // dirty area entirely off-sheet
-    const cx = { slot, ch, W, H, sx: R ? R.x : 0, sy: R ? R.y : 0, tw: R ? R.w : W, th: R ? R.h : H };
+    // A blur or sharpen on this channel reads `reach` texels round each one (4.50 (5)), so a change
+    // inside the dirty rectangle moves the result up to `reach` outside it, and each of THOSE texels
+    // reads `reach` further still: the rectangle written back is the dirty one grown by the reach, and
+    // the one composited is grown by twice it. Writing back only the dirty rectangle left a hard-edged
+    // halo where a stroke under a blur stopped (review, 2026-10-23: 632 stale bytes, worst 29 levels,
+    // for a 4 × 4 stroke under radius 6). A camouflage tile repeats, so its blur wraps round the
+    // edges (`Effect.spatial`'s `wrap`), and there a region with a reach is the whole sheet.
+    const m = rect && out._full ? Composite.reach(slot, ch) : 0, tile = m && CamoTile.is(slot);
+    const grow = (Q, k) => Q && k ? rectClamp({ x: Q.x - k, y: Q.y - k, w: Q.w + 2 * k, h: Q.h + 2 * k }, W, H) : Q;
+    const R0 = (rect && out._full && !tile) ? rectClamp(rectFromSlot(slot, rect, W, H), W, H) : null;
+    if (rect && out._full && !tile && !R0) return { live: true, wrote: false };   // dirty area entirely off-sheet
+    const R = grow(R0, m), G = grow(R0, 2 * m);
+    // The live sheet is mip level 0 (ROADMAP 4.58): what the game shows up close. A layer limited to
+    // further levels is built by `at` — for the export, and at idle for the views' own chain
+    // (`LevelView`, 4.58 (b)), never here.
+    const cx = { slot, ch, W, H, sx: G ? G.x : 0, sy: G ? G.y : 0, tw: G ? G.w : W, th: G ? G.h : H, wrap: !!CamoTile.is(slot), level: 0 };
     const target = R ? Composite.scratch("_reg", cx.tw, cx.th) : out;
     const into = { g: ctx2d(target), canvas: target };
-    Composite.reset(into.g);
-    into.g.clearRect(0, 0, cx.tw, cx.th);
-    Composite.blit(cx, into.g, base);
-    Composite.stack(cx, into, slot.layers, 0);
-    Composite.reset(into.g);
+    Composite.build(cx, into, base);
     if (R) {
       const g0 = ctx2d(out);
       Composite.reset(g0);
       g0.clearRect(R.x, R.y, R.w, R.h);
-      g0.drawImage(target, 0, 0, R.w, R.h, R.x, R.y, R.w, R.h);
+      g0.drawImage(target, R.x - G.x, R.y - G.y, R.w, R.h, R.x, R.y, R.w, R.h);
     } else { out._full = true; if (ch === "color") GradFill.prune(slot); }   // a position bake nothing reads any more goes (4.44's fifth)
     return { live: true, wrote: R };
+  },
+  // The base and the stack onto `into`, at the region's origin — the whole of a pass, shared by the
+  // live sheet and `at`.
+  build(cx, into, base){
+    Composite.reset(into.g);
+    into.g.clearRect(0, 0, cx.tw, cx.th);
+    Composite.blit(cx, into.g, base);
+    Composite.stack(cx, into, cx.slot.layers, 0);
+    Composite.reset(into.g);
+  },
+  // ---- one channel at one mip level (ROADMAP 4.58, docs/MIP_LEVELS.md §4) ----
+  // The same walk at full size with that level's set of layers — a far-only layer drawn from its first
+  // level on, a near-only one dropped — onto a canvas of its own, never the live sheet, which stays
+  // level 0. The export pads it and takes it down to its level in the pool. Null when nothing is on
+  // the channel, so the caller reads the base, exactly as `chanOut` would. The caller owns the canvas
+  // and gives its pixels back (`width = 0`) once it has read them: at 4096² it is 64 MB.
+  // `rect` (4.58 (b), the views' own chain) builds only that rectangle of the sheet, onto a canvas its
+  // size, the way a stroke's region pass does — for a channel with no blur or sharpen on it, since
+  // those read past the rectangle (`reach`; the caller asks for the whole sheet there). `into`, when
+  // it is a canvas of the size asked for, is reused.
+  at(slot, ch, level, into, rect){
+    const base = chanBase(slot, ch);
+    if (!base || (ch !== "color" && !chanHasLayers(slot, ch))) return null;
+    const ref = ch === "color" ? slot.composite : base;
+    if (!ref) return null;
+    const W = ref.width, H = ref.height, R = (rect && rectClamp(rect, W, H)) || { x: 0, y: 0, w: W, h: H };
+    const out = into && into.width === R.w && into.height === R.h ? into : mkCanvas(R.w, R.h);
+    const cx = { slot, ch, W, H, sx: R.x, sy: R.y, tw: R.w, th: R.h, wrap: !!CamoTile.is(slot), level };
+    Composite.build(cx, { g: ctx2d(out), canvas: out }, base);
+    return out;
+  },
+  // How far round a texel this channel's effects read: every visible blur's and sharpen's radius,
+  // summed, since one over another reaches as far as both. 0 on every stack without one.
+  reach(slot, ch){
+    let m = 0;
+    for (const L of visibleLeaves(slot.layers)) {
+      const c = LayerNode.contentOn(L, ch);
+      if (!c || c.kind !== "effect" || c.visible === false || !Effect.isSpatial(c.fx)) continue;
+      // as `adjust` reads it — at the widest radius keys give it at any level (4.58 (c))
+      const K = Levels.keyed(c) && c.keys.radius;
+      m += Math.max(Effect.reach(Effect.clone(c.fx)), ...(K ? K.map(e => Effect.reach({ type: c.fx.type, radius: e[1] })) : []));
+    }
+    return m;
   },
   // One level of the stack, bottom first. `into` is the canvas being built AND its context — both,
   // because an effect has to read back what the stack has produced so far.
@@ -251,20 +307,27 @@ const Composite = {
     const g = into.g;
     for (const L of nodes) {
       if (!L.visible) continue;
-      if (isGroup(L)) { Composite.group(cx, into, L, depth); continue; }
+      // Which mip levels it shows at (4.58): its opacity times its weight at the level being built,
+      // and nothing at all where the weight is 0 — the part scope's idea along the chain instead of
+      // over the model. A walk that names no level (one layer's own image) weighs everything 1.
+      const lw = Levels.weight(L, cx.level);
+      if (!lw) continue;
+      if (isGroup(L)) { Composite.group(cx, into, L, depth, lw); continue; }
       // The address, not the tag: what does this node hold HERE? A layer holding nothing on this
       // channel is not this sheet's business — drawing it anyway is what made a "Metalness fill"
       // repaint the whole vehicle in the colour picked for it.
-      const c = LayerNode.contentOn(L, cx.ch);
+      // A number keyed by level (4.58 (c)) is drawn at its value here: the content as this level
+      // sees it, which is the content itself wherever nothing is keyed.
+      const c = Levels.content(LayerNode.contentOn(L, cx.ch), cx.level);
       if (!c || c.visible === false) continue;
       // A content can be hidden and faded on its own, not only through the layer around it
       // (ROADMAP 4.28(e)'s model, built in (f) because that is where the first user of it arrived).
       // `SurfDrag` needs it: a decal's derived response is stale for the length of a drag and has to
       // go dark without the decal going with it, and since (f) the two are the same node. Absent on
       // every content the app writes today except a derived one, so this costs a property read.
-      g.globalAlpha = L.opacity * (c.opacity == null ? 1 : c.opacity) * Composite.ambAlpha(cx);
+      g.globalAlpha = L.opacity * (c.opacity == null ? 1 : c.opacity) * Composite.ambAlpha(cx) * lw;
       g.globalCompositeOperation = L.blend === "normal" ? "source-over" : L.blend;
-      if (c.kind === "effect") Composite.effect(cx, into, L, c);
+      if (c.kind === "effect") Composite.effect(cx, into, L, c, lw);
       else Composite.stencil(cx, into, L, tg => Composite.content(cx, tg, c, L));
     }
   },
@@ -280,7 +343,7 @@ const Composite = {
   // adjusts the group's own content and not the layers beneath it. That is what a group whose blend
   // is "normal" means (Photoshop calls the other behaviour "pass through"), and it falls out of
   // flattening rather than being coded for.
-  group(cx, into, G, depth){
+  group(cx, into, G, depth, lw = 1){
     // Nothing of this channel inside it — skip before allocating anything. A decal group holding
     // colour, normal and smoothness children reaches this composite three times over, and two of
     // those have no work to do.
@@ -302,6 +365,7 @@ const Composite = {
     const ambWas = cx.amb;
     if (G.blend === "pass through") {
       cx.amb = Composite.passAmb(cx, G);
+      cx.amb.alpha *= lw;                            // its level weight rides with its opacity (4.58)
       Composite.stack(cx, into, G.children, depth + 1);
       cx.amb = ambWas;
       return;
@@ -315,7 +379,7 @@ const Composite = {
     cx.amb = ambWas;
     Composite.groupStencil(cx, into, G, kg);
     const g = into.g;
-    g.globalAlpha = (G.opacity == null ? 1 : G.opacity) * Composite.ambAlpha(cx);
+    g.globalAlpha = (G.opacity == null ? 1 : G.opacity) * Composite.ambAlpha(cx) * lw;
     g.globalCompositeOperation = G.blend && G.blend !== "normal" ? G.blend : "source-over";
     g.filter = "none";
     g.drawImage(kids, 0, 0);
@@ -594,7 +658,7 @@ const Composite = {
         "  if (u_mode > 1.5) o = clamp(o + lut(y, 1.0).rgb - 128.0, 0.0, 255.0);\n" +
         "  else if (u_mode > 0.5) { vec4 m = lut(y, 1.0); o = o + floor((m.rgb - o) * m.a / 255.0 + 0.5); }\n" +
         "  if (u_keep > 0.5) o = clamp(o + (y - luma(o)), 0.0, 255.0);\n" +
-        "  gl_FragColor = vec4(o / 255.0, 1.0);\n" +             // opaque: `tables` says why
+        "  gl_FragColor = vec4(o / 255.0, 1.0);\n" +             // opaque: `effect` says why
         "}",
     init(){
       const F = Composite.fxGL, was = F.st;
@@ -624,6 +688,114 @@ const Composite = {
     const img = ctx2d(into.canvas).getImageData(0, 0, cx.tw, cx.th), d = img.data;
     Effect.apply(T, d);
     for (let k = 3; k < d.length; k += 4) d[k] = 255;
+    const out = Composite.scratch("_fxo", cx.tw, cx.th);
+    ctx2d(out).putImageData(img, 0, 0);
+    return out;
+  },
+  // ---- blur, sharpen and noise on the GPU (ROADMAP 4.50 (5), second step) ----
+  // `Effect.spatial`'s steps as one program on the shared context: mode 0 lays the across pass,
+  // premultiplied, into a framebuffer of bytes (as the CPU keeps it), and mode 1 (blur) or 2 (sharpen)
+  // reads it down and writes straight, opaque colour; mode 3 is the noise, one pass, its tile read at
+  // the texel's place on the sheet — `u_off` is the region's corner. The weights are a uniform array
+  // out to MAX_R, each tap taken twice (±i) so the array is indexed by the loop alone, as GLSL ES 1.0
+  // asks. CLAMP_TO_EDGE is the CPU's clamped index. Anything refused returns null: the CPU runs.
+  spaceGL: {
+    st: null, dead: false,
+    FS: "precision highp float;\n" +
+        "uniform sampler2D u_src; uniform sampler2D u_mid; uniform sampler2D u_tile;\n" +
+        "uniform vec2 u_size; uniform vec2 u_off; uniform float u_mode; uniform float u_r; uniform float u_amt; uniform float u_mono; uniform float u_wrap;\n" +
+        "uniform float u_w[33];\n" +
+        "vec4 at(sampler2D s, vec2 p){ return floor(texture2D(s, u_wrap > 0.5 ? fract(p) : p) * 255.0 + 0.5); }\n" +
+        "vec4 pm(vec4 t){ return vec4(t.rgb * t.a / 255.0, t.a); }\n" +
+        "void main(){\n" +
+        "  vec2 f = gl_FragCoord.xy; float y = 1.0 - f.y / u_size.y;\n" +
+        "  vec3 s = at(u_src, vec2(f.x / u_size.x, y)).rgb;\n" +
+        "  if (u_mode > 2.5) {\n" +
+        "    vec2 q = mod(vec2(floor(f.x), u_size.y - 0.5 - f.y) + u_off, 256.0);\n" +
+        "    vec4 n = at(u_tile, (q + 0.5) / 256.0);\n" +
+        "    vec3 d = u_mono > 0.5 ? vec3(n.r) : n.rgb;\n" +
+        "    gl_FragColor = vec4(clamp(s + floor((d - 128.0) * u_amt / 128.0 + 0.5), 0.0, 255.0) / 255.0, 1.0);\n" +
+        "    return;\n" +
+        "  }\n" +
+        "  vec4 acc = vec4(0.0);\n" +
+        "  for (int i = 0; i <= 32; i++) {\n" +
+        "    float k = float(i);\n" +
+        "    if (k > u_r) break;\n" +
+        "    if (u_mode < 0.5) {\n" +
+        "      vec4 a = pm(at(u_src, vec2((f.x + k) / u_size.x, y)));\n" +
+        "      if (i > 0) a += pm(at(u_src, vec2((f.x - k) / u_size.x, y)));\n" +
+        "      acc += u_w[i] * a;\n" +
+        "    } else {\n" +
+        "      vec4 a = at(u_mid, vec2(f.x / u_size.x, (f.y + k) / u_size.y));\n" +
+        "      if (i > 0) a += at(u_mid, vec2(f.x / u_size.x, (f.y - k) / u_size.y));\n" +
+        "      acc += u_w[i] * a;\n" +
+        "    }\n" +
+        "  }\n" +
+        "  if (u_mode < 0.5) { gl_FragColor = floor(acc + 0.5) / 255.0; return; }\n" +
+        "  vec3 b = acc.a > 0.0 ? acc.rgb * 255.0 / acc.a : vec3(0.0);\n" +
+        "  vec3 o = u_mode > 1.5 ? s + (s - b) * u_amt : b;\n" +
+        "  gl_FragColor = vec4(clamp(floor(o + 0.5), 0.0, 255.0) / 255.0, 1.0);\n" +
+        "}",
+    init(){
+      const F = Composite.spaceGL, was = F.st;
+      const S = Composite.gl.pass(F, F.FS, ["u_src", "u_mid", "u_tile", "u_size", "u_off", "u_mode", "u_r", "u_amt", "u_mono", "u_wrap", "u_w"], "the GPU blur, sharpen and noise pass");
+      if (S && S !== was) { const gl = S.gl; S.mid = Composite.gl.texture(gl); S.tile = Composite.gl.texture(gl); S.fbo = gl.createFramebuffer(); S.seed = null; S.mw = S.mh = 0; }
+      return S;
+    },
+    draw(cx, into, fx, grey, wrap){
+      const S = Composite.spaceGL.init();
+      if (!S) return null;
+      const C = S.C, gl = S.gl, w = cx.tw, h = cx.th, u = S.u;
+      if (C !== Composite.gl.st || gl.isContextLost() || w > C.max || h > C.max) return null;
+      if (C.canvas.width !== w || C.canvas.height !== h) { C.canvas.width = w; C.canvas.height = h; }
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(S.prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, C.src);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, into.canvas);
+      gl.uniform1i(u.u_src, 0); gl.uniform1i(u.u_mid, 1); gl.uniform1i(u.u_tile, 2);
+      gl.uniform2f(u.u_size, w, h); gl.uniform2f(u.u_off, cx.sx, cx.sy); gl.uniform1f(u.u_wrap, wrap ? 1 : 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);                    // not the framebuffer's own texture while it is drawn into
+      if (fx.type === "noise") {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, S.tile);
+        if (S.seed !== fx.seed) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, Effect.tile(fx.seed)); S.seed = fx.seed; }
+        gl.uniform1f(u.u_mode, 3); gl.uniform1f(u.u_amt, fx.amount); gl.uniform1f(u.u_mono, grey || fx.mono ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      } else {
+        const r = Effect.reach(fx), wts = new Float32Array(33);
+        wts.set(Effect.weights(r));
+        gl.uniform1fv(u.u_w, wts); gl.uniform1f(u.u_r, r);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, S.mid);
+        if (S.mw !== w || S.mh !== h) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); S.mw = w; S.mh = h; }
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, S.fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, S.mid, 0);
+        const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        if (ok) { gl.uniform1f(u.u_mode, 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        if (!ok) { gl.activeTexture(gl.TEXTURE0); return null; }
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, S.mid);
+        gl.uniform1f(u.u_mode, fx.type === "sharpen" ? 2 : 1); gl.uniform1f(u.u_amt, fx.type === "sharpen" ? fx.amount / 100 : 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      if (gl.getError() !== gl.NO_ERROR) return null;
+      const out = Composite.scratch("_fxo", w, h), og = ctx2d(out);
+      Composite.reset(og);
+      og.clearRect(0, 0, w, h);
+      og.drawImage(C.canvas, 0, 0);
+      return out;
+    },
+  },
+  // The same on the CPU — the region read back, `Effect.spatial`, written into the same scratch.
+  spaceCPU(cx, into, fx, grey, wrap){
+    const img = ctx2d(into.canvas).getImageData(0, 0, cx.tw, cx.th);
+    img.data.set(Effect.spatial(fx, img.data, cx.tw, cx.th, cx.sx, cx.sy, grey, wrap));
     const out = Composite.scratch("_fxo", cx.tw, cx.th);
     ctx2d(out).putImageData(img, 0, 0);
     return out;
@@ -672,55 +844,60 @@ const Composite = {
   // layered export renders an effect's result as a layer of its own and must apply exactly this
   // (ROADMAP 4.50 (16)).
   fxFilter(c){ return `hue-rotate(${c.hue}deg) saturate(${c.sat}%) brightness(${c.bright}%) contrast(${c.contrast}%)`; },
-  // Hue / saturation / brightness / contrast over everything below, cross-faded by opacity: the
-  // untouched copy is repainted first and the filtered one blended over it, because fading the
-  // filtered copy alone would fade the whole stack to transparent. Masked or part-scoped, it takes
-  // the same stencil pass as any other content — one branch here instead of the two the albedo
-  // version carried, and the reason an effect now applies on a greyscale channel as well (4.28's
-  // D2). What refuses one there is the Layers panel, which is a judgement about hue rotation on a
-  // roughness map and not a limit of the composite.
+  // Every effect, whatever its kind, is an adjusted copy of what the stack has produced so far — made
+  // by `adjust` — drawn over the stack at the layer's opacity, through its stencil. Nothing is copied
+  // out first: each pass READS the region and writes a separate canvas, so the stack under it is
+  // still whole when the result lands. A kind this build does not know adjusts nothing and draws
+  // nothing. Masked or part-scoped, it takes the same stencil pass as any other content — the reason
+  // an effect applies on a greyscale channel as well (4.28's D2). What refuses one there is the
+  // Layers panel, which is a judgement about hue rotation on a roughness map and not a limit of the
+  // composite.
   //
-  // Any other kind (4.50 (5)) is its tables instead of the filter — see `tables` below.
-  effect(cx, into, L, c){
-    if (c.fx) { Composite.tables(cx, into, L, c); return; }
-    const g = into.g;
-    const tmp = Composite.scratch("_fx", cx.tw, cx.th), tg = ctx2d(tmp);
-    Composite.reset(tg);
-    tg.clearRect(0, 0, cx.tw, cx.th);
-    tg.drawImage(into.canvas, 0, 0);                     // what the stack has produced so far
-    Composite.reset(g);
-    g.clearRect(0, 0, cx.tw, cx.th);
-    g.drawImage(tmp, 0, 0);
-    const filter = Composite.fxFilter(c);
-    g.globalAlpha = L.opacity * Composite.ambAlpha(cx);
-    Composite.stencil(cx, into, L, dst => { dst.filter = filter; dst.drawImage(tmp, 0, 0); dst.filter = "none"; });
-    g.globalAlpha = 1; g.filter = "none";
-  },
-  // Levels, Curves and the rest (ROADMAP 4.50 (5)): what the stack has produced so far, through the
-  // kind's tables — on the GPU where it can be, on the CPU where it cannot — into a region-sized
-  // scratch, which is then drawn over the stack at the layer's opacity and through its stencil.
-  // Nothing is copied out first: the pass READS the region and writes a separate canvas, so the
-  // stack under it is still whole when the result lands.
-  //
-  // The result is OPAQUE and lands `source-atop`, so an effect changes colour and never coverage:
+  // The copy is OPAQUE and lands `source-atop`, so an effect changes colour and never coverage:
   // the stack's alpha stays exactly what it was, and the colour is the plain cross-fade
   // adjusted · k + beneath · (1 − k), k being opacity × mask. Drawn `source-over` with the stack's
-  // own alpha instead — the way the four numbers' filtered copy is — a 70 % paint layer inside a
-  // group came out 91 % with a Levels AT REST over it (0.7 + 0.7 · 0.3): measured 2026-09-26 by
-  // t92, 45 levels off on 37 266 bytes of a 256² sheet, from an effect that should change nothing.
-  // That is the layer composited twice, the wt-canvas skill's "invisible while it is opaque and
-  // obvious once it is not". On an opaque sheet — every top-level composite — the two are the same
-  // pixels. A kind this build does not know compiles to nothing and draws nothing.
-  tables(cx, into, L, c){
-    const T = Effect.table(c);
-    if (!T) return;
-    const adj = Composite.fxGL.draw(cx, into, T) || Composite.fxCPU(cx, into, T);
+  // own alpha instead, a 70 % paint layer inside a group came out 91 % with a Levels AT REST over it
+  // (0.7 + 0.7 · 0.3): measured 2026-09-26 by t92, 45 levels off on 37 266 bytes of a 256² sheet,
+  // from an effect that should change nothing. That is the layer composited twice, the wt-canvas
+  // skill's "invisible while it is opaque and obvious once it is not". On an opaque sheet — every
+  // top-level composite — the two are the same pixels. The four numbers drew that way until
+  // 2026-10-23 (a 0.69-coverage layer came out 0.90); they land the same way as the rest now.
+  effect(cx, into, L, c, lw = 1){
+    const adj = Composite.adjust(cx, into, c);
+    if (!adj) return;
     const g = into.g;
     Composite.reset(g);
-    g.globalAlpha = L.opacity * Composite.ambAlpha(cx);
+    g.globalAlpha = L.opacity * Composite.ambAlpha(cx) * lw;
     g.globalCompositeOperation = "source-atop";
     Composite.stencil(cx, into, L, dst => dst.drawImage(adj, 0, 0));
     Composite.reset(g);
+  },
+  // The adjusted copy of the region, opaque, or null. One function, because the layered export
+  // renders an effect's result as a layer of its own and must draw exactly this (4.50 (16)):
+  //   the four numbers  the CSS filter over a copy of the stack, made opaque by the identity
+  //                     tables — the GPU upload reads straight colour, and the pass writes alpha 1
+  //   blur, sharpen,    `Effect.spatial`'s steps, on the GPU where it can be, on the CPU where it
+  //   noise             cannot (single-value channels take noise mono)
+  //   every other kind  its tables, the same way (4.50 (5)).
+  adjust(cx, into, c){
+    if (Effect.atRest(c)) return null;               // a new effect layer, before anything is set: no pass at all
+    if (!c.fx) {
+      const tmp = Composite.scratch("_fx", cx.tw, cx.th), tg = ctx2d(tmp), T = Effect.identity();
+      Composite.reset(tg);
+      tg.clearRect(0, 0, cx.tw, cx.th);
+      tg.filter = Composite.fxFilter(c);
+      tg.drawImage(into.canvas, 0, 0);
+      tg.filter = "none";
+      const src = { g: tg, canvas: tmp };
+      return Composite.fxGL.draw(cx, src, T) || Composite.fxCPU(cx, src, T);
+    }
+    if (Effect.isSpatial(c.fx)) {
+      const fx = Effect.clone(c.fx), grey = cx.ch !== "color";
+      return Composite.spaceGL.draw(cx, into, fx, grey, cx.wrap) || Composite.spaceCPU(cx, into, fx, grey, cx.wrap);
+    }
+    const T = Effect.table(c);
+    if (!T) return null;
+    return Composite.fxGL.draw(cx, into, T) || Composite.fxCPU(cx, into, T);
   },
 };
 // The albedo, plus the three things only the albedo does afterwards: it is the sheet the viewport
@@ -733,6 +910,7 @@ function compositeSlot(slot, rect){
   const done = Composite.sheet(slot, "color", rect);
   if (done.wrote === false) return;                          // nothing changed: nothing to upload
   if (slot.tex) { uploadTexRegion(slot.tex, slot.composite, done.wrote); needsRender(); }
+  LevelView.touched(slot, "color", done.wrote);              // its own levels follow at idle (4.58 (b))
   if (App.chanView && App.chanView !== "shaded") refreshChannelTextures(slot);
   slot.thumbDirty = true;
   slot.thumbRev = (slot.thumbRev || 0) + 1;
@@ -800,19 +978,23 @@ function coverageBytes(slot, rect){
 // slot whose channels had not been recomposited since a resize all exported a fully opaque sheet
 // and silently threw the mask away. It now derives the answer every time, and falls back through
 // every place the mask could still be found before giving up.
-function coverageForExport(slot, w, h){
+// `level` (ROADMAP 4.58) asks for the mask at that mip level: a wear layer can be limited to some
+// levels like any other, and the restart's alpha is that level's. Absent, it is the live mask.
+function coverageForExport(slot, w, h, level){
   if (!slot) return null;
   let cov = null, sw = 0, sh = 0;
   // 1) a hand-painted wear/coverage stack — recomposited here rather than trusted from a cache
   if (chanHasLayers(slot, "wear")) {
-    Composite.sheet(slot, "wear", null);
-    const src = slot.chanC && slot.chanC.wear;
+    const own = level ? Composite.at(slot, "wear", level) : null;
+    if (!own) Composite.sheet(slot, "wear", null);
+    const src = own || (slot.chanC && slot.chanC.wear);
     if (src && src.width && src.height) {
       sw = src.width; sh = src.height;
       const d = ctx2d(src).getImageData(0, 0, sw, sh).data;
       cov = new Uint8Array(sw * sh);
       for (let i = 0, n = sw * sh; i < n; i++) cov[i] = d[i*4];
     }
+    if (own) own.width = own.height = 0;                       // read: give the 64 MB back
   }
   // 2) the mask the imported / stock texture came in with
   if (!cov && slot.covBase && slot.baseC && slot.covBase.length === slot.baseC.width * slot.baseC.height) {
@@ -849,7 +1031,7 @@ function scheduleComposite(slot, rect){
   } else compPending.set(slot, rect || null);
   if (compTimer) return;
   compTimer = true;
-  requestAnimationFrame(() => { compTimer = false; flushComposites(); });
+  requestAnimationFrame(() => { compTimer = false; const t0 = Rec.clock(); flushComposites(); Rec.span("composite", t0); });
 }
 function flushComposites(){
   // Channels first. The wear channel ends up as the albedo composite's alpha, so its sheet has to
@@ -879,6 +1061,6 @@ function scheduleChannels(slot, rect){
   } else chanPending.set(slot, rect || null);
   if (compTimer) return;
   compTimer = true;
-  requestAnimationFrame(() => { compTimer = false; flushComposites(); });
+  requestAnimationFrame(() => { compTimer = false; const t0 = Rec.clock(); flushComposites(); Rec.span("composite", t0); });
 }
 

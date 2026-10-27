@@ -9,6 +9,19 @@
 //   node tools/all.mjs --only groups,compose      just those ids, by the names --list prints
 //                                                 (--only=groups,compose is the same; any other
 //                                                 option is refused)
+//   node tools/all.mjs --jobs 1   one test at a time, in the suite's order — the run as it was before
+//                                 lanes, and the one to use while the machine is wanted for a game
+//                                 (--jobs=N is the same; WT_TEST_JOBS=N sets the default)
+//
+// LANES (ROADMAP 0.4, 2026-10-22). Tests run N at a time, N = half the logical CPUs capped at 6
+// (tools/lanes.mjs): one at a time the suite was 307 s on the owner's 6-core machine, a long tail of
+// browser tests each mostly waiting on its own headless Chrome. The longest start first, from the
+// last run's times in dist/test-times.json (git-ignored; a test with no time yet counts as longest).
+// Entries marked `serial` assert wall-clock time, so they run after the parallel phase with nothing
+// else running, each with the reason on its entry. The report is still one line per test in the
+// suite's order — a line is printed once every test above it has finished — and the summary line is
+// unchanged. Every test has a deadline (`deadline` on its entry, in seconds; DEADLINE_S otherwise),
+// and a test past it is killed with every process it started and reported as a FAIL with its tail.
 //
 // `--only` exists for the inner loop and not for the gate: the full run is 95 s (measured
 // 2026-09-03), which is the right price to pay once before calling a change done and the wrong
@@ -31,7 +44,8 @@
 //   * report-only tools (t16 profiler, t17/t18/t19/t20) print findings and have no pass/fail.
 import fs from "fs";
 import path from "path";
-import { spawn, execFileSync } from "child_process";
+import { execFileSync } from "child_process";
+import { schedule, inOrder, runProcess, defaultJobs, yieldToOwner } from "./lanes.mjs";
 import { fileURLToPath } from "url";
 import { findInstall, describeInstall, InstallError } from "./wtdir.mjs";
 import { verdict } from "./verdict.mjs";
@@ -40,12 +54,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // `--only=ids` is `--only ids`, and an option this file does not know is refused. Until 2026-10-10
 // the equals form was read as nothing at all, so `npm test -- --only=arms` with no install ran the
 // whole install-free suite and exited 0 although an install test had been named (final audit).
-const KNOWN = new Set(["--all", "--verbose", "-v", "--list", "--only"]);
-const argv = process.argv.slice(2).flatMap(a => a.startsWith("--only=") ? ["--only", a.slice(7)] : [a]);
+const KNOWN = new Set(["--all", "--verbose", "-v", "--list", "--only", "--jobs"]);
+const argv = process.argv.slice(2).flatMap(a => a.startsWith("--only=") ? ["--only", a.slice(7)]
+  : a.startsWith("--jobs=") ? ["--jobs", a.slice(7)] : [a]);
 for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === "--only") { i++; continue; }
+  if (argv[i] === "--only" || argv[i] === "--jobs") { i++; continue; }
   if (!KNOWN.has(argv[i])) {
-    console.error(`unknown option "${argv[i]}" — tools/all.mjs takes --all, --list, --verbose and --only <ids>; nothing was run`);
+    console.error(`unknown option "${argv[i]}" — tools/all.mjs takes --all, --list, --verbose, --jobs <n> and --only <ids>; nothing was run`);
     process.exit(2);
   }
 }
@@ -59,6 +74,26 @@ const ONLY = (() => {
   if (!ids.length) { console.error("--only needs a comma-separated list of test ids (see --list)"); process.exit(2); }
   return ids;
 })();
+
+// --jobs N, else WT_TEST_JOBS, else half the logical CPUs capped at 6. A count that is not a whole
+// number from 1 up is refused, not rounded: `--jobs 0` meaning "all of them" or "one" is a guess.
+const JOBS = (() => {
+  const i = argv.indexOf("--jobs");
+  const raw = i >= 0 ? argv[i + 1] : process.env.WT_TEST_JOBS;
+  if (raw == null || raw === "") return defaultJobs();
+  if (!/^[1-9]\d*$/.test(String(raw))) {
+    console.error(`${i >= 0 ? "--jobs" : "WT_TEST_JOBS"} needs a whole number of lanes from 1 up, not "${raw}"; nothing was run`);
+    process.exit(2);
+  }
+  return +raw;
+})();
+// Below normal priority, inherited by every test and its Chrome (tools/lanes.mjs says why).
+yieldToOwner();
+
+// Seconds a test may take before it is killed and failed. The slowest install-free test took 49 s on
+// 2026-10-22 one at a time (t46, since cut to ~8 s), so 180 s is generous even with six lanes sharing
+// the machine; an entry that needs more says so with `deadline`.
+const DEADLINE_S = 180;
 
 let install;
 try { install = findInstall(); }
@@ -96,8 +131,9 @@ const SUITE = [
   { id: "decaltree",file: "t34_decalfolders.mjs",  args: [], node: [],       needsInstall: false,
     what: "decal library folder tree: rename, delete, move, legacy entries" },
   { id: "dds",      file: "t23_dds.mjs",           args: [], node: [],       needsInstall: false,
-    what: "DDS block decoders byte-for-byte against HEAD" },
-  { id: "symmetry", file: "t39_symmetry.mjs",      args: [], node: [],       needsInstall: false,
+    what: "DDS block decoders byte-for-byte against HEAD, and a crafted all-ones channel mask decodes at once instead of hanging (ROADMAP 1.21 (1))" },
+  // serial: it asserts that a second measurement takes under 5 ms and the first under 400 ms (t39).
+  { id: "symmetry", file: "t39_symmetry.mjs",      args: [], node: [],       needsInstall: false, serial: true,
     what: "the mirror plane is measured, not the bounding-box centre (gate for ROADMAP 4.6)" },
   { id: "cache",    file: "t21_cache.mjs",         args: [], node: M(4096),  needsInstall: false,
     what: "stored game index round trip at real-install size, counting the texture packs and not the model packs beside them, each unit's own model with it — none kept from a read that was empty or left a blk unread" },
@@ -116,20 +152,25 @@ const SUITE = [
   { id: "occlusion",file: "t38_occlusion.mjs",     args: [], node: [],       needsInstall: false,
     what: "the projector paints only the first surface each ray meets (gate for ROADMAP 4.2)" },
   { id: "exppick",  file: "t40_exportpick.mjs",    args: [], node: [],       needsInstall: false,
-    what: "leaving a texture out drops its .blk line with it (gate for ROADMAP 4.5); To War Thunder never dead-ends — a game folder opened another way offers the .zip at once with no picker, and the UserSkins folder can still be chosen from that dialog, a picked install root or folder above it writes into its own UserSkins and any other folder is refused, a cancelled or missing picker offers the zip too — and through stand-in handles that log every call, the only things it creates or writes are UserSkins/ and UserSkins/<name>/ (CLAUDE.md §0.4)" },
+    what: "leaving a texture out drops its .blk line with it (gate for ROADMAP 4.5); To War Thunder never dead-ends — a game folder opened another way offers the .zip at once with no picker, and the UserSkins folder can still be chosen from that dialog, a picked install root or folder above it writes into its own UserSkins and any other folder is refused, a cancelled or missing picker offers the zip too — and through stand-in handles that log every call, the only things it creates or writes are UserSkins/ and UserSkins/<name>/ (CLAUDE.md §0.4); Replace removes the earlier export's .blk and textures this one does not write, only inside UserSkins/<name>/, never a written name in other case or the user's own files, and Save as new removes nothing (ROADMAP 1.21 (7))" },
   { id: "nooodle",  file: "t42_nooodle.mjs",       args: [], node: [],       needsInstall: false,
     what: "a build with no decoder at all still degrades honestly — the scan's summary and Fill missing slots keep the Oodle cause apart (gate for ROADMAP 5.2; review of 2026-10-10)" },
   { id: "decallib", file: "t35_decallib.mjs",      args: [], node: [],       needsInstall: false,
     what: "decal library against real IndexedDB and the real dialog" },
   { id: "drop",     file: "t36_drop.mjs",          args: [], node: [],       needsInstall: false,
-    what: "drag & drop: loose files bypass the entries API, failed folder walks are reported" },
+    what: "drag & drop: loose files bypass the entries API, failed folder walks are reported, a dropped web link is not fetched and says so, and a data: image is decoded with no request (ROADMAP 1.21 (8))" },
   { id: "panels",   file: "t44_panels.mjs",        args: [], node: [],       needsInstall: false,
     what: "the sidebar panels render the markup they did before (gate for ROADMAP 2.4, 4.28)" },
-  { id: "memory",   file: "t45_memory.mjs",        args: [], node: [],       needsInstall: false,
+  // serial: it measures the heap across twelve encodes with forced collections between; a lane
+  // starved of CPU stretches those rounds past what the measurement was sized for.
+  { id: "memory",   file: "t45_memory.mjs",        args: [], node: [],       needsInstall: false, serial: true,
     what: "repeated encodes give their memory back, and the measurement can see a leak" },
-  { id: "wtlz",     file: "t46_wtlz.mjs",          args: [], node: [],       needsInstall: false,
+  // serial: it holds the decoder to within 4x of RAD's speed, both timed in one process; with six
+  // lanes sharing the CPU the ratio read 6.37x on 2026-10-22, against 3.3x alone.
+  { id: "wtlz",     file: "t46_wtlz.mjs",          args: [], node: [],       needsInstall: false, serial: true,
     what: "the shipped build carries the project's own Oodle decoder, no one else's, byte-identical to RAD's (gate for ROADMAP 5.1, 5.4)" },
-  { id: "stroke",   file: "t47_stroke.mjs",        args: [], node: [],       needsInstall: false,
+  // serial: §3.3's latency gate — a stroke's first frame under 12 ms, a whole stroke under 60 ms.
+  { id: "stroke",   file: "t47_stroke.mjs",        args: [], node: [],       needsInstall: false, serial: true,
     what: "a brush stroke does not stall the window — plain, with Flow and pressure, and with a tip and every dynamic on — and undo puts back exactly what was there (§3.3, ROADMAP 4.50 (4), (10))" },
   { id: "family",   file: "t49_family.mjs",        args: [], node: [],       needsInstall: false,
     what: "a .blk only names textures the vehicle it is written for actually has (ROADMAP 4.7); the vehicle list puts each unit on the model its own blk names, boat_a takes no \"a…\" unit by name, a unit's blk outranks a perfect name match, rows alike but for the model are twins led by what tells them apart, and a load ticks exactly the units whose blk names the model, a ranked one with a real class first; the unit blks are read in a worker pool, an unreadable one is said, and none when the stored index has them (review of 2026-10-10)" },
@@ -161,6 +202,32 @@ const SUITE = [
     what: "a decal's outline and shadow: drawn round the marking without moving it, the same size through the projector, the shadow kept out of the footprint (ROADMAP 4.44)" },
   { id: "tone",     file: "t68_tone.mjs",          args: [], node: [],       needsInstall: false,
     what: "blend-if: a layer shown by the tone or colour beneath it, in a band with a ramp, multiplied with its mask, the same on the region path (ROADMAP 4.44)" },
+  { id: "bytes",    file: "t144_crafted_bytes.mjs", args: [], node: [],      needsInstall: false,
+    what: "counts read from a crafted game file are bounded by its bytes: a DataBlock (FAT and SLIM) claiming 2^31 blocks or a negative count, 2^21 children per block, a vromfs table of 2^32 files and a model element of 4 billion faces are refused or read in bounded time, and a well-formed DataBlock reads as before (ROADMAP 1.21 (2))" },
+  { id: "projload", file: "t145_projload.mjs",     args: [], node: [],       needsInstall: false,
+    what: "a .wtproj from a newer build is refused before any of it is applied — no embedded model or texture parsed, no rebuild, the open vehicle kept — and an image missing from a project costs that image only: the load finishes, a painted layer whose sheet is lost comes back blank at the slot's size, and the status line names the file (ROADMAP 1.21 (3), (4))" },
+  { id: "swatches", file: "t152_swatches.mjs",     args: [], node: [],       needsInstall: false,
+    what: "swatches and reference images (ROADMAP 4.50 (12)): three cited paint standards as chips that set the brush and say they are sRGB approximations, a palette of your own that a settings file carries and holds to colours, a reference window whose eyedropper reads the image's own texel at any zoom, and a project that carries the images only when asked, as their own bytes, and brings them back" },
+  { id: "projbuf",  file: "t157_projbuf.mjs",      args: [], node: [],       needsInstall: false,
+    what: "the GPU projector draws into a buffer its context really gives: after sheets that grow it to 8192² (512×8192, 8192×512) a decal still lands on exactly its footprint, the next 256² projection is byte-identical to the one before them, a sheet over 4096 is drawn in windows with no seam, and a context giving less than asked halves the window until it fits (ROADMAP 1.17 (1))" },
+  { id: "projbrush", file: "t158_projbrush.mjs",   args: [], node: [],       needsInstall: false,
+    what: "the projected 3-D brush, through the real viewport on synthetic scenes: a dab on a wing's leading edge paints nothing facing away, the painted area on UVs stretched 3:1 is the ring's, a plate hidden behind is untouched, a shallow stroke across a seam of two densities stays even at 19 % with Build up — the first, second and fourth failing on the UV-space brush — one undo step, a part limit kept, the same stroke from 3 m and 12 m the same texels, and on a plate at one texel a pixel the 2-D brush's own dabs; every coverage tool across the seam, a turned Square, a pen; reach (a box past a wing's edge untouched, a 60° plate whole) and bleed (two gutter texels, not three, no false wall on a Panel line); Symmetry's mirror image texel for texel, a stroke on the plane unchanged by it, Radial's even turns; the Clone still paints the old way and says so (ROADMAP 1.19 (a)–(d))" },
+  { id: "projclick", file: "t165_projclick.mjs",  args: [], node: [],       needsInstall: false,
+    what: "the projected 3-D brush click by click, on a wing and a flap that keep their geometry from stroke to stroke as a loaded vehicle does: a click on the wing paints the wing under the ring and nothing on the flap, the next one beside the hinge paints every texel under the ring on both and nothing outside it, the same click again paints the same disc as one undo step, and six clicks in a row at Spacing 5 % each paint their whole disc (the owner's feel check, 2026-10-24: a part's kept triangle grid was queried under the stroke's own counter, so a click near the last one painted only a sliver and one on the same spot nothing); the brush is on by default (a stored off from before settings version 5 comes back on) and its facing limit is a slider at 85° that decides how steep a surface takes paint; a click on a two-triangle panel snapshots the dab's one tile of 64, and the clip's UV box holds under perspective (ROADMAP 1.19 (e))" },
+  { id: "seamseq",  file: "t162_seamseq.mjs",     args: [], node: [],       needsInstall: false,
+    what: "the seam sequence of ROADMAP 1.17 (2), run for real with both 3-D brushes: paint across a part seam at 2048, resize to 8192, one stroke on the wing alone in the undo tile that holds fuselage paint, resize back, the export preset to lossless, save and reload — after every step the fuselage's paint and its graded mask are all there (0 painted texels lost, alpha sum within 3 %), and the step-3 stroke paints where it is at 8192; a restoreTile that clears instead of restoring is caught at step 3, a way down that drops the layer at step 4" },
+  { id: "flameslot", file: "t163_flameslot.mjs",  args: [], node: [],       needsInstall: false,
+    what: "the vehicle's jet-flame sheet (ROADMAP 4.13): the desc's flame material gives it a slot whose row says jet flame (gunfire: gun flash), the flame quads draw that slot's live colour sheet weighted by its coverage — a skin's sheet replaces the stock one and an edit shows as it is composited with no material rebuilt, a sheet with no alpha drawn by colour — and, behind the gate, the export writes the community skins' exact replace_tex from jet_flame_diamonds*, the sheet DXT5 whatever the preset or its own box says (flamefmt refuses anything else), with the validator saying WT Live refuses it and UserSkins shows it" },
+  { id: "projdrag", file: "t159_projdrag.mjs",     args: [], node: [],       needsInstall: false,
+    what: "a dragged projected decal follows without a ghost and settles exactly where it is put: on a 4096 × 2048 sheet each moving frame is drawn reduced and composites a rectangle, never the sheet; no trail is left; held still it settles once, byte-identical to a placement; a slow move is full size, an unchanged frame draws nothing; the drop is a direct placement's bytes; a drop before the settle timer has no late render; a style step after a settle re-projects; a closed slider gate settles once, after the last step, uncounted; a 1-px column on a decal's edge is not left behind (ROADMAP 1.18)" },
+  { id: "tipcursor", file: "t160_tipcursor.mjs",  args: [], node: [],       needsInstall: false,
+    what: "the brush cursor is the outline of the dab it lays: on the sheet a hard Round, a Square and an L-shaped image tip turned 30° and a Chip within 2.5 texels of the dab's half edge; on the model the UV-space brush's L along the sheet's own axes, and the projected brush's Round and L on a plate turned 60° facing the camera; mid-stroke with Follow the projected ring turns with the stroke and is placed with no raycast (ROADMAP 3.41 (2))" },
+  { id: "lattice",  file: "t151_lattice.mjs",      args: [], node: [],       needsInstall: false,
+    what: "a lattice is a tile for the pattern fill: every shape's tile meets itself (slid half a tile it is the tile rolled round), a period holds its cells (hexagons 2, squares 1, diamonds 2, triangles 4, scales 2) each the same size, the border is the share of a cell it says, no fill leaves cells clear and no border leaves no seam; as a fill a cell's centre and edge land where the geometry puts them; saved, duplicated and named as a lattice; the panel makes one, changes its cells and undoes (ROADMAP 4.55a)" },
+  { id: "serve",    file: "t146_serve.mjs",        args: [], node: [],       needsInstall: false,
+    what: "the preview server serves the build of src/ from memory and never writes the artifact — a hand-edit stays on disk for t41 to catch — and says when the file on disk differs (ROADMAP 1.21 (5))" },
+  { id: "crafted",  file: "t140_crafted.mjs",      args: [], node: [],       needsInstall: false,
+    what: "a crafted .wtproj puts no markup into a panel and breaks none: every field the project reader and the weapon merge take — a channel's name, opacity, blend-if, a decal's placement, Look and text, a projection's parameters — is held to its shape, an effect of an unknown kind stays inert, and what this build writes comes back exactly" },
   { id: "stack",    file: "t69_stack.mjs",         args: [], node: [],       needsInstall: false,
     what: "a group saved as a .wtstack comes back whole onto another sheet — resampled, renumbered, projections flattened, foreign part names dropped, and said so (ROADMAP 4.44)" },
   { id: "layered",  file: "t101_layered.mjs",      args: [], node: [],       needsInstall: false,
@@ -171,7 +238,8 @@ const SUITE = [
     what: "effect kinds — Levels, Curves, colour balance, gradient map, invert, threshold, posterize: each table exact under Node, region = whole on every kind, a mask and a Limit confine it, the GPU pass = the CPU pass on every texel and in a composite, saved at version 5, the panel reaches linked siblings (ROADMAP 4.50 (5))" },
   { id: "gradient", file: "t74_gradient.mjs",      args: [], node: [],       needsInstall: false,
     what: "gradient fills: the stops as one table, on the sheet or along the model through the position bake, cached per record, repeat and reflect, dithered, saved at version 5 (ROADMAP 4.44)" },
-  { id: "pattern",  file: "t94_pattern.mjs",       args: [], node: [],       needsInstall: false,
+  // serial: the progress bar must come up past 200 ms, and a second evaluation inside 250 ms keeps it.
+  { id: "pattern",  file: "t94_pattern.mjs",       args: [], node: [],       needsInstall: false, serial: true,
     what: "noise and pattern fills along the model: seeded, in metres, one contrast at any detail, seamless across UV islands, streaks along the up axis; worked out in the fill pool byte-for-byte as the main thread would, with the progress bar and Cancel past 200 ms; tri-planar by the bake's new normal plane, filtered when shrunk, the tile kept in the workers; a pattern on the sheet repeats whole tiles; masks and chipped paint, save, convert, export wait (ROADMAP 4.50 (7), (8))" },
   { id: "radial",   file: "t75_radial.mjs",        args: [], node: [],       needsInstall: false,
     what: "radial symmetry: N copies of a stroke turned about a picked axis — the turn comes home, keeps its radius, spaces evenly, commutes with the mirror on the axle, and costs no more rays (ROADMAP 4.44)" },
@@ -189,25 +257,41 @@ const SUITE = [
     what: "one ACL key frame: constant, packed, segment-constant and raw, through both ranges, with w rebuilt — against buffers the test lays out itself (ROADMAP 2.4)" },
   { id: "path",     file: "t82_path.mjs",          args: [], node: [],       needsInstall: false,
     what: "the shape tool: the model (a straight segment stays two points, a cubic hits its midpoint, a walk spaces evenly across corners) and both verbs in the page — a closed path filled in ONE fill with no pale seam, and the brush walked along it at its own spacing (ROADMAP 6.1)" },
+  { id: "pathlayer", file: "t147_pathlayer.mjs",   args: [], node: [],       needsInstall: false,
+    what: "a path is a layer: Fill and Stamp along with the Brush make a layer that keeps its path, a node moved redraws it in one undo step, Fill again recolours it, a stamp with every dynamic redraws to the same bytes, the brush is refused on it and a duplicate is plain paint, Esc lets go; the project writes the recipe and says version 6 only then (7 inside a node with level content), the gate reads 6 and 7 and refuses 8 — a version 6 gate refuses 7 — a crafted recipe is data (ROADMAP 4.52 (3))" },
   { id: "path3d",   file: "t132_path3d.mjs",       args: [], node: [],       needsInstall: false,
     what: "the shape tool on the model: nodes laid and closed by pointer events on the 3-D view in a plane fixed at the first click; Fill projects the path through the decal projector — a square across a UV seam fills both islands, nothing on a plate behind it (the depth pre-pass) or past its edge 1 m back (the depth limit, which follows the nodes), hardened to 0 or 255, one undo step; Stamp along lays 24 separate stamps along 3 m at 1/8 m; → selection selects both islands; a path stays in the view it was started in (ROADMAP 6.1b)" },
   { id: "selshape", file: "t99_selshape.mjs",      args: [], node: [],       needsInstall: false,
     what: "selections from a lasso, a path and a colour range: a polygon covers exactly the texel centres a winding-number oracle says (nonzero, as the path's Fill), the wand's tolerance and edge-only connectivity read band by band as in one call, Shift adds / Alt removes as one step holding packed bits and a Shift or Alt that changes nothing changes nothing, path → selection covers what Fill paints; on a 4096² sheet the selection is the sheet's own texels — two touching patches recoloured with the wand and Fill leave no seam — and a click reads a band at a time from a copy made when clicked; the wand reads what the 2-D view shows: the camouflage blend by the eyedropper's arithmetic, a smoothness brush, a channel view; and a click on a camouflage tile's repeat takes the tile's own texel, one period over (ROADMAP 4.50 (9))" },
   { id: "mirror",   file: "t83_mirror.mjs",        args: [], node: [],       needsInstall: false,
     what: "symmetry on the sheet: a texel maps to its own reflection, a match further than three of this sheet’s own texels is refused, a competing region 20 mm away does not win, and a stroke jumps rather than drawing a line to its copy (ROADMAP 6.2)" },
+  { id: "linked",   file: "t160_linked.mjs",       args: [], node: [],       needsInstall: false,
+    what: "an install split across drives by folder links reads as one: the folder the links point at, laid over the install by relative path, lists each name once, the real scan walk and a pack lookup find what only it holds, a file both hold is the install's, a folder the install lists but will not open is listed from it, and anything created goes to the install; the question asked when content/base will not open — pick, open without it (said), a wrong folder (refused), a cancel, a remembered one reused or re-granted by name — and Forget clears it (2026-10-24)" },
+  { id: "onetex",   file: "t161_onetex.mjs",       args: [], node: [],       needsInstall: false,
+    what: "one texture out on its own (ROADMAP 4.59): a PNG written from the bytes keeps a packed _n's four channels where its alpha is low or zero (read back by the test's own PNG reader; the canvas route fails the same check), in a worker; a texture-search row's save writes the entry's raw .dds, or level 0 as PNG or TGA; a slot's export texture… writes a sheet as the skin export writes it, byte for byte with a full export, as an image, or the game's original, offered only when the game folder holds it" },
+  { id: "nslope",   file: "t169_nslope.mjs",       args: [], node: [],       needsInstall: false,
+    what: "the _n slope channels as the game reads them (ROADMAP 1.24 (b)): a packed _n's A is the editor's normal X and its G normal Y on import, on Replace and on a loose _n's paste; the raw views name them so; stock round-trips byte for byte; a bump the app's relief draws exports its left/right slope in A and its up/down one in G, high G toward the bottom row; the 3-D view lit from below brightens a texel leaning toward the bottom row; a project before version 8 has its stored surface sheet turned, on load and on a weapon merge, one with a sheet says 8 and the gate reads 8" },
+  { id: "levels",   file: "t164_levels.mjs",       args: [], node: [],       needsInstall: false,
+    what: "hand-made mip levels, slice (a) (ROADMAP 4.58): a layer or group limited to a range of levels weighs 1 inside it and fades over `soft` outside; the views show level 0; each exported level, decoded, is that level's stack — near-only red at 0–1, the base at 2, far-only blue from 3 — with the Mipmaps tick off and with TGA asked for (a .dds with its chain instead; TGA by hand is stopped); no level content is the bytes the export wrote before, and a restart whose sheet the chain would have generated is the same bytes, albedo and renormalised _n; a restart is padded max(32, 2^r) in the pool; Near only / Far only from the layer's menu in one undo step, with the distance from its own parts; the level ruler's colour per level and its filter strip (checker, then 128 and 188); ORA/PSD as level 0 shows it, said. Slice (b), the preview as in game: a sheet with level content is uploaded with its own levels and a stroke frame builds none (the stroke's rectangle, level by level, is what a whole build gives); In game is x1, no chain where the export writes none, texture quality from level q; the Levels view rendered at known distances reads §1's level face-on, one up at 60°, on 4K, at Medium and with no chain; the 2-D view's Level control" },
+  { id: "keys",     file: "t171_keys.mjs",         args: [], node: [],       needsInstall: false,
+    what: "hand-made mip levels, slice (c) (ROADMAP 4.58): a keyed number at level k is the key — the walk with a keyed hue, Levels gamma, blur radius, noise amount, fill colour or smoothness value equals the unkeyed layer set to the keyed value there, byte for byte; keys restart the chain where a value changes and nowhere else; each exported level decoded is the keyed colour; keys say version 7 and read back, a crafted file held to known numbers, levels 0–15, #rrggbb; By distance: a bar per level, one undo step, the plain control read-only while keyed; Holo foil, Colour flip, Distance camouflage and Metal flake build plain layers whose levels are what each promises, one undo step each" },
   { id: "listed",   file: "t84_listed.mjs",        args: [], node: [],       needsInstall: false,
     what: "a game folder chosen through the file chooser answers like a directory handle, the real scan walk and fingerprint run over it, and every way in offers it — the Program Files install a double-clicked page could not reach (ROADMAP 4.48); a folder picked ABOVE the install (a Steam library, common, a drive) finds it by name with no walk and remembers the install, a folder inside it is told to pick the one above, a sibling Gaijin game is not taken for it, the remembered install reopens, and Load a skin opens in UserSkins" },
   { id: "status",   file: "t87_status.mjs",        args: [], node: [],       needsInstall: false,
     what: "every status message can be read in full: the line takes the free width, a cut one opens on hover, a click shows the recent ones, and an error that does not fit opens by itself" },
+  { id: "uncaught", file: "t142_uncaught.mjs",     args: [], node: [],       needsInstall: false,
+    what: "an error nothing caught reaches the user: a throw in a click handler and a rejected promise are on the status line and in Messages, said once however often, at their src/ file and line — the line the event, error.stack and the console name too, every inlined script carrying a //# sourceURL — and the event is not cancelled; a worker that dies under a job is named by its pool and said once; the page without the trap and the comments fails all of it" },
   { id: "typein",   file: "t88_typein.mjs",        args: [], node: [],       needsInstall: false,
     what: "every slider shows its value and the value can be typed: click or Enter opens it, in the readout's own units (data-k, checked against every readout), clamped, one input + one change; Esc and junk change nothing — and no text below 11 px, no tooltip over 300 characters" },
   { id: "effects",  file: "t89_effects.mjs",       args: [], node: [],       needsInstall: false,
     what: "a jet flame or gun flash is drawn from the game's own sheet the desc names: colour weighted by the sheet's alpha (by colour alone when it has none), rows uploaded bottom-up, kept through gcDecoded; the gradient only when there is no sheet" },
   { id: "browse",   file: "t90_browse.mjs",        args: [], node: [],       needsInstall: false,
     what: "the vehicle list can be browsed with nothing typed: every vehicle in tree order, a filter narrows it, 200 rows at a time behind a Show-more button an IntersectionObserver presses, and typing still searches (ROADMAP 3.38); a rankless unit follows the ranked ones, the lit rows are the units the skin is for and follow the ticks by an event, and a twin's subtitle leads with what tells it apart (review of 2026-10-10)" },
-  { id: "handles",  file: "t100_handles.mjs",      args: [], node: [],       needsInstall: false,
+  // serial: it times renders against the slider gate's 250 ms.
+  { id: "handles",  file: "t100_handles.mjs",      args: [], node: [],       needsInstall: false, serial: true,
     what: "a projected decal is handled directly: its corners and knob in 3-D are the projector's own frame and resize / turn it through real pointer events; on the sheet it drags to the surface under the texel — the side it started on, where one island is two surfaces a tile apart — and has the same handles through the plane→sheet map (mirrored, turned, oblique UVs), under the model's rule and its own pointer's, with a press on bare sheet reading no layer back; the slider gate cannot latch and, closed, leaves the thread twice a render slower than 250 ms; a decal deleted or undone away mid-drag stays gone; a drop keeps the Look showing (ROADMAP 4.2)" },
-  { id: "autosave", file: "t93_autosave.mjs",      args: [], node: [],       needsInstall: false,
+  // serial: a recovery copy may never hold the UI thread for 100 ms.
+  { id: "autosave", file: "t93_autosave.mjs",      args: [], node: [],       needsInstall: false, serial: true,
     what: "autosave and crash recovery: work in no file makes the page ask before it closes (undo back to the saved state does not, past an edit with no undo step it still does), a copy lands in IndexedDB after a few quiet minutes and when the tab is hidden, the last two per session within 1 GB, and after a real reload the welcome card recovers the same nodes through ProjNode and the next copy holds the page's own sources — without holding the UI thread (ROADMAP 4.50(2))" },
   { id: "reedit",   file: "t91_reedit.mjs",        args: [], node: [],       needsInstall: false,
     what: "a projected decal's image opens in the decal editor and Use re-projects it where it is: place and marking size kept through a crop (an uneven one too) or a turn, its depth map, a normal map's vectors and its outline following the edit, the Look rebuilt (kept when untouched, shown as Custom when no preset matches), one undo step holding the old image, the ProjSource API the text tool builds on, a .wtproj round trip (ROADMAP 4.2)" },
@@ -217,6 +301,14 @@ const SUITE = [
     what: "pen pressure, smoothing and Flow: a pen stroke with rising pressure widens monotonically and a mouse is the full brush, through both views' own pointer handlers; Flow builds within a stroke up to Opacity, Build up past it, a Fill at Opacity in both; the string holds the brush back; the 3-D walk carries pressure at the chord's ray budget; a Shift+click line starts at the click's pressure; a 3-D copy on texels the stroke shares is laid once (ROADMAP 4.50 (4), 6.4)" },
   { id: "tips",     file: "t131_tips.mjs",         args: [], node: [],       needsInstall: false,
     what: "brush tips and dynamics: the four built-ins as coverage, an image read as a tip in all three conventions, the library in IndexedDB and in a settings file (not in localStorage), removing a tip puts its tools back on Round; the Round tip with no dynamics is the old stroke to the byte; a turned tip's corners are recorded, cleared and undone; Angle follows a stroke and Stamp along's path, reflected for the mirror up to an island's rim (read along the stroke's own surface and the twin's, not the padded gutter, a touching island, the twin's seams or a fold); scatter, size, flow and angle jitter show and a stroke is reproducible from its seed; the masked branch and the Clone take a tip; all of it per tool (ROADMAP 4.50 (10))" },
+  { id: "preview",  file: "t153_preview.mjs",      args: [], node: [],       needsInstall: false,
+    what: "a brush shows how it will paint, and its colour can run along the stroke: the tip grid lists every tip by the preview's own picture, a loaded one too, and picks and closes like a popover; the sample stroke is Pen.sample's dabs — walk, heading and dab at a size that fits — laid by Tips.lay, to the byte, redrawn by the controls; Hue turns exactly (a whole turn is the colour, a third red to green), a preset runs there and back, both land on a real stroke where the dab was laid and Off is the plain stroke to the byte; only the colour brush takes it, per tool; the gradient panel's holo presets replace the stops in one step (ROADMAP 3.41 (1), (3), 4.56)" },
+  { id: "filters",  file: "t154_filters.mjs",      args: [], node: [],       needsInstall: false,
+    what: "blur, sharpen and add-noise as effect kinds, and every effect landing without adding coverage: the Gaussian, the unsharp mask and the seeded grain exact under Node (no dark fringe premultiplied, noise a region's block of the sheet to the byte); the GPU pass agreeing with the CPU's (noise to the byte, blur and sharpen to a level); region = whole six ways because the compositor grows a dirty rectangle by the effects' reach, and failing without it; the four numbers at rest inside a group keeping a 69 % layer at 69 %, and a plain cross-fade on an opaque sheet; the CPU fallback in a group, save / load, a crafted radius clamped, the panel's rows as undo steps (ROADMAP 4.50 (5))" },
+  { id: "retouch",  file: "t155_retouch.mjs",      args: [], node: [],       needsInstall: false,
+    what: "the Retouch brush — blur, sharpen, smudge, dodge, burn under the brush: its settings held to their ranges, each kind's arithmetic exact under Node (blur and sharpen the effect kinds' own, smudge's carried patch, dodge and burn by their tone weights, black and white left at Midtones); on the real stroke path a blur stroke softens only what it covers, is the blur effect's result there with no seam where dabs meet (on whole texels), comes off with one undo, and passing back over it changes nothing; sharpen, smudge, dodge and burn each do what they say; colour only, never a mask, its settings the tool's (ROADMAP 4.50 (11))" },
+  { id: "genheight", file: "t156_genheight.mjs",   args: [], node: [],       needsInstall: false,
+    what: "a decal's height made from its own image: luma times alpha, softened, stretched to the full range — a white mark on transparent is 255 on 0 with a sloping edge, a faint difference is stretched, a flat or empty image gives nothing; Generate from the image (or the relief select's fourth line) gives a real decal the map, relief map and its softening on the Look, its normal tilting at interior detail the edge relief left flat, a preview; Soften remakes a generated map and never a loaded one; a flat image is refused in words (ROADMAP 4.19 (6))" },
   { id: "camotile", file: "t106_camotile.mjs",     args: [], node: [],       needsInstall: false,
     what: "a scalable camouflage of your own: the .blk pins the tile by its exact name on the stems the unit's own skins replace, a stroke over the right edge lands on the left (the Clone's source and destination, paths, flat decals — converted or exported on the sheet too — and one undo takes both halves back), it starts seamless and stays square, the view draws it 3 × 3; read out of the real export's zip, the real .wtproj round trip (its alpha kept) and the viewport's material; nothing to pin is said, it goes with its vehicle, and the model samples it through tc1 — format 4's first four bytes (ROADMAP 4.50 (6))" },
   { id: "search",   file: "t96_search.mjs",        args: [], node: [],       needsInstall: false,
@@ -231,13 +323,16 @@ const SUITE = [
     what: "a hardpoint picked is hung at once and alone: the diff, the take-down, the game-style menu with Ammo and Mass, the queue, no Apply (2026-09-21)" },
   { id: "cockpit",  file: "t71_cockpit.mjs",       args: [], node: [],       needsInstall: false,
     what: "the cockpit is a second body of the same vehicle: the switch swaps geometry and keeps each body's parts and selection, shared sheets are one slot, the seat is headPos in app space, and the project carries both (ROADMAP 4.14)" },
+  { id: "cockpitglass", file: "t166_cockpitglass.mjs", args: [], node: [], needsInstall: false,
+    what: "the cockpit body's own sheets and glass (ROADMAP 1.26): its sheets survive the exterior's rebuild that follows their decode at 70 decoded sheets and bind on the switch, not as placeholders; a see-through shader with a sheet (empty_glass, gauge glass) draws its colour through its own alpha with no depth written while the untextured canopy stays tinted glass and an ordinary sheet stays opaque; its _n too, and a cockpit body with no desc bind keeps all of them; a skin's sheet past 8192 is held at 8192 by area mean (fitRGBA checked against a brute-force mean at 50x37) (a file with a level that fits, at that level), its raw bytes kept whole, and the status line names it" },
   { id: "transfer", file: "t104_transfer.mjs",     args: [], node: [],       needsInstall: false,
     what: "the cockpit carried onto the exterior's interior sheet: nearest surface by tree = by brute force, a texel's point exact, glass, hidden, effect and unposed parts lend nothing, the sheet's own paint passes through and the texels the cockpit renders there are never written, the source read at the texel's footprint, the worker's bytes = the pure section's, one bake owns the worker and every cancel lands, and the dialog's Add as layer (ROADMAP 4.45)" },
   { id: "undo",     file: "t56_undo.mjs",          args: [], node: [],       needsInstall: false,
     what: "the undo history is budgeted in bytes, the ceiling is a setting, and it says so (ROADMAP 1.5)" },
   { id: "guides",   file: "t98_guides.mjs",        args: [], node: [],       needsInstall: false,
     what: "the 2-D view's rulers, guides and pixel grid: a guide out of either ruler lands on a whole texel as one undo step, its tab moves it and a ruler removes it; the marquee, shape-tool nodes and flat decals snap by every edge, Ctrl places freely; a checkpoint a guide throws away is said over its line; the grid shows past 600 % only (ROADMAP 4.50 (15))" },
-  { id: "history",  file: "t97_history.mjs",       args: [], node: [],       needsInstall: false,
+  // serial: a long walk must yield — its longest gap under 70 % of the walk, read by a 4 ms heartbeat.
+  { id: "history",  file: "t97_history.mjs",       args: [], node: [],       needsInstall: false, serial: true,
     what: "the undo history as a list: a click lands on its state, a checkpoint names a state and keeps it through its own step's eviction, a stale row walks nowhere, a long walk yields behind the progress bar, cancels, and stops where it is when a stroke, a press or a key is started during it (a key read with real input after a real click on a row, which keeps the focus), a closed window holds no step and is not refilled by a walk that ends after it closed, every clear is one funnel (ROADMAP 4.50 (15))" },
   { id: "prefs",    file: "t55_prefs.mjs",         args: [], node: [],       needsInstall: false,
     what: "every setting is one declared row, survives save/reset/load, and no reset fires unasked (ROADMAP 3.12, 3.11c, 3.19)" },
@@ -247,6 +342,19 @@ const SUITE = [
     what: "a glass shader's coating map is not an albedo, so a canopy gets no blank slot (ROADMAP 3.18)" },
   { id: "wtdir",    file: "t133_wtdir.mjs",        args: [], node: [],       needsInstall: false,
     what: "the tests find the install themselves and can never pass green with a wrong one: tools/wtdir.mjs finds the game in a second Steam library by libraryfolders.vdf (not without it), prefers the library the list ties to app 236390, refuses one that lists it but lacks aces.vromfs.bin or content/base/res, follows the manifest's installdir, asks the registry only when Steam's folder has no list, and throws on a WT_DIR that is not an install; all.mjs fails every mode on such a WT_DIR and --all with no install, in one line with nothing run; no install test passes over a folder holding only those two markers; the install tools exit non-zero and say why" },
+  { id: "lanes",    file: "t143_lanes.mjs",        args: [], node: [],       needsInstall: false,
+    what: "the suite's lanes: never more at once than --jobs, the longest first, serial tests after and alone, --jobs 1 the old run, the report in suite order, and a test past its deadline killed with every process it started, a hung browser included (ROADMAP 0.4)" },
+  { id: "idbconn",  file: "t168_idbconn.mjs",      args: [], node: [],       needsInstall: false,
+    what: "one IndexedDB connection, reused (ROADMAP 1.25): 20 reads and 20 writes open at most one connection, deleteDatabase then answers at once and is never blocked, the next call reopens and round-trips, and a control that leaks 20 connections must block it" },
+  { id: "undocommit", file: "t172_undocommit.mjs", args: [], node: [],      needsInstall: false,
+    what: "putting a stroke down reads nothing back (ROADMAP 1.17c): the undo commit calls getImageData 0 times, undo and redo none; partial edge tiles undo and redo to the exact bytes; a second stroke over the same tiles leaves the first entry intact; the entry's bytes are its tiles' area × 4 × 2" },
+  { id: "patbrush", file: "t173_patbrush.mjs",     args: [], node: [],       needsInstall: false,
+    what: "the pattern brush (ROADMAP 4.55): a click on the model lays every hexagon whose centre is under the ring whole and no texel of any other, past the ring where a cell runs past it; the hexagon over a part seam is laid on both parts; with a border a revealed cell's inside is the fill and its border, shared with unrevealed neighbours, the border colour; squares on whole texels exactly; one undo step; refused in words with the projected brush off and on the sheet, never laid as plain dabs; Cells off paints as before; every shape's owner map owns every texel, a shared border by two cells; the record clamped" },
+  { id: "updates",  file: "t170_updates.mjs",      args: [], node: [],       needsInstall: false,
+    what: "Check for updates and What's new (ROADMAP 5.7): version order (beta.2 < beta.10 < 1.0.0), no request at boot, Check makes exactly one request to the release list with no cookie or referrer (served through CDP interception) and shows every newer build's notes newest first with markup kept as text and links without their addresses, the newest / ahead / rate-limited / offline / not-a-list answers, and RELEASE_NOTES.md embedded and shown once after a version change, never on a first run or a downgrade, and again from the panel" },
+  { id: "guards",   file: "t167_guards.mjs",      args: [], node: [],       needsInstall: false,
+    internal: true,
+    what: "the standing rules held by code, not briefs (2026-10-24): the git guard hook refuses a push, --no-verify and git commit -n, and a merge or pull that can write a merge commit, from Bash and PowerShell, and lets a commit message or heredoc that only mentions them through; the suite and every child it starts run below normal priority, against a control child, and WT_TEST_PRIORITY=normal opts out" },
   { id: "claims",   file: "t51_claims.mjs",        args: [], node: [],       needsInstall: false, internal: true,
     what: "CLAUDE.md's numbers are measured from the code, not remembered; the user's guide names the app's version, opens on Quick start and describes a decal's Look as the code builds it" },
 
@@ -343,17 +451,18 @@ if (ALL && !ONLY && !haveInstall) {
 }
 
 // Each install test is handed the one path printed above, so none of them can find another.
-const run = (t) => new Promise(resolve => {
-  const started = Date.now();
-  const env = t.needsInstall ? { ...process.env, WT_DIR: install.dir } : process.env;
-  const p = spawn(process.execPath, [...t.node, path.join(ROOT, "tools", t.file), ...t.args],
-    { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
-  let out = "";
-  p.stdout.on("data", d => { out += d; if (VERBOSE) process.stdout.write(d); });
-  p.stderr.on("data", d => { out += d; if (VERBOSE) process.stderr.write(d); });
-  p.on("error", e => resolve({ code: -1, out: String(e.message), ms: Date.now() - started }));
-  p.on("close", code => resolve({ code, out, ms: Date.now() - started }));
-});
+// --verbose streams a test's output as it comes, which is only readable one test at a time; with
+// lanes it prints each test's whole output once it has finished, in the report's order.
+const STREAM = VERBOSE && JOBS === 1;
+const run = (t) => runProcess(process.execPath, [...t.node, path.join(ROOT, "tools", t.file), ...t.args], {
+  cwd: ROOT, env: t.needsInstall ? { ...process.env, WT_DIR: install.dir } : process.env,
+  deadlineMs: (t.deadline || DEADLINE_S) * 1000, onData: STREAM ? d => process.stdout.write(d) : null });
+
+// The last run's time per test, so the longest start first. Git-ignored, and only a hint: a missing
+// or unreadable record costs the ordering, never the run.
+const TIMES = path.join(ROOT, "dist", "test-times.json");
+let times = {};
+try { times = JSON.parse(fs.readFileSync(TIMES, "utf8")) || {}; } catch { /* no record yet: suite order */ }
 
 const tail = (s, n) => {
   const lines = s.trimEnd().split("\n");
@@ -363,33 +472,53 @@ const tail = (s, n) => {
 let failed = 0, ran = 0;
 const results = [];
 
-console.log(`node ${process.version}   mode: ${ALL ? "all" : "install-free"}\ninstall: ${describeInstall(install)}\n`);
+const wall = Date.now();
+const nSerial = JOBS > 1 ? picked.filter(t => t.serial).length : 0;
+console.log(`node ${process.version}   mode: ${ALL ? "all" : "install-free"}   lanes: ${JOBS}` +
+  (JOBS > 1 ? ` (${picked.length - nSerial} in parallel, then ${nSerial} serial; --jobs 1 runs one at a time)` : " (one at a time, in suite order)") +
+  `\ninstall: ${describeInstall(install)}\n`);
 
-for (const t of picked) {
-  // overwrite the in-progress line only on a real terminal; piped into npm it just makes a mess
-  const live = process.stdout.isTTY;
-  if (live) process.stdout.write(`....  ${t.id.padEnd(10)} ${t.what}`);
-  const r = await run(t);
-  ran++;
+// The in-progress line is redrawn only on a real terminal; piped into npm it just makes a mess. It
+// names what is running now, since with lanes that is several tests and not the next line's.
+const live = process.stdout.isTTY;
+const running = new Set();
+const status = () => {
+  if (!live) return;
+  const names = [...running].map(i => picked[i].id).join(", ");
+  process.stdout.write("\r\x1b[K" + `....  ${ran}/${picked.length} done, running: ${names}`.slice(0, (process.stdout.columns || 120) - 1));
+};
+const report = inOrder(picked.length, (i, r) => {
+  const t = picked[i];
   const secs = (r.ms / 1000).toFixed(1) + "s";
-  const head = live ? "\r" : "";
+  const head = live ? "\r\x1b[K" : "";
   // A test that exits 0 after a SKIP that means nothing ran (an install test, or no browser at all)
   // is not a pass, whatever its exit code says — tools/verdict.mjs, held by t133.
-  const v = verdict(t, r);
-  if (v.state === "fail" && v.note) {
+  const v = r.timedOut ? { state: "fail" } : verdict(t, r);
+  if (VERBOSE && !STREAM) process.stdout.write(head + `---- ${t.id}\n` + r.out + (r.out.endsWith("\n") ? "" : "\n"));
+  if (r.timedOut) {
+    console.log(`${head}FAIL  ${t.id.padEnd(10)} ${t.what} (${secs}) — still running at its ${t.deadline || DEADLINE_S} s deadline; killed with every process it started`);
+    if (!VERBOSE) console.log(tail(r.out || "(it printed nothing)", 14));
+    results.push({ t, state: "fail", r }); failed++;
+  } else if (v.state === "fail" && v.note) {
     console.log(`${head}FAIL  ${t.id.padEnd(10)} ${t.what} (${secs}) — ${v.note}`);
-    results.push({ t, state: "fail", r });
-    failed++;
+    results.push({ t, state: "fail", r }); failed++;
   } else if (v.state === "pass") {
     console.log(`${head}PASS  ${t.id.padEnd(10)} ${t.what} (${secs})${v.note ? " — " + v.note : " ".repeat(4)}`);
     results.push({ t, state: "pass", r });
   } else {
     console.log(`${head}FAIL  ${t.id.padEnd(10)} ${t.what} (${secs}, exit ${r.code})`);
     if (!VERBOSE) console.log(tail(r.out, 14));
-    results.push({ t, state: "fail", r });
-    failed++;
+    results.push({ t, state: "fail", r }); failed++;
   }
-}
+});
+await schedule(picked, { jobs: JOBS, times, run,
+  onStart: i => { running.add(i); status(); },
+  onDone: (i, r) => { running.delete(i); ran++; report(i, r); status(); } });
+if (live) process.stdout.write("\r\x1b[K");
+// Kept for the next run's ordering. A timed-out test keeps its deadline as its time, so it starts first.
+for (const x of results) times[x.t.id] = x.r.ms;
+try { fs.mkdirSync(path.dirname(TIMES), { recursive: true }); fs.writeFileSync(TIMES, JSON.stringify(times, null, 1) + "\n"); }
+catch (e) { console.log(`(could not keep the test times at ${TIMES}: ${e.message} — the next run starts in suite order)`); }
 
 // The browser tests: generate the pages so the paths are current, but never claim a result.
 // Under --only they are generated only when named — the point of --only is a short loop, and
@@ -406,12 +535,33 @@ if (!LIST) {
     // Never silence, or a dormant test becomes an absent one.
     if (r.code === 3) console.log(`DORMANT ${t.id.padEnd(8)} ${r.out.trim().split("\n")[0].replace(/^t\d+:\s*/, "")}`);
     else if (r.code === 0 && m) console.log(`WROTE ${t.id.padEnd(10)} ${m[1]}  — open in a browser: ${t.what}`);
-    else console.log(`ERR   ${t.id.padEnd(10)} could not generate (exit ${r.code})\n${tail(r.out, 6)}`);
+    else {
+      // A generator that cannot write its page fails the run (the 2026-10-22 scan's (19)): it used
+      // to print ERR and leave the exit code at 0, so a broken generator was a green suite.
+      console.log(`FAIL  ${t.id.padEnd(10)} could not generate its page (exit ${r.code})\n${tail(r.out, 6)}`);
+      results.push({ t, state: "fail", r, generator: true }); failed++;
+    }
   }
 }
 
+// The failures, named on the summary line and written whole to a file. A reader that keeps only the
+// last lines of a run (`| tail`, an agent saving its context) used to learn "1 FAILED" and nothing
+// else, and had to run the whole suite again to find out which (2026-10-24). Rewritten on every run,
+// green ones included, so it never describes an earlier run.
+const FAILS = path.join(ROOT, "dist", "test-failures.txt");
+const fails = results.filter(x => x.state === "fail");
+try {
+  fs.mkdirSync(path.dirname(FAILS), { recursive: true });
+  fs.writeFileSync(FAILS, `${new Date().toISOString()}  ${fails.length} failed of ${ran} run` +
+    (ONLY ? `  (--only ${ONLY.join(",")})` : "") + "\n" +
+    fails.map(x => `\n==== ${x.t.id}${x.generator ? " (page generator)" : ""}: ${x.t.what}\n` +
+      `exit ${x.r.code}${x.r.timedOut ? ", killed at its deadline" : ""}, ${(x.r.ms / 1000).toFixed(1)} s\n` +
+      tail(x.r.out || "(it printed nothing)", 60)).join("\n") + "\n");
+} catch (e) { console.log(`(could not write ${FAILS}: ${e.message})`); }
 const passed = results.filter(r => r.state === "pass").length;
-console.log(`\n${passed}/${ran} passed` + (failed ? `, ${failed} FAILED` : ""));
+console.log(`\n${passed}/${ran} passed` + (failed ? `, ${failed} FAILED: ${fails.map(x => x.t.id).join(", ")}` +
+  ` — output in ${path.relative(ROOT, FAILS).replace(/\\/g, "/")}` : ""));
+console.log(`(${((Date.now() - wall) / 1000).toFixed(0)} s at ${JOBS} lane${JOBS > 1 ? "s" : ""})`);
 if (notHere.length && !ONLY) console.log(`(${notHere.map(t => t.id).join(" and ")}: check${notHere.length > 1 ? "" : "s"} files only the author's repository has — not run here)`);
 if (ONLY) console.log(`(--only ${ONLY.join(",")} — this is NOT the gate; run the whole suite before calling a change done)`);
 else if (!ALL) console.log(haveInstall ? "(install-dependent tests not run — use --all)"

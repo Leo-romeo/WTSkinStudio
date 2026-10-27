@@ -15,6 +15,11 @@ const R = makeReport();
 
 const BODY = `async function(){
   var out = {};
+  // Wait for what the step is FOR, not for a fixed time (the 2026-10-22 scan's (20)): under a loaded
+  // machine — six lanes of the suite at once — a sleep that was long enough stops being so. Bounded,
+  // so a step that never happens is the check after it failing, not a hang.
+  var until = async function(cond, ms){ var t = performance.now();
+    while (!cond() && performance.now() - t < (ms || 10000)) await new Promise(function(r){ setTimeout(r, 10); }); };
   // a 2x2 png, so add() stores something a thumbnail can actually be drawn from
   function tinyPng(){
     var c = mkCanvas(2, 2), g = ctx2d(c);
@@ -81,7 +86,7 @@ const BODY = `async function(){
   await DecalLib.add(rec("nose art"), "");
   App.decalFolder = "";
   var dlg = await openDecalLibrary();
-  await new Promise(function(r){ setTimeout(r, 350); });
+  await until(function(){ return dlg.body.querySelectorAll(".declib .card .nm").length >= 3; });
   var grid = dlg.body.querySelector(".declib");
   out.rootFolders = Array.from(grid.querySelectorAll(".card.folder .nm")).map(function(e){ return e.textContent; });
   out.rootDecals = Array.from(grid.querySelectorAll(".card:not(.folder) .nm")).map(function(e){ return e.textContent; });
@@ -92,7 +97,7 @@ const BODY = `async function(){
   // enter a folder by clicking its card
   var roundels = Array.from(grid.querySelectorAll(".card.folder")).find(function(c){ return c.querySelector(".nm").textContent === "Roundels"; });
   roundels.onclick();
-  await new Promise(function(r){ setTimeout(r, 250); });
+  await until(function(){ return App.decalFolder === "Roundels" && dlg.body.querySelectorAll(".crumbs button").length >= 2; });
   out.crumbsInside = Array.from(dlg.body.querySelectorAll(".crumbs button")).map(function(b){ return b.textContent; });
   out.insideCards = Array.from(grid.querySelectorAll(".card .nm")).map(function(e){ return e.textContent; });
   out.remembered = App.decalFolder;
@@ -100,7 +105,7 @@ const BODY = `async function(){
   // search from inside a folder must still find things outside it
   var search = dlg.body.querySelector("input[type=search]");
   search.value = "kill"; search.oninput();
-  await new Promise(function(r){ setTimeout(r, 250); });
+  await until(function(){ return Array.from(grid.querySelectorAll(".card:not(.folder) .nm")).some(function(e){ return e.textContent === "kill mark"; }); });
   out.searchHits = Array.from(grid.querySelectorAll(".card:not(.folder) .nm")).map(function(e){ return e.textContent; });
   out.searchShowsPath = Array.from(grid.querySelectorAll(".card .path")).map(function(e){ return e.textContent; });
   dlg.close();
@@ -110,7 +115,7 @@ const BODY = `async function(){
   await DecalLib.add(rec(evil), "");
   App.decalFolder = "";
   var dlg2 = await openDecalLibrary();
-  await new Promise(function(r){ setTimeout(r, 300); });
+  await until(function(){ return dlg2.body.querySelectorAll(".declib .card .nm").length >= 1; });
   var g2 = dlg2.body.querySelector(".declib");
   out.evilRenderedAsText = Array.from(g2.querySelectorAll(".card .nm")).some(function(e){ return e.textContent === evil; });
   out.evilNoImg = g2.querySelectorAll("img").length === 0;
@@ -149,7 +154,7 @@ const BODY = `async function(){
   await DecalLib.add(rec("star v2"), "", { base: starId });
   App.decalFolder = "";
   var dlg3 = await openDecalLibrary();
-  await new Promise(function(r){ setTimeout(r, 400); });
+  await until(function(){ return dlg3.body.querySelectorAll(".declib .card:not(.folder) .nm").length >= 1; });
   var g3 = dlg3.body.querySelector(".declib");
   var cards = Array.from(g3.querySelectorAll(".card:not(.folder)"));
   out.cardNames = cards.map(function(c){ return c.querySelector(".nm").textContent; });
@@ -168,7 +173,7 @@ const BODY = `async function(){
   // ---- 12. the editor opens with NO texture slot loaded, knowing which decal it came from ----
   out.noSlotLoaded = !App.activeSlot;
   editBtn.onclick();
-  await new Promise(function(r){ setTimeout(r, 500); });
+  await until(function(){ var m = document.querySelectorAll("#modalHost .modal"); return m.length === 2 && m[1].querySelector(".foot input[type=text]"); });
   var modals = document.querySelectorAll("#modalHost .modal");
   out.editorStacked = modals.length === 2;
   var ed = modals[modals.length - 1];
@@ -181,7 +186,7 @@ const BODY = `async function(){
 
   // ---- 13. using a decal with nothing loaded leaves it on the cursor ----
   useBtn.onclick();
-  await new Promise(function(r){ setTimeout(r, 500); });
+  await until(function(){ var g = document.getElementById("carryGhost"); return !dlg3.ov.parentNode && g.style.display === "block" && g.querySelector("canvas").width > 0; });
   var ghost = document.getElementById("carryGhost");
   out.libraryClosed = !dlg3.ov.parentNode;
   out.carryingClass = document.body.classList.contains("carrying");
@@ -242,7 +247,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 700), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }

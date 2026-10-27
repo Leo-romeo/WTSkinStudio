@@ -132,16 +132,37 @@ console.log("\n=== 2. the real attach path, polled as fast as Chrome will answer
 // (~1 run in 6 during a concurrent `npm test`, 0 in 12 on an idle one). Kept as a smoke check over
 // the whole path; check 1 above is the one that fails deterministically if the fix is removed.
 {
+  // Two at a time (ROADMAP 0.4): one after another they were eight launches in a row, and the race
+  // this smoke-checks is a busy machine's, so launching together loses nothing it was for.
   let ok = 0, bad = [];
-  for (let i = 1; i <= RUNS; i++) {
+  const one = async i => {
     const run = await evalInPage({ browser, html: PAGE, expr: pageExpr(BODY, 250), timeoutMs: 30000, attachPollMs: 0 });
-    if (!run.ok) { bad.push(`run ${i}: ${String(run.reason).split("\n")[0]}`); continue; }
+    if (!run.ok) { bad.push(`run ${i}: ${String(run.reason).split("\n")[0]}`); return; }
     const r = run.result;
     if (r.real === true && r.marker === "the-real-document" && /\/page\.html$/.test(r.href || "") && r.body === "page") ok++;
     else bad.push(`run ${i}: answered from the wrong document → ${JSON.stringify(r)}`);
-  }
+  };
+  for (let i = 1; i <= RUNS; i += 2) await Promise.all([0, 1].filter(k => i + k <= RUNS).map(k => one(i + k)));
   R.is(ok === RUNS, `${ok}/${RUNS} tight attaches landed in the page's own document` +
     (bad.length ? "\n         " + bad.join("\n         ") : ""));
+}
+
+console.log("\n=== 3. a browser that never attaches is killed and launched once more, then said ===");
+// ROADMAP 0.4: under six lanes about one launch in a few hundred never reached its page. The rare
+// case cannot be forced on a real Chrome, so the "browser" here is Node itself, which refuses
+// Chrome's switches and exits: it never writes a DevTools port, which is the same branch. What has to
+// hold is that the harness tries exactly once more, says both failures, and does not hang.
+{
+  const t0 = Date.now();
+  const lines = [];
+  const was = console.error;
+  console.error = (...a) => { lines.push(a.join(" ")); };
+  let run;
+  try { run = await evalInPage({ browser: process.execPath, html: PAGE, expr: "1", timeoutMs: 10000 }); }
+  finally { console.error = was; }
+  const relaunched = lines.filter(l => /never attached .* launching once more/.test(l)).length;
+  R.is(!run.ok && relaunched === 1 && /a relaunch was tried/.test(run.reason) && !("launch" in run) && Date.now() - t0 < 30000,
+    `a launch that never attaches is relaunched once and both failures are said, in ${((Date.now() - t0) / 1000).toFixed(1)} s → ${relaunched} relaunch, ${JSON.stringify(String(run.reason).split("\n").slice(-1)[0].trim().slice(0, 140))}`);
 }
 
 R.finish();

@@ -29,7 +29,7 @@ const browser = findBrowser(argv.includes("--chrome") ? argv[argv.indexOf("--chr
 if (!browser) { console.log("SKIP: no Chrome or Edge found. Pass --chrome <path> or set CHROME."); process.exit(0); }
 const R = makeReport();
 
-const BODY = `function(){
+const BODY = `async function(){
   var out = {};
   // The real materials, in the real shape buildDescBind produces: { c, n, cls, index, all }.
   var MATS = [
@@ -88,9 +88,12 @@ const BODY = `function(){
   // never see them and they fell through to the flat "no texture" fallback. The class is what says
   // they are glass, and it is now recorded where the desc entry is already in hand.
   out.glass = {
-    recorded: [...App.matGlass.keys()].sort().join(","),
+    // a glass shader WITH a t0 is recorded too since ROADMAP 1.26, marked "tex" — it keeps its slot and is drawn
+    // through its sheet's alpha — so the no-sheet entries are the ones without the mark
+    recorded: [...App.matGlass].filter(function(e){ return !e[1].tex; }).map(function(e){ return e[0]; }).sort().join(","),
+    withSheet: [...App.matGlass].filter(function(e){ return e[1].tex; }).map(function(e){ return e[0]; }).sort().join(","),
     coat: (App.matGlass.get("canopy_gold") || {}).coat + "|" + (App.matGlass.get("canopy_black") || {}).coat,
-    notPaintable: !App.matGlass.has("ef_2000_aesa_aircraft_normal_detail_lo") && !App.matGlass.has("glass_with_albedo"),
+    notPaintable: !App.matGlass.has("ef_2000_aesa_aircraft_normal_detail_lo"),
   };
   var mkMat = function(n){ var m = makeMaterial(n, ""); return { t: !!m.transparent, o: +m.opacity.toFixed(2),
     c: "#" + m.color.getHexString(), phys: !!m.isMeshPhysicalMaterial, dw: !!m.depthWrite }; };
@@ -163,6 +166,15 @@ const BODY = `function(){
   compositeSlot(A); Composite.sheet(A, "smooth", null);
   out.paste.smoothMoved = !!(A.chanC && A.chanC.smooth) &&
     ctx2d(A.chanC.smooth).getImageData(PN / 2, PN / 2, 1, 1).data[0] !== 0x20;
+  // a .tga from disk (found in the review of 2.3a: it was handed to parseTGA as a Uint8Array, which
+  // a DataView refuses, so every .tga paste failed): an 18-byte header and 2 × 2 BGRA texels
+  var tga = new Uint8Array(18 + 16); tga[2] = 2; tga[12] = 2; tga[14] = 2; tga[16] = 32; tga[17] = 8;
+  for (var ti = 0; ti < 4; ti++) { tga[18 + ti * 4] = 0x10; tga[19 + ti * 4] = 0x80; tga[20 + ti * 4] = 0xf0; tga[21 + ti * 4] = 255; }
+  var nTga = A.layers.length, actWas = App.activeSlot; App.activeSlot = A;
+  await PasteTex.fromFile(new File([tga], "paste.tga"));
+  var LT = A.layers[A.layers.length - 1];
+  out.paste.tga = { added: A.layers.length - nTga, px: LT && LT.canvas ? [].slice.call(ctx2d(LT.canvas).getImageData(0, 0, 1, 1).data) : null };
+  App.activeSlot = actWas;
   App.slots.delete("pa_c"); App.slots.delete("pb_c");
   App.activeSlot = null; App.activeLayer = null;
   App.undoStack.length = 0; App.redoStack.length = 0;
@@ -173,7 +185,7 @@ const BODY = `function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -223,6 +235,8 @@ R.is(PT.steps === 1 && PT.afterUndo === 0, `one undo step, and it takes the laye
 R.is(PT.nChan === "smooth" && PT.nColourLayers === 1,
   `a smoothness source lands on the SMOOTHNESS channel (${PT.nChan}) and adds no colour layer (${PT.nColourLayers}, the one pasted above) — dropping a packed _n onto the albedo is the failure this feature invites, and it cannot happen because the sources are channels`);
 R.is(PT.smoothMoved, "and it really reaches the smoothness sheet, rather than sitting in the stack doing nothing");
+R.is(PT.tga && PT.tga.added === 1 && PT.tga.px && PT.tga.px[0] === 0xf0 && PT.tga.px[1] === 0x80 && PT.tga.px[2] === 0x10,
+  `a .tga from disk becomes a layer of its own colour (${JSON.stringify(PT.tga)}) — it used to throw before it was read`);
 
 console.log("\n=== glazing renders as glass, not as white plastic (4.15) ===");
 const GL = o.glass;
@@ -231,7 +245,8 @@ console.log(`   gold ${JSON.stringify(GL.gold)}`);
 console.log(`   rainbow ${JSON.stringify(GL.rainbow)}   airframe ${JSON.stringify(GL.airframe)}`);
 R.is(GL.recorded === "canopy_black,canopy_gold" && GL.coat === "golden_coating|black_coating",
   `the glass materials are recorded WITH their coating lookup (${GL.recorded}; ${GL.coat}) — the t3 is what stands in for an albedo on this shader, and its name is what says gold from rainbow from smoke`);
-R.is(GL.notPaintable, "and only those two: the ordinary aircraft shader and a glass material that really has a t0 are not in it, or a loose test would have eaten the fleet");
+R.is(GL.notPaintable && GL.withSheet === "glass_with_albedo",
+  `and only those two as sheetless glass: the ordinary aircraft shader is not in it at all, or a loose test would have eaten the fleet, and the glass material that really has a t0 is in it only as glass WITH a sheet (${GL.withSheet}) — drawn through its alpha, ROADMAP 1.26`);
 R.is(GL.gold.t && GL.gold.phys && !GL.gold.dw && GL.gold.o < .7,
   `a gold-coated canopy comes out transparent (opacity ${GL.gold.o}, depthWrite ${GL.gold.dw}) — it used to be an opaque MeshStandardMaterial with no map, which is the reported "white and not transparent"`);
 R.is(GL.gold.c !== GL.black.c && GL.gold.c !== GL.rainbow.c,

@@ -28,7 +28,7 @@ const argv = process.argv.slice(2);
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -327,7 +327,7 @@ const BODY = `async function(){
   return o;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAIL: " + r.reason); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("FAIL: the test body threw\n" + o.__threw); process.exit(1); }

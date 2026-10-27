@@ -153,6 +153,60 @@ const ListedDir = {
     }
     await openReadOnlyGameFolder(ListedDir.handle(at.node), at.below ? root.name + "/" + at.below : "");
   },
+  // ---- The folder an install's links point at (GameScan.merge, 2026-10-24) ----
+  // Every way in passes the install through here before it is scanned. A linked folder remembered
+  // from the last visit is laid over it when the browser still grants it; an install with a folder
+  // every install has (GameScan.LINKED) that will not open is asked about, once per open, and what
+  // is picked must fill that gap or it is refused with what it lacks. "Open without it" opens the
+  // install as it is and says what is missing, so nothing is silently half-scanned.
+  linkedText: gaps => gaps.map(p => p.replace(/\//g, "\\")).join(", "),
+  async withLinks(dir){
+    const gaps = await GameScan.linkGaps(dir);
+    const kept = await idbGet("gameDirLinked");
+    if (kept && kept.queryPermission) {
+      let perm = "denied";
+      try { perm = await kept.queryPermission({ mode: "read" }); }
+      catch (e) { reportFailure("reopening the linked folder", e, "linked"); }
+      if (perm === "granted") return GameScan.merge(dir, kept);
+    }
+    if (!gaps.length) return dir;
+    const c = await choiceDialog("“" + ListedDir.linkedText(gaps) + "” in this War Thunder folder will not open. That is what a folder " +
+      "moved to another drive and left behind as a link (a junction) looks like — the game follows the link, the browser never does." +
+      "\n\nPick the folder the links point at (the one holding “content”) and it is read as part of the install.",
+      [{ label: kept ? "Reopen “" + kept.name + "”" : "Pick the linked folder…", value: "pick", primary: true },
+       { label: "Open without it", value: "skip" }]);
+    if (c === "pick") {
+      const linked = await ListedDir.pickLinked(kept);
+      if (linked) {
+        const merged = GameScan.merge(dir, linked), still = await GameScan.linkGaps(merged);
+        if (!still.length) { idbSet("gameDirLinked", linked); return merged; }
+        setStatus("“" + linked.name + "” has no " + ListedDir.linkedText(still) + " either — pick the folder the links point at, the one holding “content”", "err");
+      }
+    }
+    setStatus("Opened without " + ListedDir.linkedText(gaps) + ": models and textures in it are not listed. Advanced ▸ Add linked folder… adds it", "err");
+    return dir;
+  },
+  // The remembered one again if the browser re-grants it in this click, else the picker. Null when
+  // the user backs out; any other failure is said.
+  async pickLinked(kept){
+    try {
+      if (kept && kept.requestPermission && await kept.requestPermission({ mode: "read" }) === "granted") return kept;
+      if (!window.showDirectoryPicker) return null;
+      return await showDirectoryPicker({ mode: "read", id: "wtlinked" });
+    } catch (e) {
+      if (e && e.name !== "AbortError") reportFailure("picking the linked folder", e, "linked");
+      return null;
+    }
+  },
+};
+// Advanced ▸ Add linked folder… — for links the automatic check cannot see (only content.hq moved,
+// say): picked here, kept, and the install read again with it.
+$("btnLinkedFolder").onclick = async () => {
+  if (!App.gameDir) { setStatus("Open your War Thunder folder first", "err"); return; }
+  const linked = await ListedDir.pickLinked(null);
+  if (!linked) return;
+  idbSet("gameDirLinked", linked);
+  await indexGameFolder(GameScan.merge(App.gameDir._primary || App.gameDir, linked), true);
 };
 $("gameDirPick").onchange = e => { const files = [...e.target.files]; e.target.value = ""; ListedDir.open(files); };
 // Same entry point as the picker, minus the picker — for a dropped folder and a chosen one alike.
@@ -161,7 +215,7 @@ async function openReadOnlyGameFolder(dir, found){
   try {
     $("welcome").style.display = "none";
     if (found) setStatus("Found War Thunder at " + found + " — opening it", "ok");
-    const n = await indexGameFolder(dir, false, found || "");
+    const n = await indexGameFolder(await ListedDir.withLinks(dir), false, found || "");
     if (!n && !GameDB.models.length) {
       $("welcome").style.display = "";      // nothing was loaded — leave them where they started
       setStatus("No game data found in “" + dir.name + "” — " + (dir._via === "list" ? "pick" : "drop") +
@@ -196,6 +250,9 @@ window.addEventListener("dragover", e => { if (dragCarriesFiles(e)) e.preventDef
 window.addEventListener("drop", async e => {
   if (!dragCarriesFiles(e)) return;
   e.preventDefault(); dragDepth = 0; $("drop").style.display = "none";
+  // Onto the reference window it is a reference, which that window's own handler has taken
+  // (ui/panels/refwin.js) — the overlay above still has to come down, so this is where it stops.
+  if (e.target && e.target.closest && e.target.closest("#winRef")) return;
   // dataTransfer is invalidated by the first await — collect everything synchronously first
   const entries = [], plainFiles = [];
   const uri = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").trim().split(/[\r\n]+/)[0];
@@ -262,9 +319,16 @@ window.addEventListener("drop", async e => {
     return;
   }
   if (files.length) { addFiles(files); return; }
-  // An image dragged straight out of a web page arrives as a URL, not a file. That used to do
-  // nothing at all and looked like drag & drop being broken.
-  if (/^https?:\/\//i.test(uri) || /^data:image\//i.test(uri)) { addImageFromURL(uri); return; }
+  // An image dragged straight out of a web page arrives as a URL, not a file. A data: URI carries its
+  // own bytes and is decoded here. A web link is NOT fetched: that was a request to any host the page
+  // named, which CLAUDE.md §0.1 forbids (ROADMAP 1.21 (8), t36) — so the status line says so, and how
+  // to bring the picture in instead. Saying nothing used to look like drag & drop being broken.
+  if (/^data:image\//i.test(uri)) { addImageFromDataURI(uri); return; }
+  if (/^https?:\/\//i.test(uri)) {
+    setStatus("That was a link to an image on the web, and it was not fetched — this app never reaches the network. " +
+      "Save the image to disk and drop the file, or right-click it ▸ Copy image and press Ctrl+V here", "err");
+    return;
+  }
   if (walkErr) {
     setStatus("Could not read that dropped folder (" + (walkErr.message || walkErr) + ")." +
       (location.protocol === "file:"
@@ -279,16 +343,17 @@ async function useDroppedImage(bmp, name){
   // whether the result lands as a layer or waits on the cursor for a slot to exist.
   addDecalFromImage(bmp, name);
 }
-async function addImageFromURL(url){
-  setStatus("Fetching the dropped image…");
+// The bytes are in the URI itself, so nothing is requested — not even a fetch() of a data: URL.
+async function addImageFromDataURI(uri){
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const blob = await r.blob();
-    if (!/^image\//.test(blob.type)) throw new Error("that link isn't an image");
-    await useDroppedImage(await createImageBitmap(blob), (url.split("?")[0].split("/").pop() || "image") + "");
+    const m = /^data:(image\/[\w.+-]+)?((?:;[^,;]*)*?)(;base64)?,(.*)$/is.exec(uri);
+    if (!m) throw new Error("that is not an image");
+    const raw = m[3] ? atob(m[4]) : decodeURIComponent(m[4]);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 0xff;
+    await useDroppedImage(await createImageBitmap(new Blob([bytes], { type: m[1] || "image/png" })), "image");
   } catch (err) {
-    setStatus("Could not read that image from the web (" + err.message + ") — save it to disk and drop the file, " +
+    setStatus("Could not read the dropped image (" + err.message + ") — save it to disk and drop the file, " +
       "or right-click ▸ Copy image and press Ctrl+V here", "err");
   }
 }

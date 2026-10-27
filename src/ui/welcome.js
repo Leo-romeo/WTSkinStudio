@@ -48,7 +48,7 @@ async function openGameFolder(fromWelcome){
     }
     const found = at.below ? String(picked.name).replace(/[\\/]+$/, "") + "/" + at.below : "";    // a drive root may be named "D:\"
     if (found) setStatus("Found War Thunder at " + found + " — opening it", "ok");
-    const n = await indexGameFolder(at.dir, false, found);
+    const n = await indexGameFolder(await ListedDir.withLinks(at.dir), false, found);
     if (!n && !GameDB.models.length) { setStatus("No game data found — pick the War Thunder install folder itself, not a subfolder", "err"); return; }
     idbSet("gameDir", at.dir);                   // the INSTALL is remembered, not the folder above it, so next visit skips the picker
   } catch (e) {
@@ -82,7 +82,7 @@ async function tryRestoreGameFolder(){
       try {
         if (await dir.requestPermission({ mode: "read" }) !== "granted") { openGameFolder(false); return; }
         $("welcome").style.display = "none";
-        await indexGameFolder(dir);
+        await indexGameFolder(await ListedDir.withLinks(dir));
       } catch { openGameFolder(false); }
     };
     const wg = $("btnWelcomeGame");
@@ -94,11 +94,12 @@ async function tryRestoreGameFolder(){
   // the game then goes to the list rather than asking for this folder a second time.
   if (Recovery.offered.length) Recovery.holdCard();
   else $("welcome").style.display = "none";
-  await indexGameFolder(dir);
+  await indexGameFolder(await ListedDir.withLinks(dir));
   return true;
 }
 $("btnForgetFolder").onclick = async () => {
   await idbDel("gameDir");
+  await idbDel("gameDirLinked");
   await idbDel("userSkinsDir");
   App.userSkinsHandle = null; App.dirHandle = null;
   await idbDel(GAME_INDEX_KEY);
@@ -107,7 +108,7 @@ $("btnForgetFolder").onclick = async () => {
 $("btnRescan").onclick = async () => {
   if (!App.gameDir) { setStatus("Open your War Thunder folder first", "err"); return; }
   await idbDel(GAME_INDEX_KEY);
-  await indexGameFolder(App.gameDir, true);
+  await indexGameFolder(App.gameDir, true);       // a linked folder stays laid over it (GameScan.merge)
 };
 // Lightweight promise-based modal for replace/cancel style choices.
 function choiceDialog(msg, choices){

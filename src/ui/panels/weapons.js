@@ -430,7 +430,7 @@ async function loadWeaponAlone(modelName){
     await progTick(true);
     await loadVehicleTextures(modelName);
     progEnd();
-    setStatus(modelName + " loaded on its own — paint it, then Export as… writes a skin whose " +
+    setStatus(modelName + " loaded on its own — paint it, then Export writes a skin whose " +
       "replace_tex entries name this weapon's textures" + ModelLoss.note(geo.dropped), geo.dropped.length ? "warn" : "ok");
   } catch (e) {
     progEnd();

@@ -965,7 +965,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 500), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }

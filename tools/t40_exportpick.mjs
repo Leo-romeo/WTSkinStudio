@@ -119,7 +119,7 @@ const BODY = `async function(){
 
     // ---- 6. exporting with nothing ticked must say WHY, not "paint something" ----
     for (var i = 0; i < slots.length; i++) { opt(slots[i].id, "c").off = true; opt(slots[i].id, "n").off = true; }
-    await doExport(false);
+    out.emptyOk = await doExport(false);
     out.emptyStatus = document.getElementById("status").textContent;
 
     // ---- 7. the per-texture choices survive a save/load round trip ----
@@ -177,7 +177,36 @@ const BODY = `async function(){
       out.zip.named = named.sort();
       out.zip.textures = paths.filter(function(p){ return /\.(dds|tga)$/.test(p); })
         .map(function(p){ return p.split("/").pop(); }).sort();
+      // ROADMAP 3.42 (4): mipmaps are off for a fresh profile, so a DDS written with the shipped
+      // settings carries one level — dwMipMapCount (offset 28) 0 and no DDSD_MIPMAPCOUNT flag.
+      out.zip.mipsBox = document.getElementById("optMips").checked;
+      out.zip.mipCounts = [];
+      for (var di = 0; di < paths.length; di++) if (/\.dds$/.test(paths[di])) {
+        var dv = new DataView(await z.file(paths[di]).async("arraybuffer"));
+        out.zip.mipCounts.push(dv.getUint32(28, true) + ((dv.getUint32(8, true) & 0x20000) ? "f" : ""));
+      }
     }
+
+    // ---- 8a. Zip for WT Live (ROADMAP 4.50 (13)): the same skin, packaged for an upload ----
+    // End to end on the one vehicle, then the packaging itself on a two-vehicle file list, where the
+    // UserSkins zip and the upload part ways: one archive per .blk, each holding only what it names.
+    var lives = [], realCOU3 = URL.createObjectURL, realClick3 = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = function(b){ lives.push({ blob: b }); return "blob:stub"; };
+    HTMLAnchorElement.prototype.click = function(){ if (lives.length) lives[lives.length - 1].name = this.download; };
+    try { out.liveOk = await doExport(false, true); } finally { URL.createObjectURL = realCOU3; HTMLAnchorElement.prototype.click = realClick3; }
+    out.live = { said: document.getElementById("status").textContent, zips: [] };
+    for (var li = 0; li < lives.length; li++) {
+      var lz = await JSZip.loadAsync(lives[li].blob), lp = [];
+      lz.forEach(function(rel, f){ if (!f.dir) lp.push(rel); });
+      out.live.zips.push({ name: lives[li].name, paths: lp.sort() });
+    }
+    var enc = function(t){ return new TextEncoder().encode(t); };
+    var packs = ExportRun.livePacks({ skin: "Zip probe-2_é", files: [
+      { name: "hull_c.dds", data: new Uint8Array(4) }, { name: "gun_c.dds", data: new Uint8Array(4) },
+      { name: "f-4e.blk", data: enc('replace_tex{ from:t="f_4e_c*" to:t="hull_c.dds" }') },
+      { name: "f_4ej.blk", data: enc('replace_tex{ from:t="f_4e_c*" to:t="hull_c.dds" } replace_tex{ from:t="g*" to:t="gun_c.dds" }') },
+      { name: "f_4e.blk", data: enc('replace_tex{ from:t="f_4e_c*" to:t="hull_c.dds" }') }] });   // strips to f-4e's letters
+    out.livePacks = packs.map(function(P){ return { name: P.name, blk: P.blk.name, tex: P.tex.map(function(f){ return f.name; }).sort() }; });
 
     // ---- 8b. "To War Thunder", with and without a folder it may write to (2026-10-10) ----
     // Same skin as 8, now down the folder path. The dialog, the picker, IndexedDB and the download
@@ -210,13 +239,19 @@ const BODY = `async function(){
               return { write: async function(d){ wlog.push("write " + at(n) + " " + (d.byteLength || 0)); }, close: async function(){} }; } };
           }
           return files[n];
+        },
+        // Every entry, as a real handle iterates them, and a removal logged by path like every other call.
+        values: async function*(){ for (var k in files) yield files[k]; for (var d in dirs) yield dirs[d]; },
+        removeEntry: async function(n){
+          if (!files[n] && !dirs[n]) throw new DOMException("no " + n, "NotFoundError");
+          wlog.push("rm " + at(n)); delete files[n]; delete dirs[n];
         } };
     };
     var exp = async function(){
       asked = []; offered = []; picks = []; zipped = null; wlog = []; App.dirHandle = null; App.userSkinsHandle = null; App.userSkinsDir = null;
       document.getElementById("status").textContent = "";
-      await doExport(true);
-      return { asked: asked.slice(), offered: offered.slice(), picks: picks.slice(), zip: !!zipped,
+      var ok = await doExport(true);
+      return { ok: ok, asked: asked.slice(), offered: offered.slice(), picks: picks.slice(), zip: !!zipped,
                said: document.getElementById("status").textContent, log: wlog.slice() };
     };
     window.choiceDialog = async function(msg, choices){
@@ -288,11 +323,11 @@ const BODY = `async function(){
       // (3) no folder picker in this browser at all
       window.showDirectoryPicker = undefined; stored = {};
       answer = "zip"; out.noPicker = await exp();
-      // (3b) …which is where every game folder was opened another way: there is no picker to blame
-      // Program Files for, so it is the browser's answer that is given, and its status on cancel
-      App.gameDir = ListedDir.handle(ListedDir.node("War Thunder"));
-      answer = "zip"; out.noPickerLegacy = await exp();
-      answer = "cancel"; out.noPickerLegacyNo = await exp();
+      // (3b) …which is where every game folder was opened another way. No question at all (4.57 (1)):
+      // the zip is the only answer this browser has, so a dialog asking for it is a click for nothing,
+      // and declining it ("cancel") is not asked either. The folder named is the one the user opened.
+      App.gameDir = ListedDir.handle(ListedDir.node("WT Steam"));
+      answer = "cancel"; out.noPickerLegacy = await exp();
       App.gameDir = null;
       window.showDirectoryPicker = picker;
       // (4) a real game folder: UserSkins is found (made, if it is not there) and written, nothing else
@@ -300,9 +335,19 @@ const BODY = `async function(){
       App.gameDir = game; stored = {};
       answer = "replace"; out.real = await exp();
       out.real.remembered = !!stored.userSkinsDir && stored.userSkinsDir === await game.getDirectoryHandle("UserSkins");
-      // (5) a later visit: no game folder open, the UserSkins folder remembered — no picker, same place
+      // (5) a later visit: no game folder open, the UserSkins folder remembered — no picker, same place.
+      // The skin folder holds what an EARLIER export left (ROADMAP 1.21 (7)): a .blk and a texture this
+      // export does not write, a file and a folder of the user's own, and a written name in other case.
+      var sk = await (await game.getDirectoryHandle("UserSkins")).getDirectoryHandle("zip_probe");
+      var firstWrite = (out.real.log.filter(function(l){ return /^write /.test(l); })[0] || "").split(" ")[1].split("/").pop();
+      out.planted = ["old_unit.blk", "old_hull_c.dds", "readme.txt", firstWrite.toUpperCase()];
+      for (var pi = 0; pi < out.planted.length; pi++) await sk.getFileHandle(out.planted[pi], { create: true });
+      await sk.getDirectoryHandle("extra", { create: true });
       App.gameDir = null;
       out.later = await exp();
+      // (5b) the same folder saved as new instead: nothing removed anywhere
+      await sk.getFileHandle("old_unit.blk", { create: true });
+      answer = "rename"; out.laterNew = await exp(); answer = "replace";
     } finally {
       window.choiceDialog = keep8.cd; window.showDirectoryPicker = keep8.pick; window.idbGet = keep8.get; window.idbSet = keep8.set;
       App.gameDir = keep8.game; App.userSkinsHandle = keep8.ush; App.userSkinsDir = keep8.usd; App.dirHandle = keep8.dh;
@@ -390,7 +435,7 @@ const BODY = `async function(){
     alphaSel.value = alphaWas; modeSel.value = modeWas;
 
     // The _n is four channels of three sheets, and CLAUDE.md §1 is the only reason the order is what
-    // it is. R = inverted roughness (from smooth), G = normal X, B = metallicity, A = normal Y.
+    // it is. R = inverted roughness (from smooth), G = normal Y, B = metallicity, A = normal X (1.24).
     invBox.checked = true;                                    // the game's own form: pass through
     var nPass = pick("n");
     invBox.checked = false;                                   // "I authored plain smoothness"
@@ -529,12 +574,29 @@ eq(Z.textures, ["gun_c.dds", "hull_c.dds", "hull_n.dds", "turret_c.dds", "turret
   "one file per TICKED texture and no others — gun_n was unticked, and unticking is what stops a 4K sheet being encoded at all");
 R.is(Z.paths.filter(p => /\.blk$/.test(p)).length === 1,
   "one .blk, for the one selected vehicle — the count is per unit, which is what an F-4E skin doing nothing on an F-4EJ was");
+R.is(Z.mipsBox === false && Z.mipCounts.length > 0 && Z.mipCounts.every(c => c === "0"),
+  `mipmaps are off for a fresh profile, so every DDS is written with one level (${J(Z.mipCounts)}) — ROADMAP 3.42 (4): mipmapped angled surfaces blur with the game's older-video-card support on`);
+R.is(/Extract here/.test(Z.said) && /zip_probe/.test(Z.said),
+  `and the zip's status line says how to install it: Extract here, into UserSkins, so its zip_probe/ folder lands in place (${Z.said})`);
 eq(Z.named, Z.textures,
   "and the .blk names exactly the textures the archive contains — CLAUDE.md §1's archive/.blk symmetry, checked against the real bytes rather than against the plan the validator saw");
 
+console.log("\n=== Zip for WT Live (ROADMAP 4.50 (13)) ===");
+const LV = r.live || { zips: [] };
+console.log(`   ${J(LV.zips)} · ${J(r.livePacks)}`);
+R.is(r.liveOk === true && LV.zips.length === 1 && LV.zips[0].name === "zipprobe.zip" && LV.zips[0].paths.every(p => p.startsWith("zipprobe/")),
+  `one archive for the one vehicle, the archive and its folder named in letters and digits only — "zip probe" is zipprobe, where the UserSkins zip keeps zip_probe (${LV.zips[0] && LV.zips[0].name})`);
+eq(LV.zips[0] ? LV.zips[0].paths.map(p => p.split("/").pop()).filter(n => !/\.blk$/.test(n)).sort() : [], Z.textures,
+  "holding the same ticked textures as the UserSkins zip");
+R.is(LV.zips[0] && LV.zips[0].paths.filter(p => /\.blk$/.test(p)).length === 1 && /WT Live/.test(LV.said) && /16:9/.test(LV.said),
+  `with exactly one .blk, and the status line says what the upload still needs (${LV.said})`);
+eq(r.livePacks, [{ name: "Zipprobe2f4e", blk: "f-4e.blk", tex: ["hull_c.dds"] }, { name: "Zipprobe2f4ej", blk: "f_4ej.blk", tex: ["gun_c.dds", "hull_c.dds"] },
+                 { name: "Zipprobe2f4e2", blk: "f_4e.blk", tex: ["hull_c.dds"] }],
+  "on a model several vehicles share it is one archive PER .blk, each with only the textures its own .blk names, the unit's .blk name kept as the game needs it, the archive's name stripped to letters and digits — and two ids that strip alike kept apart by a number");
+
 console.log("\n=== \"To War Thunder\" never dead-ends (2026-10-10) ===");
 const show = (k, o) => console.log(`   ${k.padEnd(10)} picks ${o.picks.length} · zip ${o.zip} · asked ${J(o.asked.map(a => a.split("\n")[0].slice(0, 60)))} · "${o.said}"`);
-for (const k of ["legacyZip", "legacyNo", "legacyChoose", "legacyChooseNo", "rootPick", "abovePick", "wrongPick", "wrongNo", "lateRetry", "cancelZip", "cancelNo", "noPicker", "noPickerLegacy", "noPickerLegacyNo", "real", "later"])
+for (const k of ["legacyZip", "legacyNo", "legacyChoose", "legacyChooseNo", "rootPick", "abovePick", "wrongPick", "wrongNo", "lateRetry", "cancelZip", "cancelNo", "noPicker", "noPickerLegacy", "real", "later"])
   show(k, r[k]);
 const writes = o => o.log.filter(l => /^write /.test(l)).map(l => l.split(" ")[1]).sort();
 const want = Z.paths.map(p => "UserSkins/" + p).sort();
@@ -585,13 +647,15 @@ R.is(/No folder was chosen/.test(r.cancelZip.asked[0] || "") && /contains system
   "a cancelled (or refused) picker offers the zip too, saying what a refusal looks like, and the zip is made");
 R.is(!r.cancelNo.zip && r.cancelNo.said === "Export cancelled — no folder chosen",
   `…and declining that is still a plain cancellation (${r.cancelNo.said})`);
-R.is(r.noPicker.picks.length === 0 && /needs Chrome or Edge/.test(r.noPicker.asked[0] || "") && r.noPicker.zip,
-  "a browser with no folder picker offers the zip rather than only saying it cannot");
-R.is(/needs Chrome or Edge/.test(r.noPickerLegacy.asked[0] || "") && !/Program Files|opened another way/.test(r.noPickerLegacy.asked[0] || "")
-  && J(r.noPickerLegacy.offered[0] || []) === J(["Download .zip", "Cancel"]) && r.noPickerLegacy.zip,
-  "in that browser every game folder is opened another way — and the dialog says it is the browser, not Program Files, with no folder to choose");
-R.is(r.noPickerLegacyNo.said === "Folder access needs Chrome/Edge — use Download .zip instead",
-  `…and declining it says the same as before (${r.noPickerLegacyNo.said})`);
+// ROADMAP 4.57 (1): a browser without the folder API (Firefox) is known before the click, so
+// Export there is the zip at once — no failed picker, no dialog — and the status line says where
+// it goes and how: the folder by name, then UserSkins, and *Extract here*.
+R.is(r.noPicker.picks.length === 0 && r.noPicker.asked.length === 0 && r.noPicker.zip
+  && /War Thunder\/UserSkins/.test(r.noPicker.said) && /Extract here/.test(r.noPicker.said),
+  `a browser with no folder picker downloads the zip at once, with no dialog, and says where to extract it (${r.noPicker.said})`);
+R.is(r.noPickerLegacy.picks.length === 0 && r.noPickerLegacy.asked.length === 0 && r.noPickerLegacy.zip
+  && /WT Steam\/UserSkins/.test(r.noPickerLegacy.said),
+  `…naming the game folder the user opened, by its name (${r.noPickerLegacy.said})`);
 R.is(r.real.picks.length === 0 && r.real.asked.length === 0 && J(writes(r.real)) === J(want),
   `a real game folder: UserSkins is found by itself and the skin written into it — exactly the files the zip holds (${writes(r.real).length})`);
 const stray = strays(r.real);
@@ -599,8 +663,25 @@ R.is(r.real.log.length > 0 && !stray.length,
   `CLAUDE.md §0.4: the only things created or written are UserSkins/ and UserSkins/<name>/ — read off every call the export made (${stray.length ? "ALSO: " + J(stray) : J(r.real.log.filter(l => /^mkdir/.test(l)))})`);
 R.is(r.real.remembered && /^Exported to UserSkins\/zip_probe/.test(r.real.said),
   `…and the UserSkins folder is remembered for next time (${r.real.said.slice(0, 40)}…)`);
+// ROADMAP 3.43: doExport answers true exactly when the skin was written or the zip handed over —
+// the Export window closes on that answer, and stays open with its message on every other way out.
+{ const runs = ["legacyZip", "legacyNo", "legacyChoose", "legacyChooseNo", "rootPick", "abovePick", "wrongPick", "wrongNo",
+    "lateRetry", "cancelZip", "cancelNo", "noPicker", "noPickerLegacy", "real", "later", "laterNew"].filter(k => r[k]);
+  const wrong = runs.filter(k => (r[k].ok === true) !== (r[k].zip || /^Exported to/.test(r[k].said)));
+  R.is(!wrong.length && r.emptyOk !== true && runs.some(k => r[k].ok === true) && runs.some(k => r[k].ok !== true),
+    `doExport answers true when the skin was written or zipped and on no other way out — refused, cancelled, nothing ticked (${runs.length} runs; wrong: ${J(wrong.map(k => k + "=" + r[k].ok))}; nothing ticked: ${r.emptyOk})`); }
 R.is(r.later.picks.length === 0 && J(writes(r.later)) === J(want) && r.later.asked.length === 1 && /already exists/.test(r.later.asked[0]),
   "a later visit with no game folder open writes to the remembered UserSkins with no picker — and asks before replacing the skin already there");
+// ROADMAP 1.21 (7): Replace replaces. Read off the log of every call the export made, so it proves
+// both halves: what is removed is only inside UserSkins/<name>/, and nothing this export wrote is.
+const rms = o => o.log.filter(l => /^rm /.test(l)).map(l => l.slice(3)).sort();
+R.is(J(rms(r.later)) === J(["UserSkins/zip_probe/old_hull_c.dds", "UserSkins/zip_probe/old_unit.blk"]),
+  `Replace removes the earlier export's .blk and textures this export does not write — and nothing else: not the user's own file or folder, not a written name in other case (${J(rms(r.later))}; planted ${J(r.planted)})`);
+R.is(!rms(r.later).some(p => writes(r.later).includes(p)) && !r.later.log.some(l => /^rm /.test(l) && !/^rm UserSkins\/zip_probe\/[^/ ]+$/.test(l)),
+  "…every removal is a file inside UserSkins/<name>/, and none is a file this export wrote (CLAUDE.md §0.4)");
+R.is(/removed 2 file/.test(r.later.said), `…and the status line says what it removed (${r.later.said.slice(r.later.said.indexOf("removed") - 3, r.later.said.indexOf("removed") + 70)})`);
+R.is(!rms(r.laterNew).length && !rms(r.real).length && !rms(r.rootPick).length,
+  `Save as new, and a skin folder that did not exist, remove nothing (${J(rms(r.laterNew).concat(rms(r.real)))})`);
 
 console.log("\n=== what a sheet nothing on the model uses is called (4.13/4.14) ===");
 const RO = r.role;
@@ -629,8 +710,8 @@ R.is(A.groundAuto.rgb.join() === "200,60,20" && A.airAuto.rgb.join() === "200,60
 
 const S = r.surf;
 console.log(`   _n pass-through ${J(S.pass)}, converted ${J(S.conv)}   (smooth 100, metal 210, normal 30/180)`);
-R.is(J(S.pass) === J([100, 30, 210, 180]),
-  `the _n packs R=smoothness, G=normal X, B=metallicity, A=normal Y (${J(S.pass)}) — CLAUDE.md §1's order, and every channel here holds a different number so a swap is a wrong value rather than a plausible one`);
+R.is(J(S.pass) === J([100, 180, 210, 30]),
+  `the _n packs R=smoothness, G=normal Y, B=metallicity, A=normal X (${J(S.pass)}) — CLAUDE.md §1's order, and every channel here holds a different number so a swap is a wrong value rather than a plausible one`);
 R.is(S.conv[0] === 158,
   `unticking "already inverted roughness" runs the post-2022 curve, 1-(1-0.7s)³ (100 → ${S.conv[0]}, the formula gives 157.6)`);
 R.is(J(S.conv.slice(1)) === J(S.pass.slice(1)),

@@ -211,6 +211,126 @@ const Procedural = {
     return { space: p.space === "model" ? "model" : "uv", repeat: Math.round(num(p.repeat, 8, 1, 256)), size: num(p.size, 1, .001, 1000),
              angle: num(p.angle, 0, -360, 360), x: num(p.x, 0, -1, 1), y: num(p.y, 0, -1, 1), sharp: num(p.sharp, 4, 1, 32) };
   },
+  // ---- lattices (ROADMAP 4.55, the lattice as a fill first) ----
+  // A honeycomb and its kin as a TILE for the pattern fill, so it repeats on the sheet or wraps round
+  // the model exactly as an image tile does, and its cells line up across the whole of it. The record
+  // is what the tile is drawn from (`GradFill.latticeTile`): the cell shape, the fill and the border,
+  // each with its colour and whether it is drawn, and the border's width as a fraction of the cell.
+  LATTICE: ["hex", "square", "diamond", "triangle", "scale"],
+  latticeMake(){ return { kind: "hex", fill: "#262a30", border: "#d8dde4", width: .08, fillOn: true, borderOn: true }; },
+  latticeClone(l){
+    l = l || {};
+    const hex = (v, d) => /^#[0-9a-f]{6}$/i.test(String(v)) ? String(v).toLowerCase() : d, w = +l.width;
+    return { kind: Procedural.LATTICE.includes(l.kind) ? l.kind : "hex", fill: hex(l.fill, "#262a30"), border: hex(l.border, "#d8dde4"),
+             width: Math.max(0, Math.min(.5, Number.isFinite(w) ? w : .08)), fillOn: l.fillOn !== false, borderOn: l.borderOn !== false };
+  },
+  // One period of a lattice, in its cell units: the tile's size (w × h — the aspect it keeps) and its
+  // cells, as polygons [x0, y0, x1, y1, …] or, for scales, circles [cx, cy, r] in the order they
+  // overlap. Every cell that reaches into the period is listed, its neighbours' copies included, so a
+  // tile drawn from them meets itself at every edge. A unit is a hexagon's or a triangle's side, a
+  // square's side, a diamond's diagonal, a scale's diameter.
+  latticeCells(kind){
+    const out = { w: 1, h: 1, cells: [], circles: null }, S3 = Math.sqrt(3);
+    const at = (pts, dx, dy) => pts.map((v, i) => v + (i & 1 ? dy : dx));
+    if (kind === "hex") {                                   // pointy-top, side 1: a period of √3 × 3, two cells
+      out.w = S3; out.h = 3;
+      const hx = [];
+      for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; hx.push(Math.cos(a), Math.sin(a)); }
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) out.cells.push(at(hx, i * S3, j * 3), at(hx, S3 / 2 + i * S3, 1.5 + j * 3));
+    } else if (kind === "square") {
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) out.cells.push(at([0, 0, 1, 0, 1, 1, 0, 1], i, j));
+    } else if (kind === "diamond") {                        // squares turned 45°: two a period
+      const d = [.5, 0, 1, .5, .5, 1, 0, .5];
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) out.cells.push(at(d, i, j), at(d, i - .5, j - .5));
+    } else if (kind === "triangle") {                       // side 1: a period of 1 × √3, four cells
+      const h = S3 / 2;
+      out.h = S3;
+      for (let k = -2; k <= 2; k++) for (let i = -2; i <= 1; i++) {      // an odd row is half a cell over: its copy at −2 reaches 0
+        const x = i + (k & 1 ? .5 : 0), y = k * h;
+        out.cells.push([x, y + h, x + 1, y + h, x + .5, y], [x + .5, y, x + 1.5, y, x + 1, y + h]);
+      }
+    } else {                                                // scales: rows of discs half a diameter apart,
+      out.circles = [];                                     // each row over the one above it
+      for (let k = -2; k <= 3; k++) for (let i = -1; i <= 1; i++) out.circles.push([i + (k & 1 ? .5 : 0), k * .5, .5]);
+    }
+    return out;
+  },
+  // ---- the pattern brush (4.55, the brush that reveals whole cells) ----
+  // The brush's own record: the lattice's look (`latticeClone`) with `kind` "off" for no pattern, and
+  // where it lies on the model — the tile's width in metres and its angle, the "lattice, along the
+  // model" fill's Size and Angle, so a brush and a fill set alike lay the same cells.
+  brushPatMake(){ return Object.assign(Procedural.latticeMake(), { kind: "off", size: .3, angle: 0 }); },
+  brushPatClone(p){
+    p = p || {};
+    const num = (v, d, lo, hi) => { v = +v; return Math.max(lo, Math.min(hi, Number.isFinite(v) ? v : d)); };
+    return Object.assign(Procedural.latticeClone(p), { kind: Procedural.LATTICE.includes(p.kind) ? p.kind : "off",
+      size: num(p.size, .3, .01, 100), angle: num(p.angle, 0, -360, 360) });
+  },
+  // Which cells own each pixel of a W × H tile of lattice `kind` with a border `width` wide (cell
+  // units, as `latticeTile` strokes it): RGBA, up to four cell indices into `centres` (255 for none),
+  // nearest first. A cell owns what it encloses and its border — every pixel within half the border
+  // of its outline — so a border two cells share belongs to both, and a cell revealed alone keeps its
+  // whole border; four, because that is how many squares or diamonds meet at a corner (three hexagons
+  // do; six triangles meet at theirs, and the nearest four keep all of a corner but its tip — at three
+  // the review of 2026-10-25 saw a notch at a square's corner under a 0.3 border). Scales overlap, each over the one above it, so a pixel is the topmost scale's that
+  // reaches it, border included, and only that one's. `centres` is each cell's centre in cell units
+  // in the period's frame, sixteen bits a coordinate over −8 … 8, four bytes a cell (`cellAt` in
+  // ProjBrushGL's lattice pass reads them back); `reach` is the farthest any pixel a cell owns lies
+  // from its centre, in cell units. Pure, so t173 holds it under Node.
+  latticeOwners(kind, width, W, H){
+    const C = Procedural.latticeCells(kind), hw = Math.max(0, +width || 0) / 2, own = new Uint8Array(W * H * 4).fill(255);
+    const tol = .5 * Math.max(C.w / W, C.h / H);           // half a pixel: a texel the tile shows as border is owned
+    const shapes = C.circles ? C.circles.map(([x, y, r]) => ({ x, y, R: r, r })) : C.cells.map(p => {
+      let x = 0, y = 0;
+      for (let i = 0; i < p.length; i += 2) { x += p[i]; y += p[i + 1]; }
+      x /= p.length / 2; y /= p.length / 2;
+      let R = 0;
+      for (let i = 0; i < p.length; i += 2) R = Math.max(R, Math.hypot(p[i] - x, p[i + 1] - y));
+      return { x, y, R, p };
+    });
+    if (shapes.length > 64) throw new Error("lattice " + kind + ": more than 64 cells in a period");
+    // signed distance from (x, y) to polygon p: negative inside (the polygons are convex)
+    const dist = (p, x, y) => {
+      let best = Infinity, inside = true, sgn = 0;
+      for (let i = 0, n = p.length; i < n; i += 2) {
+        const ax = p[i], ay = p[i + 1], bx = p[(i + 2) % n], by = p[(i + 3) % n], ex = bx - ax, ey = by - ay;
+        const cr = ex * (y - ay) - ey * (x - ax);
+        if (cr !== 0) { const s = Math.sign(cr); if (sgn && s !== sgn) inside = false; sgn = sgn || s; }
+        const t = Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey)));
+        best = Math.min(best, Math.hypot(x - ax - t * ex, y - ay - t * ey));
+      }
+      return inside ? -best : best;
+    };
+    // Each row looks only at the cells whose reach crosses it, and the nearest three are kept in place —
+    // a triangle tile at 256 × 512 is 131 072 pixels over 40 cells, and the first version, every cell
+    // at every pixel with an array per hit, took 610 ms at 512 × 1024 on the owner's machine.
+    const lim = hw + tol, bd = new Float64Array(4), bk = new Int32Array(4), bc = new Float64Array(4);
+    let reach = 0;
+    for (let py = 0; py < H; py++) {
+      const y = (py + .5) / H * C.h, row = [];
+      for (let k = 0; k < shapes.length; k++) if (Math.abs(y - shapes[k].y) <= shapes[k].R + lim) row.push(k);
+      for (let px = 0; px < W; px++) {
+        const x = (px + .5) / W * C.w, o = (py * W + px) * 4;
+        let n = 0;
+        for (const k of row) {
+          const s = shapes[k], dc = Math.hypot(x - s.x, y - s.y);
+          if (dc > s.R + lim) continue;
+          if (!s.p) { bd[0] = 0; bk[0] = k; bc[0] = dc; n = 1; continue; }   // circles in order: the last that reaches is on top
+          const d = dist(s.p, x, y);
+          if (d > lim) continue;
+          let j = Math.min(n, 3);                                       // insert by distance, keeping four
+          if (n === 4 && d >= bd[3]) continue;
+          while (j > 0 && bd[j - 1] > d) { bd[j] = bd[j - 1]; bk[j] = bk[j - 1]; bc[j] = bc[j - 1]; j--; }
+          bd[j] = d; bk[j] = k; bc[j] = dc;
+          if (n < 4) n++;
+        }
+        for (let j = 0; j < n; j++) { own[o + j] = bk[j]; if (bc[j] > reach) reach = bc[j]; }
+      }
+    }
+    const centres = new Uint8Array(64 * 4), q = v => Math.max(0, Math.min(65535, Math.round((v + 8) / 16 * 65535)));
+    shapes.forEach((s, k) => { const a = q(s.x), b = q(s.y); centres.set([a >> 8, a & 255, b >> 8, b & 255], 4 * k); });
+    return { W, H, own, centres, reach, n: shapes.length };
+  },
   // Where the tile goes on a UV sheet, as a canvas transform from the image's pixels to the sheet's
   // texels: scaled so `repeat` tiles span the sheet's width (the tile keeps its own aspect), slid
   // (x, y) of a tile along its own axes, turned by `angle` about the sheet's corner — clockwise as

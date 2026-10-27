@@ -51,7 +51,10 @@ const R = makeReport();
 // vehicles and n skins and shows the search the way the end of a folder scan does.
 const HELPERS = `(async function(){
   if (document.readyState !== "complete") await new Promise(function(r){ addEventListener("load", r); });
-  await new Promise(function(r){ setTimeout(r, 400); });
+  // What the boot left running, then two frames for the layout it changes — not a fixed 400 ms,
+  // which stops being long enough on a loaded machine (the 2026-10-22 scan's (20)).
+  await App.bootSettled;
+  await new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ r(); }); }); });
   var frame = function(){ return new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ r(); }); }); }); };
   var $ = function(id){ return document.getElementById(id); };
   var box = function(id){ var r = $(id).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, h: r.height, left: r.left, width: r.width }; };

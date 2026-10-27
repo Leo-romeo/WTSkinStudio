@@ -185,8 +185,10 @@ const SkinLoad = {
     const buf = (await entry.bytes()).buffer;
     const nm = entry.name.toLowerCase();
     let dec, src = buf;
-    if (nm.endsWith(".dds")) { dec = await parseDDSAsync(buf); src = dec.raw; }
-    else if (nm.endsWith(".tga")) dec = parseTGA(buf);
+    // held at most the largest sheet the editor holds (ROADMAP 1.26: a 12 800² canopy sheet in a
+    // UserSkin held the UI thread 28 s and kept gigabytes alive for the rest of the session)
+    if (nm.endsWith(".dds")) { dec = await parseDDSAsync(buf, SLOT_SIZES[SLOT_SIZES.length - 1]); src = dec.raw; }
+    else if (nm.endsWith(".tga")) dec = TGA.parseTGA(buf);
     else {
       const bmp = await createImageBitmap(new Blob([buf]));
       const cv = mkCanvas(bmp.width, bmp.height);
@@ -254,7 +256,10 @@ const SkinLoad = {
         try {
           let dec = decoded.get(entry);
           if (dec) dec = Object.assign({}, dec);
-          else { dec = await SkinLoad.decode(entry); decoded.set(entry, dec); }
+          else {
+            dec = await SkinLoad.decode(entry); decoded.set(entry, dec);
+            if (dec.fitFrom) (sk.fitted || (sk.fitted = [])).push(dec.rawName + " " + dec.fitFrom.w + "×" + dec.fitFrom.h);
+          }
           SkinLoad.bind(sk, entry, replaces, dec); sk.applied++;
         } catch (e) { console.warn("skin tex " + entry.name, e); sk.failed++; }
       }
@@ -280,7 +285,10 @@ const SkinLoad = {
       (sk.cleared ? " · " + sk.cleared + " reset to stock first" : "") +
       (sizes.length ? " · " + sizes.sort((a, b) => b - a)[0] + "px" : "") +
       (sk.wantModel ? " · model " + sk.wantModel : "") +
-      (sk.undone ? " (undo history cleared)" : ""), sk.applied ? "ok" : "err");
+      (sk.undone ? " (undo history cleared)" : "") +
+      // said, because an export with that sheet ticked writes it at the size held (ROADMAP 1.26)
+      (sk.fitted ? " · held at " + SLOT_SIZES[SLOT_SIZES.length - 1] + ", the largest sheet the editor holds: " + sk.fitted.join(", ") +
+        " (the game still reads the file as it is)" : ""), sk.applied ? "ok" : "err");
     updateExportList();
   },
 };
@@ -338,7 +346,8 @@ async function loadSkinFolder(){
     // It opens in UserSkins, or in the game folder, when either is known (2026-10-10) — this
     // session's, or the install remembered from the last, which needs no permission to be a starting
     // point. An IndexedDB read is milliseconds and the dialog's click has just renewed the activation.
-    const real = h => h && !h._legacy && h.kind === "directory" ? h : null;
+    // An install with a linked folder laid over it (GameScan.merge) starts in the install itself.
+    const real = h => h && !h._legacy && h.kind === "directory" ? (h._primary || h) : null;
     const home = real(App.userSkinsDir) || real(App.gameDir) || real(await idbGet("gameDir"));
     const dir = await showDirectoryPicker({ mode: "read", id: "wtskins", ...(home ? { startIn: home } : {}) });
     const entries = [];

@@ -6,9 +6,9 @@
 // "correct":
 //
 //   1. SEMANTIC — round trips and invariants that would still hold if the code were rewritten:
-//      encodeBC3 -> the page's own decodeBCn reproduces a solid block exactly; writeDDS -> parseDDS
+//      BCnEnc.encodeBC3 -> the page's own BCnDec.decodeBCn reproduces a solid block exactly; BCnEnc.writeDDS -> DDS.parseDDS
 //      reads back the dimensions, format and full mip chain it wrote; writeTGA's header fields and
-//      BGRA order; buildMips' level count and halving; renormalizeWTNormal never leaving a normal
+//      BGRA order; BCnEnc.buildMips' level count and halving; BCnEnc.renormalizeWTNormal never leaving a normal
 //      longer than unit and never touching R or B; padSeams never writing inside the mask and
 //      stopping at maxDist rings.
 //   2. GOLDEN — SHA-256 per case against tools/fixtures/encode.golden.json, so any drift in the
@@ -18,7 +18,7 @@
 // Inputs are chosen for the hazards CLAUDE.md §3 records, not for coverage-by-volume: a THREE-hue
 // block (a decal edge keyed off its background — the case that breaks BC1's one-line palette and
 // that the principal-axis endpoint selection exists for), a flat block (the power-iteration
-// `L < 1e-9` break), constant alpha (encodeBC4AlphaBlock's mn===mx branch), and sizes that are not
+// `L < 1e-9` break), constant alpha (BCnEnc.encodeBC4AlphaBlock's mn===mx branch), and sizes that are not
 // multiples of four (the block-padding clamp).
 //
 // Usage: node tools/t29_encode.mjs [git-rev]     compare current page against a revision too
@@ -43,7 +43,7 @@ const REV = args.find(a => !a.startsWith("-")) || null;
 // live out in the export code and are pulled by name.
 const CODECS = ["DDS", "BCNDEC", "BCNENC"];
 const sectionOf = (src, n) => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section");
   return src.slice(a + 1, b);
 };
@@ -57,12 +57,16 @@ const fnOf = (src, name) => {
   }
   throw new Error("unbalanced: " + name);
 };
-const EXPORTS = ["buildMips", "renormalizeWTNormal", "writeDDS", "encodeBC3", "encodeBC4AlphaBlock",
-  "encodeBC1ColorBlock", "writeTGA", "padSeams", "parseDDS", "decodeBCn", "to565", "c565"];
+// [namespace, name]: each codec function through its module's namespace since ROADMAP 2.3, or bare
+// in a revision from before it, so the golden comparison against HEAD~ still lifts both. writeTGA
+// and padSeams are not codecs and stay bare.
+const EXPORTS = [["BCnEnc", "buildMips"], ["BCnEnc", "reduce"], ["BCnEnc", "renormalizeWTNormal"], ["BCnEnc", "writeDDS"], ["BCnEnc", "encodeBC3"],
+  ["BCnEnc", "encodeBC4AlphaBlock"], ["BCnEnc", "encodeBC1ColorBlock"], [null, "writeTGA"], [null, "padSeams"],
+  ["DDS", "parseDDS"], ["BCnDec", "decodeBCn"], ["BCnEnc", "to565"], ["BCnDec", "c565"]];
 const load = (src, tag) => {
   const body = CODECS.map(n => sectionOf(src, n)).join("\n").replace(/^"use strict";$/m, "") +
     "\n" + fnOf(src, "writeTGA") + "\n" + fnOf(src, "padSeams");
-  const m = new Function(body + "\nreturn {" + EXPORTS.join(",") + "};")();
+  const m = new Function(body + "\nreturn {" + EXPORTS.map(([ns, n]) => ns ? n + ": typeof " + ns + " !== \"undefined\" ? " + ns + "." + n + " : " + n : n).join(",") + "};")();
   m.tag = tag;
   return m;
 };
@@ -134,8 +138,8 @@ function testImage(w, h) {
   }
   return a;
 }
-// A WT packed normal sheet: R = inverted roughness, G = normal X, B = metallicity, A = normal Y
-// (CLAUDE.md §1). Deliberately includes vectors longer than unit so renormalize has work to do.
+// A WT packed normal sheet: R = inverted roughness, G = normal Y, B = metallicity, A = normal X
+// (CLAUDE.md §1; renormalising treats the two alike, so the order does not matter here). Deliberately includes vectors longer than unit so renormalize has work to do.
 function normalImage(w, h) {
   const a = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -180,7 +184,7 @@ console.log("=== block encoders ===");
   // The three-hue block is the known-lossy case, and the number in CLAUDE.md §3 (worst channel
   // error 106 -> 66) belongs to one measured texture, not to any three-hue block — so asserting a
   // fixed threshold here would only be asserting this fixture. What IS a property of the code is
-  // the claim the comment on encodeBC1ColorBlock makes: principal-axis endpoints beat luminance
+  // the claim the comment on BCnEnc.encodeBC1ColorBlock makes: principal-axis endpoints beat luminance
   // extremes. So the luminance version is built here and the two are compared directly.
   {
     const px = threeHueBlock();
@@ -225,12 +229,12 @@ console.log("=== block encoders ===");
   }
 }
 
-console.log("=== encodeBC3 ===");
+console.log("=== BCnEnc.encodeBC3 ===");
 for (const [w, h] of [[4, 4], [64, 64], [130, 66], [1, 1], [7, 3]]) {
   const img = testImage(w, h);
   const out = cur.encodeBC3(img, w, h);
   const bw = Math.max(1, (w + 3) >> 2), bh = Math.max(1, (h + 3) >> 2);
-  is(out.length === bw * bh * 16, `encodeBC3 ${w}x${h} -> ${out.length} bytes (${bw}x${bh} blocks)`);
+  is(out.length === bw * bh * 16, `BCnEnc.encodeBC3 ${w}x${h} -> ${out.length} bytes (${bw}x${bh} blocks)`);
   record(`encodeBC3/${w}x${h}`, out);
 }
 // A solid opaque sheet must come back bit-exact at every texel, partial edge blocks included —
@@ -246,20 +250,20 @@ for (const [w, h] of [[4, 4], [64, 64], [130, 66], [1, 1], [7, 3]]) {
   is(bad < 0, `solid ${w}x${h} sheet round trips exactly through partial edge blocks` + (bad < 0 ? "" : ` (texel ${bad})`));
 }
 
-console.log("=== buildMips / renormalizeWTNormal ===");
+console.log("=== BCnEnc.buildMips / BCnEnc.renormalizeWTNormal ===");
 {
   const w = 64, h = 64, img = testImage(w, h);
   const mips = cur.buildMips(img, w, h, false);
-  is(mips.length === 7, `buildMips 64x64 -> ${mips.length} levels (expect 7, down to 1x1)`);
-  is(mips[0].rgba === img, "buildMips level 0 aliases the source array (no copy)");
+  is(mips.length === 7, `BCnEnc.buildMips 64x64 -> ${mips.length} levels (expect 7, down to 1x1)`);
+  is(mips[0].rgba === img, "BCnEnc.buildMips level 0 aliases the source array (no copy)");
   is(mips.every((m, i) => m.w === Math.max(1, w >> i) && m.h === Math.max(1, h >> i)), "every level halves");
   for (const m of mips) record(`buildMips/64x64/L${Math.log2(w / m.w) | 0}`, m.rgba);
 
   // non-square, non-power-of-two: the chain must terminate at 1x1 without an infinite loop
   const odd = cur.buildMips(testImage(13, 5), 13, 5, false);
-  is(odd[odd.length - 1].w === 1 && odd[odd.length - 1].h === 1, `buildMips 13x5 terminates at 1x1 in ${odd.length} levels`);
+  is(odd[odd.length - 1].w === 1 && odd[odd.length - 1].h === 1, `BCnEnc.buildMips 13x5 terminates at 1x1 in ${odd.length} levels`);
 
-  // The renorm path has a contract that is easy to misread: buildMips renormalises the levels it
+  // The renorm path has a contract that is easy to misread: BCnEnc.buildMips renormalises the levels it
   // GENERATES and deliberately leaves level 0 alone, because level 0 is the sheet the user
   // authored and aliasing it (see above) means normalising it would silently rewrite their
   // pixels. Box-filtering two opposing normals shortens the result, which is what levels >= 1 are
@@ -274,10 +278,40 @@ console.log("=== buildMips / renormalizeWTNormal ===");
   };
   let longest = 0;
   for (let i = 1; i < nmips.length; i++) longest = Math.max(longest, longestIn(nmips[i]));
-  is(longest <= 1 + 1 / 127.5, `buildMips renorm: generated levels never exceed unit length (longest ${longest.toFixed(4)})`);
+  is(longest <= 1 + 1 / 127.5, `BCnEnc.buildMips renorm: generated levels never exceed unit length (longest ${longest.toFixed(4)})`);
   is(nmips[0].rgba.every((v, i) => v === before[i]),
-    `buildMips renorm: level 0 is left exactly as authored (longest there ${longestIn(nmips[0]).toFixed(4)}, unnormalised by design)`);
+    `BCnEnc.buildMips renorm: level 0 is left exactly as authored (longest there ${longestIn(nmips[0]).toFixed(4)}, unnormalised by design)`);
   for (const m of nmips) record(`buildMipsN/32x32/L${Math.log2(32 / m.w) | 0}`, m.rgba);
+
+  // Restarts (ROADMAP 4.58): a level handed in IS that level, and the levels below it come from it
+  // exactly as they come from level 0. `reduce(r)` is the chain's level r — what the export makes a
+  // restart's full-size sheet into — so a restart that is the generated level changes nothing.
+  // Its own images, and the PRNG put back after them: every case below draws from the same sequence,
+  // and its goldens were captured without these.
+  const seedWas = seed;
+  {
+    const eq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+    const refused = f => { try { f(); return false; } catch (e) { return true; } };
+    const plain = cur.buildMips(img.slice(), w, h, false), other = testImage(16, 16);
+    const red2 = cur.reduce(img.slice(), w, h, false, 2);
+    is(red2.w === 16 && red2.h === 16 && eq(red2.rgba, plain[2].rgba), "BCnEnc.reduce(…, 2) is the chain's level 2, byte for byte");
+    const same = cur.buildMips(img.slice(), w, h, false, [{ level: 2, rgba: red2.rgba }]);
+    is(same.length === plain.length && same.every((m, i) => eq(m.rgba, plain[i].rgba)), "a restart that is the generated level changes no level of the chain");
+    const own = cur.buildMips(img.slice(), w, h, false, [{ level: 2, rgba: other }]);
+    const want3 = cur.reduce(other.slice(), 16, 16, false, 1).rgba;
+    is(own[2].rgba === other && eq(own[1].rgba, plain[1].rgba) && eq(own[3].rgba, want3) && !eq(own[3].rgba, plain[3].rgba),
+      "a restart at 2 is level 2, level 1 is untouched, and level 3 is generated from the restart, not from level 0");
+    for (const m of own) record(`buildMipsRestart/64x64@2/L${Math.log2(w / m.w) | 0}`, m.rgba);
+    const nAll = normalImage(32, 32);
+    is(eq(cur.reduce(nAll.slice(), 32, 32, true, 2).rgba, cur.buildMips(nAll.slice(), 32, 32, true)[2].rgba), "renorm: BCnEnc.reduce(…, 2) is the renormalised chain's level 2 too");
+    const nOwn = normalImage(8, 8), nm = cur.buildMips(normalImage(32, 32), 32, 32, true, [{ level: 2, rgba: nOwn }]);
+    let nl = 0;
+    for (let i = 3; i < nm.length; i++) nl = Math.max(nl, longestIn(nm[i]));
+    is(nm[2].rgba === nOwn && nl <= 1 + 1 / 127.5, `renorm: the levels after a restart are renormalised too (longest ${nl.toFixed(4)}); the restart itself is passed through`);
+    is(refused(() => cur.buildMips(img.slice(), w, h, false, [{ level: 2, rgba: new Uint8ClampedArray(4) }])), "a restart of the wrong size is refused");
+    is(refused(() => cur.buildMips(img.slice(), w, h, false, [{ level: 9, rgba: other }])), "a restart past the chain's end is refused");
+  }
+  seed = seedWas;
 
   // the standalone call, on its own copy, so the golden is of the function and not of the chain
   const solo = normalImage(16, 16), soloBefore = solo.slice();
@@ -287,12 +321,12 @@ console.log("=== buildMips / renormalizeWTNormal ===");
     if (solo[i] !== soloBefore[i] || solo[i + 2] !== soloBefore[i + 2]) rbMoved++;
     if (Math.hypot(solo[i + 1] / 127.5 - 1, solo[i + 3] / 127.5 - 1) > 1 + 1 / 127.5) stillLong++;
   }
-  is(rbMoved === 0, "renormalizeWTNormal leaves R (inverted roughness) and B (metallicity) untouched");
-  is(stillLong === 0, "renormalizeWTNormal clamps every normal to unit length");
+  is(rbMoved === 0, "BCnEnc.renormalizeWTNormal leaves R (inverted roughness) and B (metallicity) untouched");
+  is(stillLong === 0, "BCnEnc.renormalizeWTNormal clamps every normal to unit length");
   record("renormalizeWTNormal/16x16", solo);
 }
 
-console.log("=== writeDDS ===");
+console.log("=== BCnEnc.writeDDS ===");
 for (const bc3 of [true, false]) {
   const w = 64, h = 64;
   const mips = cur.buildMips(testImage(w, h), w, h, false);
@@ -308,7 +342,7 @@ for (const bc3 of [true, false]) {
   // round trip through the page's own reader — the only end-to-end proof the payload layout is right
   const parsed = cur.parseDDS(dds.buffer.slice(dds.byteOffset, dds.byteOffset + dds.byteLength));
   is(parsed.width === w && parsed.height === h && parsed.mips.length === mips.length,
-    `${label}: parseDDS reads back ${parsed.width}x${parsed.height}, ${parsed.mips.length} mips`);
+    `${label}: DDS.parseDDS reads back ${parsed.width}x${parsed.height}, ${parsed.mips.length} mips`);
   if (!bc3) {
     // BGRA8 is lossless, so every level must come back identical texel for texel
     let bad = -1;
@@ -420,15 +454,15 @@ if (REV) {
     };
     for (const [w, h] of [[4, 4], [64, 64], [130, 66], [7, 3]]) {
       const img = testImage(w, h);
-      same(`encodeBC3 ${w}x${h}`, old.encodeBC3(img, w, h), cur.encodeBC3(img.slice(), w, h));
+      same(`BCnEnc.encodeBC3 ${w}x${h}`, old.encodeBC3(img, w, h), cur.encodeBC3(img.slice(), w, h));
     }
     const img = testImage(64, 64);
-    same("writeDDS DXT5", old.writeDDS(old.buildMips(img, 64, 64, false), { bc3: true }),
+    same("BCnEnc.writeDDS DXT5", old.writeDDS(old.buildMips(img, 64, 64, false), { bc3: true }),
       cur.writeDDS(cur.buildMips(img.slice(), 64, 64, false), { bc3: true }));
     same("writeTGA", old.writeTGA(img, 64, 64), cur.writeTGA(img.slice(), 64, 64));
     const n1 = normalImage(32, 32), n2 = n1.slice();
     old.renormalizeWTNormal(n1); cur.renormalizeWTNormal(n2);
-    same("renormalizeWTNormal", n1, n2);
+    same("BCnEnc.renormalizeWTNormal", n1, n2);
   }
 }
 

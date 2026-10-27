@@ -21,7 +21,7 @@
 // surface map onto the colour channel, where R is inverted roughness and G/A are the normal axes
 // (§1) — a picture of nothing, offered as if it were a texture. It cannot happen here, because the
 // sources ARE channels: a slot contributes its colour, smoothness, metalness and normal separately,
-// already unpacked by `initSlotSurface`, and each pastes onto the channel it came from.
+// already unpacked by `NSheet.init`, and each pastes onto the channel it came from.
 const PasteTex = {
   SAME_TIP: "This is the texture the layer lives on — its UVs line up exactly.",
   OTHER_TIP: "A different texture of this model. Its UV layout is unrelated to this slot's, so it will not line up — useful only for a shared or tiling sheet.",
@@ -44,7 +44,7 @@ const PasteTex = {
     // from the game search (`Vehicle ▸ search ▸ add`) lands one here and binds it only if a material
     // matches, so without this tier the search half of the request ends in a texture the paste
     // dialog cannot see. A `_n` in this tier is offered as normal-map content and nothing else: it
-    // has not been through `initSlotSurface`, so its three maps are still packed and there is no
+    // has not been through `NSheet.init`, so its three maps are still packed and there is no
     // honest colour reading of it (§1).
     const bound = new Set();
     for (const s of App.slots.values()) { if (s.cStem) bound.add(String(s.cStem).toLowerCase()); if (s.nStem) bound.add(String(s.nStem).toLowerCase()); }
@@ -59,8 +59,13 @@ const PasteTex = {
   canvasOf(it){
     if (it.src) return it.src;
     if (it._c) return it._c;
-    const c = mkCanvas(it.dec.width, it.dec.height);
-    ctx2d(c).putImageData(new ImageData(it.dec.mips[0].rgba.slice(), it.dec.width, it.dec.height), 0, 0);
+    const c = mkCanvas(it.dec.width, it.dec.height), w = it.dec.width, h = it.dec.height;
+    // A loose `_n` is still packed, so its normal-channel reading is its slopes, unpacked the way a
+    // slot's are — its raw bytes put roughness in X and lost Y to the canvas's alpha (ED-PROJ-05,
+    // closed with ROADMAP 1.24 (b)).
+    const px = it.loose && it.ch === "normal" ? NSheet.slopes(it.dec.mips[0].rgba, w, h)
+      : new ImageData(it.dec.mips[0].rgba.slice(), w, h);
+    ctx2d(c).putImageData(px, 0, 0);
     it._c = c;
     return c;
   },
@@ -154,7 +159,9 @@ const PasteTex = {
         src = mkCanvas(dec.width, dec.height);
         ctx2d(src).putImageData(new ImageData(dec.mips[0].rgba.slice(), dec.width, dec.height), 0, 0);
       } else if (/\.tga$/i.test(f.name)) {
-        const dec = parseTGA(new Uint8Array(await f.arrayBuffer()));
+        // the ArrayBuffer itself: parseTGA reads it through a DataView, which a Uint8Array is not —
+        // pasting a .tga as a layer threw every time (found in the review of 2.3a, 2026-10-23)
+        const dec = TGA.parseTGA(await f.arrayBuffer());
         src = mkCanvas(dec.width, dec.height);
         ctx2d(src).putImageData(new ImageData(dec.mips[0].rgba.slice(), dec.width, dec.height), 0, 0);
       } else src = toCanvas(await createImageBitmap(f));

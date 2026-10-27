@@ -25,24 +25,38 @@
 const SelOverlay = {
   key: null, node: null, canvas: null, tex: null, mat: null, meshes: [],
 
-  // The stencil the verbs and the brush are actually about, in the accent colour. An island
-  // selection already has one — `Marquee.setIslands` builds it once, when the islands are picked —
-  // and a plain rectangle gets a cheap one drawn here at the same mask resolution, into one reused
-  // canvas.
+  // The stencil the verbs and the brush are actually about, drawn as a rim and a faint wash
+  // (`Marquee.outline`, ROADMAP 3.39 (1)). An island selection already has one — `Marquee.set`
+  // is handed it pre-drawn, once, when the shape is picked — and a plain rectangle gets one built
+  // here at the same mask resolution, into one reused canvas.
+  //
+  // A rectangle's rim is four bands, drawn straight: what `Marquee.outline` would erode its way to,
+  // in five fills instead of fourteen draws — and a rectangle is rebuilt on every frame of its drag
+  // (review of 3.39 (1): the outline there was the dearest thing a drag did).
   source(sh){
     if (Marquee.shape()) return Marquee.tint;
     const r = Marquee.rect();
     if (!r) return null;
-    const D = maskDims(sh.W, sh.H);
-    const c = (SelOverlay.canvas && SelOverlay.canvas.width === D.w && SelOverlay.canvas.height === D.h)
-      ? SelOverlay.canvas : (SelOverlay.canvas = mkCanvas(D.w, D.h));
-    const g = ctx2d(c);
-    g.setTransform(1, 0, 0, 1, 0, 0);
+    const D = maskDims(sh.W, sh.H), c = SelOverlay.target(D), g = ctx2d(c);
+    Composite.reset(g); g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, D.w, D.h);
+    const x = Math.floor(r.x * D.w / sh.W), y = Math.floor(r.y * D.h / sh.H);
+    const w = Math.max(1, Math.round(r.w * D.w / sh.W)), h = Math.max(1, Math.round(r.h * D.h / sh.H));
+    const k = Math.min(Math.max(2, Math.round(Math.max(D.w, D.h) / 512)), Math.floor(w / 2), Math.floor(h / 2));
     g.fillStyle = Marquee.ACCENT;
-    g.fillRect(Math.floor(r.x * D.w / sh.W), Math.floor(r.y * D.h / sh.H),
-               Math.max(1, Math.round(r.w * D.w / sh.W)), Math.max(1, Math.round(r.h * D.h / sh.H)));
+    g.globalAlpha = Marquee.RIM;
+    if (k < 1) g.fillRect(x, y, w, h);
+    else {
+      g.fillRect(x, y, w, k); g.fillRect(x, y + h - k, w, k);
+      g.fillRect(x, y + k, k, h - 2 * k); g.fillRect(x + w - k, y + k, k, h - 2 * k);
+      g.globalAlpha = Marquee.WASH; g.fillRect(x + k, y + k, w - 2 * k, h - 2 * k);
+    }
+    Composite.reset(g);
     return c;
+  },
+  target(D){
+    return (SelOverlay.canvas && SelOverlay.canvas.width === D.w && SelOverlay.canvas.height === D.h)
+      ? SelOverlay.canvas : (SelOverlay.canvas = mkCanvas(D.w, D.h));
   },
 
   // ---- ROADMAP 4.35(1): with no selection in force, the overlay shows the SELECTED DECAL ----
@@ -70,9 +84,7 @@ const SelOverlay = {
   },
   ring(sh, L){
     const D = maskDims(sh.W, sh.H);
-    const c = (SelOverlay.canvas && SelOverlay.canvas.width === D.w && SelOverlay.canvas.height === D.h)
-      ? SelOverlay.canvas : (SelOverlay.canvas = mkCanvas(D.w, D.h));
-    // the footprint, in the accent colour: the layer's alpha through source-in
+    // the footprint: the layer's own alpha, which `Marquee.outline` turns into the rim and the wash
     const st = Composite.scratch("_ovl", D.w, D.h);
     const gs = ctx2d(st);
     Composite.reset(gs); gs.setTransform(1, 0, 0, 1, 0, 0); gs.clearRect(0, 0, D.w, D.h);
@@ -83,22 +95,16 @@ const SelOverlay = {
       Composite.content({ slot: sh.s, ch: "color", W: sh.W, H: sh.H, sx: 0, sy: 0, tw: sh.W, th: sh.H }, gs, LayerNode.contentOn(L, "color"));
       gs.setTransform(1, 0, 0, 1, 0, 0);
     }
-    gs.globalCompositeOperation = "source-in"; gs.fillStyle = Marquee.ACCENT; gs.fillRect(0, 0, D.w, D.h);
     Composite.reset(gs);
-    // the ring: the footprint dilated in eight directions, minus the footprint — then the inside at
-    // a third, so the region reads as well as its edge
-    const g = ctx2d(c);
-    Composite.reset(g); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, D.w, D.h);
-    const r = Math.max(2, Math.round(D.w / 512));
-    for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r], [r, -r], [-r, r]]) g.drawImage(st, dx, dy);
-    g.globalCompositeOperation = "destination-out"; g.drawImage(st, 0, 0);
-    g.globalCompositeOperation = "source-over"; g.globalAlpha = .35; g.drawImage(st, 0, 0);
-    Composite.reset(g);
-    return c;
+    // The ring used to be the footprint dilated minus itself, i.e. OUTSIDE it: in UV space that is
+    // gutter or another island, so on the model it could sit on a part the decal never touched.
+    // It is the same inside rim as a selection's now, so the two read as one kind of mark.
+    return Marquee.outline(st, SelOverlay.target(D));
   },
 
   sync(){
-    const sh = Marquee.sheet();
+    // Hidden (H, `Marquee.shown`) is "nothing to draw": the selection itself is untouched.
+    const sh = Marquee.shown ? Marquee.sheet() : null;
     const r = (sh && modelGroup) ? Marquee.rect() : null;
     const L = (!r && sh && modelGroup) ? SelOverlay.decal(sh) : null;
     // A decal being dragged re-renders at every step; the ring waits for the drop rather than
@@ -121,8 +127,10 @@ const SelOverlay = {
     // must read the same on a shadowed underside as on a lit deck. depthWrite off and a negative
     // polygon offset put it on the surface without fighting it; DoubleSide because a skirt or an
     // aerial is one triangle thick and would otherwise show the selection from one side only.
+    // Opacity 1: the rim's and the wash's alphas are in the texture (`Marquee.RIM`, `.WASH`), so
+    // the line is solid while the inside stays faint — one material opacity cannot be both.
     SelOverlay.mat = new THREE.MeshBasicMaterial({
-      map: SelOverlay.tex, transparent: true, opacity: .42, depthWrite: false,
+      map: SelOverlay.tex, transparent: true, opacity: 1, depthWrite: false,
       side: THREE.DoubleSide, toneMapped: false,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
     for (const mesh of App.meshes.values()) {

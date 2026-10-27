@@ -87,9 +87,21 @@ function flipUVs(uv){ const o = new Float32Array(uv.length); for (let i = 0; i <
 // So: additive, weighted by alpha — and by nothing when a sheet carries no alpha at all, or no muzzle
 // flash would ever show. The plume the game draws behind an afterburner is a volumetric effect, not
 // these quads (ROADMAP 4.13), so with the stock sheet what shows here is the nozzle ring (measured on
-// an F-16A: the plume cards and the five diamond discs map onto the sheet's alpha-0 part). A SKIN's
-// replacement sheet is not shown yet: it lands in the flame's texture-only slot, and this reads the
-// stock sheet out of App.decoded.
+// an F-16A: the plume cards and the five diamond discs map onto the sheet's alpha-0 part).
+//
+// A SKIN's sheet is shown since 2026-10-24 (ROADMAP 4.13, queue item 18). The desc's flame material
+// gives the vehicle a texture-only slot for its sheet (`addTextureOnlySlots`), a loaded skin's
+// `jet_flame_diamonds` lands in it, and that is what the community skins in the owner's UserSkins
+// repaint — plume and diamonds into the stock sheet's alpha-0 part, 30–35 % of the flame strip under
+// non-zero alpha. So when such a slot exists the flame draws THE SLOT: its colour sheet (`slot.tex`,
+// the canvas the 2-D view paints into, opaque RGB) weighted by its coverage (`slot.texCov`, the
+// sheet's alpha) in the blend — SrcAlpha, One. Nothing is read back and nothing is rebuilt per
+// stroke: `compositeSlot` uploads the stroke's rectangle into the very texture this samples, so an
+// edit shows the frame it lands, at any size. (The card asked for a readback of up to 4096² off the
+// UI thread; binding the live textures needs no readback at all, which is cheaper than either.)
+// The order differs from `sheet()` below by one step — the GPU decodes sRGB before the multiply,
+// where `sheet()` multiplies the sRGB bytes — which is also the order the game's sampler works in.
+// `sheet()` stays for a material with no slot (a store's flame, a sheet the index does not hold).
 const EffectMat = {
   sheets: new Map(),          // stem → { src: WeakRef to the decoded record it was built from, tex }
   grad: null,                 // the stand-in, for a model the game's desc does not describe (an .obj)
@@ -110,6 +122,15 @@ const EffectMat = {
   // transparent target and reads it as straight alpha, where AdditiveBlending also adds the quad's
   // alpha — every card, black where it draws nothing, would land in the PNG as an opaque slab.
   make(matName){
+    const slot = this.slotOf(App.matEffect.get(matName));
+    if (slot) {
+      const m = new THREE.MeshBasicMaterial({ map: slot.tex, alphaMap: this.covered(slot) ? slot.texCov : null,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+        blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor });
+      m.userData.effect = true;
+      return m;
+    }
     const sheet = this.sheet(App.matEffect.get(matName));
     const m = sheet
       ? new THREE.MeshBasicMaterial({ map: sheet, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
@@ -120,6 +141,35 @@ const EffectMat = {
     m.userData.effect = true;
     return m;
   },
+  // The slot holding an effect sheet, once it has pixels. Matched on the stem the desc names, as
+  // `addTextureOnlySlots` made it — the same lower-cased name App.matEffect holds.
+  slotOf(stem){
+    if (!stem) return null;
+    for (const s of App.slots.values())
+      if (s.cStem && s.cStem.toLowerCase() === stem && !s.missing && s.tex && s.composite) return s;
+    return null;
+  },
+  // What a slot holding an effect sheet is, for its row in the slot list — or null when it holds none.
+  kindOf(slot){
+    const stem = slot && slot.cStem && slot.cStem.toLowerCase();
+    if (!stem || ![...App.matEffect.values()].includes(stem)) return null;
+    return /gunfire|muzzle/.test(stem) ? "gun flash" : /flame|afterburner/.test(stem) ? "jet flame" : "effect";
+  },
+  // Whether the slot's coverage weights it. `sheet()`'s rule, kept: a sheet with no alpha anywhere —
+  // gunfire is alpha 0 across the whole sheet — is drawn by colour, or no muzzle flash would show.
+  // A wear stack painted on it is coverage by definition. Asked once per imported mask.
+  covered(slot){
+    if (!slot.texCov) return false;
+    if (chanHasLayers(slot, "wear")) return true;
+    const cov = slot.covBase;
+    if (!cov) return false;
+    if (this._cov.has(cov)) return this._cov.get(cov);
+    let any = false;
+    for (let i = 0; i < cov.length; i++) if (cov[i]) { any = true; break; }
+    this._cov.set(cov, any);
+    return any;
+  },
+  _cov: new WeakMap(),
   // The sheet, premultiplied by its own alpha and box-filtered to at most 1024² (a preview: the
   // 2048² original would be 16 MB of GPU memory for a glow), so what `make` adds is exactly Σ rgb·a.
   // Alpha is set to 255 and not used. Rows are written bottom-up because a DataTexture is not

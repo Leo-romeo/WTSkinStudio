@@ -8,9 +8,24 @@
 // (materials exported only as "unknown_N", where N is the material index).
 class BlkReader {
   constructor(u8){ this.b = u8; this.o = 0; this.dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); }
-  byte(){ return this.b[this.o++]; }
+  // A read past the end THROWS. It used to return `undefined`, which `& 0x7f` makes 0, so a count
+  // from a crafted header ran its loop for billions of records out of a few bytes (ROADMAP 1.21 (2),
+  // t144). In a file that parses, every read is in range, so this costs nothing that worked.
+  byte(){ if (this.o >= this.b.length) throw new Error("DataBlock is truncated or corrupt — a read past the end"); return this.b[this.o++]; }
   u32(){ const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
-  read(n){ const s = this.o; this.o += n; return this.b.subarray(s, s + n); }
+  read(n){ const s = this.o; if (!(n >= 0) || s + n > this.b.length) throw new Error("DataBlock is truncated or corrupt — " + n + " bytes past the end"); this.o += n; return this.b.subarray(s, s + n); }
+  // A count out of a header: a fifth VLQ byte shifted by 28 can set bit 31 and make it negative, which
+  // used to parse into a DataBlock with no root and throw later, elsewhere, as a TypeError (1.21 (2)).
+  static count(n, what){ if (n < 0) throw new Error("DataBlock is corrupt — " + what + " out of range (" + n + ")"); return n; }
+  // Each block's children are the `bCount` blocks from `firstBlockId`, and only the ones that exist:
+  // the loop reads no bytes, so a crafted bCount of 2^21 per block was bounded by nothing (1.21 (2)).
+  static link(blocks){
+    for (const blk of blocks) {
+      if (blk.children.length === blk.bCount || blk.firstBlockId < 0) continue;
+      const end = Math.min(blk.bCount, blocks.length - blk.firstBlockId);
+      for (let i = 0; i < end; i++) blk.children.push(blocks[blk.firstBlockId + i]);
+    }
+  }
 }
 // LEB128-style variable-length int: 7 payload bits per byte, high bit = continue.
 function blkVLQ(r, step, end, shift = 1){
@@ -32,9 +47,9 @@ function loadDataBlock(u8){
   const td = new TextDecoder();
   const sharedNames = td.decode(namesRaw.subarray(2)).split("\0").slice(0, -1);
 
-  const blocksCount = blkVLQ(r, 7, 0x23);
-  const paramsCount = blkVLQ(r, 7, 0x23);
-  const dataSize    = blkVLQ(r, 7, 0x23);
+  const blocksCount = BlkReader.count(blkVLQ(r, 7, 0x23), "block count");
+  const paramsCount = BlkReader.count(blkVLQ(r, 7, 0x23), "param count");
+  const dataSize    = BlkReader.count(blkVLQ(r, 7, 0x23), "data size");
   const paramsData  = r.read(dataSize);
   const paramsBuf   = r.read(paramsCount * 8);
   const pv = new DataView(paramsBuf.buffer, paramsBuf.byteOffset, paramsBuf.byteLength);
@@ -49,10 +64,7 @@ function loadDataBlock(u8){
     blocks.push({ nameId, pCount, bCount, firstBlockId, ofs: offset, children: [] });
     offset += 8 * pCount;
   }
-  for (const blk of blocks) {
-    if (blk.children.length === blk.bCount) continue;
-    for (let i = 0; i < blk.bCount; i++) blocks[blk.firstBlockId + i] && blk.children.push(blocks[blk.firstBlockId + i]);
-  }
+  BlkReader.link(blocks);
   const nameOf = b => (b.nameId >= 1 ? sharedNames[b.nameId - 1] : "(root)");   // DAE decrements twice net
   return {
     root: blocks[0], blocks, sharedNames, slim: false,
@@ -66,7 +78,7 @@ function loadGameResDesc(u8){
   if (u8[0] !== 2) throw new Error("GameResDesc magic != 2");
   const size = u8[1] | (u8[2] << 8) | (u8[3] << 16);
   const comp = u8.subarray(4, 4 + size);
-  return loadDataBlock(zstdDec(comp));
+  return loadDataBlock(Zstd.zstdDec(comp));
 }
 // model name → { tex:[names], mats:[{ block, slots:{tN:texName}, cls, props }] }
 function descGetModel(db, modelName){

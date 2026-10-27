@@ -164,7 +164,7 @@ const BODY = `async function(){
       } };
     return h;
   };
-  var warThunder = realDir("War Thunder", { content: realDir("content", {}), UserSkins: realDir("UserSkins", { my_skin: realDir("my_skin", {}, ["f-4e.blk"]) }) },
+  var warThunder = realDir("War Thunder", { content: realDir("content", { base: realDir("base", { res: realDir("res", {}) }) }), UserSkins: realDir("UserSkins", { my_skin: realDir("my_skin", {}, ["f-4e.blk"]) }) },
                    ["aces.vromfs.bin", "char.vromfs.bin"]);
   var common = realDir("common", { "Some Other Game": realDir("Some Other Game", {}, ["game.exe"]), "War Thunder": warThunder });
   var lib = realDir("SteamLibrary", { steamapps: realDir("steamapps", { common: common }) });
@@ -255,7 +255,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r0 = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r0 = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r0.ok) { console.log("FAIL: " + r0.reason); process.exit(1); }
 const r = r0.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -314,7 +314,9 @@ R.is(/Found War Thunder at SteamLibrary\/steamapps\/common\/War Thunder/.test(A.
   "…and the status says where it was found");
 R.is(A.common.same && A.common.found === "common/War Thunder" && A.drive.same && A.drive.found === "D:/" + A.lib.found,
   `so is \`common\`, one level up, and the drive the library is on (${A.common.found}; ${A.drive.found})`);
-R.is(A.drive.lists === 0 && A.drive.looks <= 12,
+// The one listing allowed is INSIDE the install, once found: whether content/base opens, read to its
+// first entry (GameScan.linkGaps — a folder moved to another drive and left as a link, 2026-10-24).
+R.is(A.drive.lists <= 1 && A.drive.looks <= 14,
   `the drive is not walked — the install is looked up by name, ${A.drive.looks} lookups and ${A.drive.lists} directory listings`);
 R.is(A.install.same && A.install.found === "" && A.install.rememberedSame && !/Found War Thunder/.test(A.install.said),
   "the install itself is still taken as it is, with nothing said about finding it");

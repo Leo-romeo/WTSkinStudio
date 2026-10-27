@@ -49,6 +49,21 @@ function updateExportValidation(items){
     list.appendChild(row);
   }
 }
+// ROADMAP 4.50 (13): the Market checklist's count, and its inverted-roughness line only while the
+// textures carry it — asking the author to tick a box the export does not need would be a wrong
+// instruction. Run when the Export window's settings change and on every tick.
+const MarketList = {
+  sync(){
+    const inv = $("optInvRough"), row = $("expMarketInv");
+    if (row) row.style.display = inv && inv.checked ? "" : "none";
+    const all = [...document.querySelectorAll("#expMarket .mktChk")].filter(c => c.closest(".row").style.display !== "none");
+    const done = all.filter(c => c.checked).length, sum = $("expMarketSum");
+    if (sum) sum.textContent = "For WT Live — only you can confirm (" + done + " of " + all.length + ")";
+  },
+};
+document.querySelectorAll("#expMarket .mktChk").forEach(c => c.addEventListener("change", MarketList.sync));
+$("optInvRough").addEventListener("change", MarketList.sync);
+MarketList.sync();
 // Kept as the one-line summary the export confirmation dialog needs. Everything it knows now comes
 // from validateExport, so there is a single oracle for the publishing rules.
 function exportIssues(items){
@@ -74,15 +89,7 @@ function updateExportWarnings(){
   const camoRow = $("rowCamoBase");
   const stems = stockCamoStems();
   if (camoRow) camoRow.style.display = mode === "set_tex" ? "" : "none";
-  if ($("rowCamoTile")) {
-    $("rowCamoTile").style.display = mode === "set_tex" && CamoTile.on() ? "" : "none";
-    // The two preview sliders follow the state rather than lead it, so a restored project shows its own.
-    const v = CamoTile.view;
-    $("camoTileScale").value = String(Math.round(v.scale * 100));
-    $("camoTileRot").value = String(Math.round(v.rot));
-    $("camoTileScaleVal").textContent = Math.round(v.scale * 100) + "%";
-    $("camoTileRotVal").textContent = (v.rot > 0 ? "+" : "") + Math.round(v.rot) + "°";
-  }
+  ExportPreview.tileRows(mode);
   if (cls === "tank" || cls === "ship") {
     if (mode === "replace_tex") notes.push("Ground vehicles normally need set_tex — with replace_tex in-game decals won't stick, and you take over the wear mask yourself.");
     if ($("expAlpha") && $("expAlpha").value === "keep")
@@ -91,9 +98,9 @@ function updateExportWarnings(){
   if (cls === "air" && mode === "set_tex") notes.push("Aircraft only support fixed skins — replace_tex is the correct mode.");
   if (mode === "set_tex") {
     if (!stems.length) notes.push("No camouflage texture was found for this model, so nothing can be pinned — if the skin comes out tinted in game, load the vehicle from the game files rather than from an .obj.");
-    else if (camoBaseMode() === "keep") notes.push("Camo left alone: whatever camouflage the player has selected (" + stems.slice(0, 3).map(escHtml).join(", ") + (stems.length > 3 ? "…" : "") + ") shows through everywhere your alpha is not opaque.");
+    else if (camoBaseMode() === "keep") notes.push("Camo left alone: whatever camouflage the player has selected (" + stems.slice(0, 3).join(", ") + (stems.length > 3 ? "…" : "") + ") shows through everywhere your alpha is not opaque.");
     else if (camoBaseMode() === "stock" && stems.some(s => !App.paintTex.has(s) && !App.skinCamo.has(s)))
-      notes.push("The stock camo pixels for " + stems.filter(s => !App.paintTex.has(s) && !App.skinCamo.has(s)).slice(0, 2).map(escHtml).join(", ") + " were not read from the game files, so that camo cannot be pinned — load the vehicle from the game folder, or pick a solid colour.");
+      notes.push("The stock camo pixels for " + stems.filter(s => !App.paintTex.has(s) && !App.skinCamo.has(s)).slice(0, 2).join(", ") + " were not read from the game files, so that camo cannot be pinned — load the vehicle from the game folder, or pick a solid colour.");
     // My own pattern with nothing to pin: the tile was deleted from its ⋮ menu, or unticked in
     // Textures out. Either way the .blk pins no camouflage, which is the "Leave it" skin — said, not
     // shipped quietly (4.50 (6)).
@@ -115,15 +122,20 @@ function updateExportWarnings(){
     for (const s of App.slots.values())
       for (const L of layerLeaves(s.layers))
         if (L.visible && ((c => c && (c.kind === "image" || c.proj))(LayerNode.contentOn(L, "color")))) decals++;
-    if (decals) notes.push("This skin has " + decals + " image/decal layer" + (decals === 1 ? "" : "s") +
+    // A caution rather than a fault, so it is one line and the reason is in its tooltip (3.44).
+    if (decals) notes.push({ line: decals + " decal layer" + (decals === 1 ? "" : "s") + " and a DXT5 albedo: keyed decal " +
+      "edges can bleed in 4×4 blocks — the Lossless preset keeps them.",
+      more: "This skin has " + decals + " image/decal layer" + (decals === 1 ? "" : "s") +
       " and the albedo is being compressed to DXT5. DXT5 stores four colours per 4×4 block along a " +
       "single line, so where a decal edge was keyed off its background — texture, marking and a " +
       "leftover halo in one block — colour bleeds between them in square chunks. It only shows up " +
-      "after export, never in the editor. Use the <b>Lossless</b> preset (or set the albedo to " +
-      "RGBA8) if the marking edges matter; the file is larger, so watch the archive size limit.");
+      "after export, never in the editor. Use the Lossless preset (or set the albedo to " +
+      "RGBA8) if the marking edges matter; the file is larger, so watch the archive size limit." });
   }
+  // Built as text, never as markup: the stems in these lines are read out of the game's packs.
+  // What says something is wrong is said in full; only the DXT5 caution carries a tooltip (3.44).
   el.style.display = notes.length ? "" : "none";
-  el.innerHTML = notes.map(n => "⚠ " + n).join("<br>");
+  el.replaceChildren(...notes.map(n => typeof n === "string" ? Tip.make("div", null, "⚠ " + n, "") : Tip.make("div", null, "⚠ " + n.line, n.more)));
   updateCamoPinInfo();
 }
 // Spell out exactly what the .blk will do to each camo sheet — this is the half of a ground skin
@@ -183,8 +195,27 @@ function updateCamoPinInfo(){
     $("camoTileScaleVal").textContent = Math.round(CamoTile.view.scale * 100) + "%";
     $("camoTileRotVal").textContent = (rot > 0 ? "+" : "") + rot + "°";
     CamoTile.applyView();
+    Tip.set($("camoTileInfo"), CamoTile.readoutLine(), CamoTile.readout());
   };
   $("camoTileScale").oninput = $("camoTileRot").oninput = view;
+  // The calibration grid goes in as the tile's base like any picture put there; paint layers already
+  // on the tile still draw over it, which is said rather than left to be found. While it is in, the
+  // same button takes it out again and puts back the base it covered (ROADMAP 3.45).
+  $("btnCamoTileCal").onclick = () => {
+    if (CamoTile.calIn()) {
+      const back = CamoTile.calTake();
+      setStatus(back === "kept" ? "Calibration grid removed — the tile's base is back as it was before the grid."
+        : "Calibration grid removed — the base it covered was not kept across the reload, so the tile is back at its start: " +
+          (back === "camo" ? "the vehicle's own camouflage." : "flat mid grey, as no camouflage sheet was read for this vehicle."), "ok");
+      changed();
+      return;
+    }
+    const made = !CamoTile.slot(), s = CamoTile.calPut(), N = s.baseC.width;
+    if (made) changed(); else updateExportWarnings();
+    const over = layerLeaves(s.layers).length;
+    setStatus("Calibration grid in the tile (" + N + "²): cells 1–16 from the top left, a red frame one repeat wide, the arrow in cell 1 toward +v." +
+      (over ? " " + over + " paint layer" + (over === 1 ? "" : "s") + " on the tile still draw over it — hide them for the check." : ""), "ok");
+  };
   $("btnCamoTileEdit").onclick = () => { const made = !CamoTile.slot(); open(); if (made) changed(); };
   // The camo pin changes what the vehicle looks like under the skin, so the viewport has to follow.
   $("expCamoBase").onchange = () => {

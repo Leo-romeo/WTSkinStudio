@@ -11,7 +11,7 @@
 // since. The five others read the blob as their "is Oodle available" test, which is the same
 // break with a quieter failure. Found 2026-09-20 when the sweeps ran again.
 export function section(src, name) {
-  const a = src.indexOf("\n/*==" + name + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + name + "==\\*/"));
   const b = src.indexOf("\n/*==END" + name + "==*/");
   if (a < 0 || b < 0) return null;
   return src.slice(a + 1, b);
@@ -23,14 +23,13 @@ export function oodleFrom(html) {
   if (!oodle) throw new Error("section OODLE not found in the built page");
   return new Function("var OODLE_IMPL = " + JSON.stringify(impl ? impl[1] : "") + ";\n" +
     "var OODLE_WASM_B64 = " + JSON.stringify(blob ? blob[1] : "") + ";\n" +
-    (section(html, "WTLZ") || "") + "\n" + oodle + "\nreturn { ensureOodle, oodleDecompress, oodleAvailable, oodleImpl };")();
+    (section(html, "WTLZ") || "") + "\n" + oodle + "\nreturn { ensureOodle: Oodle.ensureOodle, oodleDecompress: Oodle.oodleDecompress, oodleAvailable: Oodle.oodleAvailable, oodleImpl: Oodle.oodleImpl };")();
 }
-// Put the three names where the page's own MODEL / DDS sections, run under `new Function`, will
-// find them as free globals — which is how every roster tool runs those sections.
+// Put the decoder where the page's own MODEL / DDS sections, run under `new Function`, will find it
+// as a free global — which is how every roster tool runs those sections. Since ROADMAP 2.3 they
+// reach it as `Oodle.ensureOodle` and the rest, so the global is the namespace, not three names.
 export function installOodle(html) {
   const O = oodleFrom(html);
-  globalThis.ensureOodle = O.ensureOodle;
-  globalThis.oodleDecompress = O.oodleDecompress;
-  globalThis.oodleAvailable = O.oodleAvailable;
+  globalThis.Oodle = O;
   return O;
 }

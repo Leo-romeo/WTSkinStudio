@@ -17,10 +17,11 @@
 // because undoing "gradient → pattern" has to bring the tile back as well as the stops.
 const GradUI = {
   KINDS: [["flat", "flat colour"], ["linear", "gradient, on the sheet"], ["radial", "radial, on the sheet"], ["model", "gradient, along the model"],
-          ["noise", "noise, along the model"], ["patuv", "pattern, on the sheet…"], ["patmodel", "pattern, along the model…"]],
+          ["noise", "noise, along the model"], ["patuv", "pattern, on the sheet…"], ["patmodel", "pattern, along the model…"],
+          ["latuv", "lattice, on the sheet"], ["latmodel", "lattice, along the model"]],
   // What the Fill select says for a content.
   kindOf(c){
-    if (c.pat) return c.pat.space === "model" ? "patmodel" : "patuv";
+    if (c.pat) return (c.lattice ? "lat" : "pat") + (c.pat.space === "model" ? "model" : "uv");
     if (!c.grad) return "flat";
     if (c.grad.shape === "noise") return "noise";
     if (c.grad.space === "model") return "model";
@@ -38,13 +39,15 @@ const GradUI = {
   // ---- the whole fill, for a change of kind ----
   fillState(c){
     return { grad: Gradient.clone(c.grad), pat: c.pat ? Procedural.patClone(c.pat) : null,
-             patImg: c.pat ? c.patImg || null : null, patName: c.pat ? c.patName || null : null, color: c.color };
+             patImg: c.pat ? c.patImg || null : null, patName: c.pat ? c.patName || null : null, color: c.color,
+             lattice: c.pat && c.lattice ? Procedural.latticeClone(c.lattice) : null };
   },
   putFill(P, st){
     P.onChan((c, x) => {
       c.grad = st.grad ? Gradient.clone(st.grad) : null;
       if (st.pat && st.patImg) { c.pat = Procedural.patClone(st.pat); c.patImg = st.patImg; c.patName = st.patName || null; }
       else { c.pat = null; delete c.patImg; delete c.patName; }
+      if (st.pat && st.lattice) c.lattice = Procedural.latticeClone(st.lattice); else delete c.lattice;
       if (st.color) c.color = st.color;
       if (!c.grad && !c.pat) { delete c._gradSheet; delete c._gradKey; }   // a flat fill keeps no sheet behind it
       if (x._thumb) x._thumbRev = -1; else x._thumb = null;
@@ -98,7 +101,7 @@ const GradUI = {
   build(P){
     const { C, mk } = P;
     const kind = GradUI.kindOf(C);
-    const r = mk(`<label title="A flat colour; a gradient across the sheet (a Limit rectangle centres it) or along the model — nose to tail, top to bottom; a noise along the model, for grime, chips and rain marks; or a pattern — an image of your own, repeated across the sheet or wrapped round the model from three sides.">Fill</label>` +
+    const r = mk(`<label title="A flat colour; a gradient across the sheet (a Limit rectangle centres it) or along the model; a noise along the model, for grime, chips and rain marks; a pattern — an image of your own, repeated on the sheet or wrapped round the model; or a lattice — a honeycomb or its kin, drawn for you.">Fill</label>` +
       `<select style="flex:1">${GradUI.KINDS.map(([k, w]) => `<option value="${k}"${k === kind ? " selected" : ""}>${w}</option>`).join("")}</select>`);
     r.querySelector("select").onchange = e => GradUI.setKind(P, e.target.value);
     if (C.pat) { GradUI.patRows(P); return; }
@@ -112,11 +115,20 @@ const GradUI = {
   setKind(P, k){
     const C = P.C, col = C.grad && C.grad.stops.length ? Gradient.sorted(C.grad.stops)[0].color : C.color;
     if (k === "flat") { GradUI.stepFill(P, "flat fill", { grad: null, pat: null, color: col }); return; }
+    if (k === "latuv" || k === "latmodel") {
+      // a lattice is a tile the app draws (4.55): the one this fill had, or a honeycomb
+      const space = k === "latmodel" ? "model" : "uv", l = Procedural.latticeClone(C.lattice || Procedural.latticeMake());
+      const p = Procedural.patClone(C.pat || Procedural.patMake(space));
+      p.space = space;
+      if (space === "model" && !App.geomData) setStatus("No vehicle is loaded — a lattice along the model will show once one is", "err");
+      GradUI.stepFill(P, "lattice " + (space === "model" ? "along the model" : "on the sheet"), GradUI.latState(p, l));
+      return;
+    }
     if (k === "patuv" || k === "patmodel") {
       const space = k === "patmodel" ? "model" : "uv";
       // nothing to repeat yet: choose it first — with the rows rebuilt under the picker, so that
       // closing it without a file leaves the select saying what the fill still is
-      if (!C.patImg) { refreshLayerList(); GradUI.pickTile(P, space); return; }
+      if (!C.patImg || C.lattice) { refreshLayerList(); GradUI.pickTile(P, space); return; }
       const p = Procedural.patClone(C.pat || Procedural.patMake(space));
       p.space = space;
       if (space === "model" && !App.geomData) setStatus("No vehicle is loaded — a pattern along the model will show once one is", "err");
@@ -194,6 +206,12 @@ const GradUI = {
   // model by a tile size in metres with the three projections' blend. Angle and offset for both.
   patRows(P){
     const C = P.C, p = Procedural.patClone(C.pat), model = p.space === "model";
+    if (C.lattice) GradUI.latRows(P); else GradUI.tileRow(P, p);
+    GradUI.repeatRows(P, p, model);
+  },
+  // An image tile's row: its picture, its name, and the button that picks another.
+  tileRow(P, p){
+    const C = P.C;
     const r = P.mk(`<label title="The image that repeats — any picture, or a DDS. One that tiles seamlessly hides its own edges; the app does not make it seamless for you.">Tile</label>`);
     const th = mkCanvas(20, 20);
     th.style.cssText = "border-radius:3px;flex:0 0 auto";
@@ -206,6 +224,42 @@ const GradUI = {
     b.style.cssText = "padding:1px 6px;font-size:11px";
     b.onclick = () => GradUI.pickTile(P, p.space);
     r.append(th, nm, b);
+  },
+  // ---- a lattice (4.55) ----
+  // The fill state of a lattice pattern: its record, and the tile drawn from it.
+  latState(p, l){
+    const cv = GradFill.latticeTile(l);
+    return { grad: null, pat: p, patImg: cv, patName: "lattice", lattice: l, color: GradUI.meanOf(cv) };
+  },
+  LAT_NAMES: { hex: "hexagons", square: "squares", diamond: "diamonds", triangle: "triangles", scale: "scales" },
+  // The cells' shape, the fill and the border — each drawn or not, in its own colour — and the
+  // border's width. A change of shape, colour or switch is one undo step; the width is a slider.
+  latRows(P){
+    const l = Procedural.latticeClone(P.C.lattice);
+    // Each change starts from the record and the pattern as they are WHEN it is made: the sliders
+    // below write without rebuilding these rows, so a copy taken here would put their edits back —
+    // Repeats 20 and a 25 % border became 8 and 8 % again at the next change of cells (review of 4.55a).
+    const step = (desc, edit) => GradUI.stepFill(P, desc, GradUI.latState(Procedural.patClone(P.C.pat), Object.assign(Procedural.latticeClone(P.C.lattice), edit)));
+    const r = P.mk(`<label title="The shape of the cells. They line up across the whole sheet, or all round the model, wherever the fill shows.">Cells</label>` +
+      `<select style="flex:1">${Procedural.LATTICE.map(k => `<option value="${k}"${k === l.kind ? " selected" : ""}>${GradUI.LAT_NAMES[k]}</option>`).join("")}</select>`);
+    r.querySelector("select").onchange = e => step("lattice cells", { kind: e.target.value });
+    for (const [k, on, lab, tip] of [["fill", "fillOn", "Cell fill", "The inside of every cell: its colour, or — unticked — clear, so only the border is drawn over what is under it."],
+                                     ["border", "borderOn", "Border", "The line between cells: its colour, or — unticked — none, so the cells' fill meets edge to edge."]]) {
+      const rr = P.mk(`<label title="${tip}">${lab}</label><input type="checkbox"${l[on] ? " checked" : ""} title="${tip}">` +
+        `<input type="color" value="${l[k]}" title="${tip}" style="flex:0 0 auto;width:28px;height:20px;padding:0">`);
+      rr.querySelector("input[type=checkbox]").onchange = e => step("lattice " + k, { [on]: e.target.checked });
+      rr.querySelector("input[type=color]").onchange = e => step("lattice " + k + " colour", { [k]: e.target.value });
+    }
+    const rw = P.mk(`<label title="How wide the border is, as a share of one cell — a hexagon's side, a square's.">Border width</label><input type="range" min="0" max="40" step="1" value="${Math.round(l.width * 100)}"><span class="val">${Math.round(l.width * 100)}%</span>`);
+    bindUndoRange(rw.querySelector("input[type=range]"), () => Math.round(Procedural.latticeClone(P.C.lattice).width * 100), v => {
+      const q = Object.assign(Procedural.latticeClone(P.C.lattice), { width: v / 100 }), cv = GradFill.latticeTile(q);
+      P.onChan((c, x) => { c.lattice = q; c.patImg = cv; c.color = GradUI.meanOf(cv); if (x._thumb) x._thumbRev = -1; else x._thumb = null; });
+      GradFill.retry(layerFamily(P.L).map(e => e.slot));
+    }, "lattice border width", () => { rw.querySelector(".val").textContent = Math.round(Procedural.latticeClone(P.C.lattice).width * 100) + "%"; });
+  },
+  // How a tile repeats: across the sheet by a whole number of repeats, or along the model by a size
+  // in metres with the three projections' blend; angle and offset for both.
+  repeatRows(P, p, model){
     if (model) {
       const rs = GradUI.metreRow(P, "Size", "How wide one tile is on the vehicle — the same on every texture the vehicle uses. Drag for 2 cm to 50 m, or type metres in the box.", p.size, -170, 170);
       GradUI.patSlider(P, rs, x => Math.log10(x.size) * 100, (x, v) => { x.size = +Math.pow(10, v / 100).toPrecision(3); }, "pattern size", (row, x) => { row.querySelector("input.val").value = x.size; });
@@ -422,6 +476,22 @@ const GradUI = {
         for (const s of n.stops) s.t = 1 - s.t;
         io.step("reverse gradient", n);
       }));
+    // ROADMAP 4.56: the holographic sets, as one step that replaces the stops. Colour only — on a
+    // single-value channel a rainbow would be its luminance, which is not what any of them is for.
+    if (!grey) {
+      const sel = document.createElement("select");
+      sel.title = "Recolour the stops with a holographic set — a rainbow, foil, oil slick, pearl or heat tint — keeping how transparent the gradient is along its length. One undo step";
+      sel.style.cssText = "flex:1;min-width:0;font-size:11px";
+      sel.append(new Option("holo preset…", ""), ...Gradient.HOLO.map(P => new Option(P.name, P.id)));
+      sel.onchange = () => {
+        const n = Gradient.clone(io.get()), stops = Gradient.holoOver(sel.value, n.stops);
+        sel.value = "";
+        if (!stops) return;
+        n.stops = stops;
+        io.step("holo preset", n);
+      };
+      r.append(sel);
+    }
     const h = document.createElement("div");
     h.className = "hint";
     h.style.margin = "0 0 4px";

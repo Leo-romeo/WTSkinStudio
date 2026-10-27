@@ -6,10 +6,14 @@
 // Settings. What stays is what is edited — Brush, Selection, Projected image, Decal, Surface tools.
 //
 // Decisions taken 2026-09-20:
-//   (a) The Export window is NON-MODAL, undimmed, and stays open while painting. Two of its
-//       settings — camo under skin and alpha — are previewed by the 3-D view itself (the item says
-//       so), which a modal's backdrop would cover; and "tweak, look, export" should not need the
-//       window reopened each round. Reversal: a backdrop element and one class.
+//   (a) The Export window is NON-MODAL and undimmed: two of its settings — camo under skin and
+//       alpha — are previewed by the 3-D view itself, which a modal's backdrop would cover.
+//       Reversal: a backdrop element and one class. It also stayed open while painting, so "tweak,
+//       look, export" needed no reopening — REVERSED 2026-10-23 by the owner (ROADMAP 3.43, "the
+//       export menu does not close by itself when it should"): it closes after an export from it
+//       has finished, on a press in either view (orbiting and panning included), and when a tool
+//       starts from the keyboard — never on a press inside it, while an export is running, or after
+//       one that failed or was cancelled, so its message stays in sight. `closeExport`, `run`.
 //   (b) The View panel FLOATED by default and could be docked back into the sidebar with the button
 //       in its header; the choice was a layout pref (`ui.viewDock`), so Reset layout restored it.
 //       Floating is what was asked for ("move to the top"); docking is the option the item named.
@@ -21,6 +25,7 @@
 // One window at a time: a second one over the first is clutter, and Escape closes whichever is up.
 const TopWin = {
   open: null,                       // id of the open window, or null
+  busy: 0,                          // exports started from here and still running (3.43): nothing closes the window under them
   docked: false,                    // View & scene + Moving parts live in the sidebar, not the window
   FLOAT_OFF: true,                  // floating View & scene is parked (decision (b)): docked, no button
   // window id → the sections it holds, in order; the host inside the window they go into
@@ -44,6 +49,16 @@ const TopWin = {
     this.dockButton();
     if (this.FLOAT_OFF) this.dock(true);
     this.foot();
+    // ROADMAP 3.42: Export exports, at once, with the settings as they stand — what "To War
+    // Thunder" does — and the gear beside it (the window's `data-for`) is what opens the settings.
+    // The click goes straight to doExport, so the folder question, when there is one, is asked
+    // inside this click's activation and before the encode (3.21).
+    $("btnExport").onclick = () => this.run(() => doExport(true));
+    this.browserNote();
+    // A press in either view closes the Export window (3.43). On the view, not its canvas, and in the
+    // capture phase: the canvases take pointer capture and a stroke or an orbit starts on this same
+    // press, so it must close whatever the canvas handler then does. The press itself goes on.
+    for (const v of ["view3dwrap", "view2dwrap"]) $(v).addEventListener("pointerdown", () => this.closeExport(), true);
     // Not while the Controls & guide screen covers the window. The guide takes Escape itself when it
     // is on top (ui/keys.js); when a dialog or Messages is drawn over it, it steps aside WITHOUT
     // stopping the key — that thing needs it — and this listener then closed the window hidden under
@@ -98,8 +113,9 @@ const TopWin = {
     if (on && this.open === "winView") this.close();
     this.dockLabel();
   },
-  // The three ways out, at the foot of the Export window — the "Export as…" popover they used to
-  // be, now under the settings they act on.
+  // The ways out, at the foot of the Export window — the "Export as…" popover they used to be, now
+  // under the settings they act on. Export in the top bar does the first one in one click (3.42);
+  // the others are reached from here, behind its gear. *Zip for WT Live* is 4.50 (13)'s.
   foot(){
     const f = $("winExportFoot");
     if (!f) return;
@@ -110,9 +126,37 @@ const TopWin = {
       f.appendChild(b);
       return b;
     };
-    mk("To War Thunder", "Writes the skin folder into your game's UserSkins — auto-detected when the game folder is open, otherwise you pick it. Where the browser cannot write there (an install under Program Files), it offers the .zip instead", () => doExport(true), true).id = "btnExportGame";
-    mk("Download .zip", "A zip you unzip into UserSkins yourself", () => doExport(false)).id = "btnExportZip";
-    mk("Save project", "Editable project (.wtproj) — model, textures and layers embedded", () => saveProject()).id = "btnExportProj";
+    mk("To War Thunder", "Write the skin into War Thunder's UserSkins folder — the same as Export. The folder is found when the game folder is open; otherwise you pick it once. Where the browser may not write (an install under Program Files), you get the .zip instead", () => this.run(() => doExport(true)), true).id = "btnExportGame";
+    mk("Download .zip", "The skin as a .zip — put it in War Thunder/UserSkins and choose Extract here", () => this.run(() => doExport(false))).id = "btnExportZip";
+    mk("Zip for WT Live", "For uploading to the WT Live market: one .zip per vehicle, each with only its own .blk and the textures that .blk names, the archive and its folder named in English letters and digits only. The checklist above says what the app checked and what only you can", () => this.run(() => doExport(false, true))).id = "btnExportLive";
+    mk("Save project", "An editable project (.wtproj), with the model, textures and layers inside", () => this.run(() => saveProject())).id = "btnExportProj";
+  },
+  // An export from here (3.43): marked as running while it runs, and the window closed once it has
+  // finished — only on success, which doExport and saveProject answer `true`; a failure or a cancel
+  // leaves the window open with its message. Only the Export window: Settings may be up by then.
+  async run(fn){
+    let ok = false;
+    this.busy++;
+    try { ok = await fn(); } finally { this.busy--; }
+    if (ok === true) this.closeExport();
+    return ok;
+  },
+  closeExport(){ if (this.open === "winExport" && !this.busy) this.close(); },
+  // A browser without the folder API (Firefox, ROADMAP 4.57 (1)) is known before the first click,
+  // so it is said up front rather than after a picker that cannot appear: the window's first line
+  // says Export is a .zip and where to extract it, the button's tooltip says the same, and "To War
+  // Thunder" is not offered — there it would only be Download .zip under another name. Again when
+  // the window opens, because the folder it names is the game folder opened since.
+  browserNote(){
+    const zipOnly = !window.showDirectoryPicker, note = $("expZipNote"), toWT = $("btnExportGame");
+    if (note) {
+      note.style.display = zipOnly ? "" : "none";
+      note.textContent = zipOnly ? "This browser cannot write into folders, so Export downloads a .zip. " + ExportRun.zipHint() : "";
+    }
+    $("btnExport").title = zipOnly
+      ? "Download the skin as a .zip, with the current settings. " + ExportRun.zipHint()
+      : "Export the skin into War Thunder's UserSkins folder, with the current settings. The gear beside it opens them.";
+    if (toWT) toWT.style.display = zipOnly ? "none" : "";
   },
   toggle(id){ if (this.open === id) this.close(); else this.show(id); },
   show(id){
@@ -126,7 +170,7 @@ const TopWin = {
     w.style.display = "";
     this.open = id;
     $(w.dataset.for).classList.add("active");
-    if (id === "winExport") ExportPreview.show(true);   // before place(): the column is part of the width
+    if (id === "winExport") { this.browserNote(); MarketList.sync(); ExportPreview.show(true); }   // before place(): the column is part of the width
     this.place(id);
     requestAnimationFrame(() => { if (this.open === id) this.place(id); });   // once more after layout: a scrollbar widens it
     if (id === "winExport") ExportPreview.refresh();
@@ -144,7 +188,7 @@ const TopWin = {
   // Under the button, left-aligned to it, clamped to the page; as tall as the page allows.
   place(id){
     const w = $(id), b = $(w.dataset.for);
-    const r = b.getBoundingClientRect();
+    const r = (b.closest(".splitbtn") || b).getBoundingClientRect();   // the gear's window sits under the whole Export button
     const top = Math.round(r.bottom + 4);
     w.style.top = top + "px";
     w.style.maxHeight = "calc(100vh - " + (top + 8) + "px)";

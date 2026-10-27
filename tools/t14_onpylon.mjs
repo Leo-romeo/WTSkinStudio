@@ -6,7 +6,7 @@ import { installOodle } from "./oodle_lift.mjs";
 
 const src = fs.readFileSync(new URL("../wt_skin_studio.html", import.meta.url), "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   return src.slice(a + 1, b);
 };
 // Oodle, for model packs compressed with it.
@@ -14,7 +14,7 @@ const section = n => {
 // shim, which is what stood here until 2026-09-20 and had been broken since the page stopped
 // carrying RAD's blob.
 installOodle(src);
-globalThis.zstdDec = A.zstdDec;
+globalThis.Zstd = { zstdDec: A.zstdDec };   // the sections reach it as Zstd.zstdDec (ROADMAP 2.3)
 const M = new Function(section("MODEL") +
   "\nreturn { grpParseFront, GRP_CLS, loadSkeletonBytes, loadDynModelBytes, buildDynModelGeometry, MReader };")();
 

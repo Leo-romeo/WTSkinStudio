@@ -16,7 +16,7 @@ import { fileURLToPath } from "url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const src = fs.readFileSync(path.join(ROOT, "wt_skin_studio.html"), "utf8");
-const a = src.indexOf("\n/*==VALIDATE==*/"), b = src.indexOf("\n/*==ENDVALIDATE==*/");
+const a = src.search(/[\n>]\/\*==VALIDATE==\*\//), b = src.indexOf("\n/*==ENDVALIDATE==*/");
 if (a < 0 || b < 0) throw new Error("no VALIDATE section in the page");
 const { validateExport, validateWorst, WT_RULES } =
   new Function(src.slice(a + 1, b) + "\nreturn { validateExport, validateWorst, WT_RULES };")();

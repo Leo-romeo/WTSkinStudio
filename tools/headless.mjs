@@ -20,6 +20,7 @@ import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 import { fileURLToPath } from "url";
+import { killTree } from "./lanes.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -103,6 +104,15 @@ export function connect(wsUrl) {
       close() { try { ws.close(); } catch { /* already gone */ } },
     });
     ws.onerror = e => reject(new Error("CDP websocket failed: " + (e.message || "connection refused")));
+    // A browser that dies closes the socket, and every command still waiting on it must say so.
+    // Without this a send pending at that moment never settled, and the test hung with nothing
+    // left to wait for — seen 2026-10-22 under the suite's lanes (ROADMAP 0.4): a Chrome whose
+    // main process was gone, and a Node that sat on `Runtime.enable` for 15 minutes.
+    ws.onclose = () => {
+      reject(new Error("CDP websocket closed before it opened"));
+      for (const { rej } of pending.values()) rej(new Error("CDP websocket closed (the browser went away)"));
+      pending.clear();
+    };
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
       if (m.id && pending.has(m.id)) {
@@ -229,7 +239,29 @@ export async function pageContext(cdp, ms, everyMs) {
  * `expr` must be a JS expression evaluating to a Promise of a JSON-serialisable value.
  * Returns { ok, result } or { ok:false, reason }.
  */
-export async function evalInPage({ browser, inject = "", append = "", expr, timeoutMs = 60000, keep = false, html,
+//
+// ONE RELAUNCH, for a launch that never attaches. Under the suite's six lanes (ROADMAP 0.4,
+// 2026-10-22) about one launch in a few hundred never got as far as the page: `groups` and `camera`
+// each failed once "timed out waiting for a page target" at the full 60 s, and a stress of 24
+// concurrent launches caught a Chrome that never wrote DevToolsActivePort and whose main process
+// then went, leaving its crashpad and storage processes behind. Nothing in the page or the test is
+// involved — it is the browser failing to come up on a saturated machine — so a launch that fails
+// before its page is attached (port, target, socket, the page's own context: ATTACH_MS in all) is
+// killed with its whole tree and made once more, from a fresh profile, and the first failure is
+// said on stderr. A failure after attaching — the page threw, timed out, lost its context — is the
+// test's answer and is never retried.
+const ATTACH_MS = 45000;
+export async function evalInPage(opts) {
+  const first = await evalOnce(opts);
+  if (first.ok || !first.launch) { delete first.launch; return first; }
+  console.error("headless: the browser never attached (" + first.reason.split("\n")[0] + ") — killed it and launching once more");
+  const again = await evalOnce(opts);
+  delete again.launch;
+  if (!again.ok) again.reason += "\n      (a relaunch was tried: the first launch failed the same way — " + first.reason.split("\n")[0] + ")";
+  return again;
+}
+
+async function evalOnce({ browser, inject = "", append = "", expr, timeoutMs = 60000, keep = false, html,
   // How often to poll while attaching. Only `tools/t43_harness.mjs` sets it: polling as fast as
   // Chrome will answer is what makes the attach race above reproducible on demand.
   attachPollMs = 100,
@@ -299,8 +331,11 @@ export async function evalInPage({ browser, inject = "", append = "", expr, time
   // that walk went from 0.32 s (20 Jul) to 60.3 s, i.e. the leak from a heavy test day is paid
   // back a minute at a time on every single boot. Wait for the exit, then retry past the lock.
   const gone = new Promise(res => child.once("exit", res));
+  // The whole tree, not `child.kill()`: on Windows that ends the main process only, and Chrome's
+  // crashpad handler and storage service outlive it holding the profile — found 2026-10-22 still
+  // running from launches an hour old, with their `wthl-*` folders (ROADMAP 0.4).
   const done = async () => {
-    try { child.kill(); } catch { /* already exited */ }
+    killTree(child.pid);
     if (keep) { console.log("kept: " + page); return; }
     await Promise.race([gone, sleep(5000)]);
     for (let i = 0; ; i++) {
@@ -313,22 +348,33 @@ export async function evalInPage({ browser, inject = "", append = "", expr, time
     }
   };
 
+  let attached = false;
   try {
+    // Everything up to the page's own context, under one deadline (see ATTACH_MS above): each step
+    // has a wait of its own, but a socket or a fetch the browser never answers has none.
+    let attachTimer;
+    const { cdp, off, contextId } = await Promise.race([(async () => {
     // Chrome writes the port it actually chose into the profile directory.
     const portFile = path.join(profile, "DevToolsActivePort");
     const dead = () => exited && (exited + "\n" + stderr.slice(-800));
     const port = await waitFor(() => {
       const t = fs.readFileSync(portFile, "utf8").split("\n")[0].trim();
       return t && /^\d+$/.test(t) ? t : null;
-    }, 30000, "Chrome's DevToolsActivePort", 100, dead);
+    }, ATTACH_MS, "Chrome's DevToolsActivePort", 100, dead);
 
-    // 30 s, not 20: this is a COLD BROWSER LAUNCH, not a page load, and the suite runs several of
-    // them. A `nooodle` run hit the old 20 s wall exactly (2026-08-06) and passed on its own
-    // moments later — the code was never in question, only how long Chrome took to come up.
+    // Not 20 s: this is a COLD BROWSER LAUNCH, not a page load, and the suite runs several of them.
+    // A `nooodle` run hit the old 20 s wall exactly (2026-08-06) and passed on its own moments later
+    // — the code was never in question, only how long Chrome took to come up. Under six lanes a
+    // healthy launch reached its target in 7.5 s at the median and 16 s at worst (24 at once,
+    // 2026-10-22); one that has not by ATTACH_MS is not coming, and is relaunched instead.
+    let lastList = "(no answer yet)";
     const target = await waitFor(async () => {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      return list.find(t => t.type === "page" && t.webSocketDebuggerUrl) || null;
-    }, 30000, "a page target", attachPollMs, dead);
+      try {
+        const list = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+        lastList = JSON.stringify(list.map(t => ({ type: t.type, url: String(t.url).slice(0, 60), ws: !!t.webSocketDebuggerUrl })));
+        return list.find(t => t.type === "page" && t.webSocketDebuggerUrl) || null;
+      } catch (e) { lastList = "fetch: " + (e.cause && e.cause.code || e.message); throw e; }
+    }, ATTACH_MS, "a page target", attachPollMs, dead).catch(e => { throw new Error(e.message + " (last /json/list: " + lastList + ")"); });
 
     const cdp = await connect(target.webSocketDebuggerUrl);
     const off = offline ? await goOffline(cdp, pageUrl) : null;
@@ -336,6 +382,10 @@ export async function evalInPage({ browser, inject = "", append = "", expr, time
     // initial empty document and the real navigation destroys the context mid-await — see
     // pageContext() for the measurement.
     const contextId = await pageContext(cdp, 20000, attachPollMs);
+    return { cdp, off, contextId };
+    })(), new Promise((_, rej) => { attachTimer = setTimeout(() => rej(new Error(`the browser did not attach within ${ATTACH_MS / 1000} s`)), ATTACH_MS + 1000); })])
+      .finally(() => clearTimeout(attachTimer));
+    attached = true;
     const withNet = o => (off ? { ...o, requests: [...off.net.values()], watched: [...off.watched], notes: [...off.notes] } : o);
     if (drive) {
       const evaluate = async (expression, ms = timeoutMs) => {
@@ -374,13 +424,37 @@ export async function evalInPage({ browser, inject = "", append = "", expr, time
     // because chasing it into the test's own code costs hours (it did).
     if (/[Ee]xecution context|Cannot find context/.test(reason))
       reason += "\n      (the page's context went away mid-evaluate — that is the attach race pageContext() exists to prevent, not a fault in the test)";
-    return { ok: false, reason: reason + (stderr ? "\n      chrome: " + stderr.trim().split("\n").slice(-3).join("\n      ") : "") };
+    return { ok: false, launch: !attached, reason: reason + (stderr ? "\n      chrome: " + stderr.trim().split("\n").slice(-3).join("\n      ") : "") };
   }
 }
 
 // Wrap a test body (an async function taking no args and returning the result object) into an
 // expression that waits for load first, traps its own throw, and always resolves.
-export function pageExpr(bodySrc, settleMs = 300) {
+//
+// What it waits for after load (ROADMAP 0.6 (b), 2026-10-24): with no `settleMs`, on what the app's
+// boot left running — `App.bootSettled` (main.js: the brush tips, the path presets, the recovery
+// check and the remembered folder) — and then two frames, for the layout and ResizeObservers that
+// boot changes. It replaced a fixed sleep each test guessed for itself, 300 to 1 500 ms. Measured
+// 2026-10-24: `App.bootSettled` lands 405–436 ms after load on the fresh profile every round trip
+// gets (all four parts together — they wait on the first open of the app's IndexedDB), so the 300
+// and 400 ms guesses most tests used were SHORTER than the boot, and its work landed inside the test
+// body. No test read it: 82 of 82 pageExpr tests passed with no wait at all, and the 17 that touch
+// tips, path presets, recovery or the remembered folder passed with no wait even with all of the
+// boot's async work delayed 800 ms (each sets up the state it reads). So this is the wait that keeps
+// the boot out of the body, at about the cost of the guesses. A page with no `App.bootSettled` — the
+// harness's own pages, a damaged copy whose boot stopped early — has nothing to wait on and keeps a
+// fixed 300 ms. A NUMBER still means that fixed sleep instead: left where a test is about the cold
+// start itself (`boot`), uses a page of its own (`harness`), or sat in another lane's area while
+// (b) was cut (export, exppick, crafted, projload, groups, panels, stroke, pathlayer, memory) — drop
+// it there next.
+export function pageExpr(bodySrc, settleMs = null) {
+  const settle = settleMs == null
+    ? `(window.App && App.bootSettled
+          ? App.bootSettled.then(function(){}, function(){}).then(function(){
+              return new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ r(); }); }); });
+            })
+          : new Promise(function(r){ setTimeout(r, 300); }))`
+    : `new Promise(function(r){ setTimeout(r, ${Number(settleMs)}); })`;
   return `(function(){
     function afterLoad(){
       return new Promise(function(res){
@@ -389,7 +463,7 @@ export function pageExpr(bodySrc, settleMs = 300) {
       });
     }
     return afterLoad()
-      .then(function(){ return new Promise(function(r){ setTimeout(r, ${settleMs}); }); })
+      .then(function(){ return ${settle}; })
       .then(function(){ return (${bodySrc})(); })
       .then(function(o){
         o = o || {};

@@ -312,10 +312,13 @@ const ProjLive = {
   // with no drop left to release it. A move and a release inside one frame is all it takes: a drag,
   // a handle or a nudge whose last step and its commit share a frame.
   gen: 0, want: 0,
+  held: -Infinity,        // when the gate last held a step back: a drag's settle waits for it (ProjDrag.arm)
   closed(){ return ProjLive.ms[0] >= ProjLive.BUDGET && ProjLive.ms[1] >= ProjLive.BUDGET; },
   ok(){
-    return !ProjLive.closed() ||
+    const go = !ProjLive.closed() ||
       performance.now() - ProjLive.end >= Math.max(ProjLive.EVERY, ProjLive.IDLE * ProjLive.ms[0]);
+    if (!go) ProjLive.held = performance.now();
+    return go;
   },
 };
 let projEditFrom = null;
@@ -326,10 +329,11 @@ function projLiveRender(P){
   requestAnimationFrame(() => {
     ProjLive.pending = false;
     if (ProjLive.want !== ProjLive.gen) return;
-    const t0 = performance.now();
-    renderProjGroup(P, true);
+    const t0 = performance.now(), r = renderProjGroup(P, true);
     ProjLive.end = performance.now();
-    ProjLive.ms = [ProjLive.end - t0, ProjLive.ms[0]];
+    // A settled frame (1.18) is a placement's full render by design, not a step's cost: counted, it
+    // closed the gate on a machine whose steps were well inside it.
+    if (r.pace !== "settled") ProjLive.ms = [ProjLive.end - t0, ProjLive.ms[0]];
   });
 }
 function projSliderInput(P, label, val){
@@ -635,6 +639,9 @@ for (const k in SURF_DELTA_CHAN) {
 // One binding, matching `Relief` on the editor side and `DecalUI` beside it (§4).
 const ReliefUI = {
   LABEL: { edge: "From the edge (sticker rim)", bevel: "Bevelled body (no file needed)", map: "Depth or normal map…" },
+  // Not a mode of its own: a height made from the image IS a depth map, so it lands as "map". The
+  // select offers it as a fourth line because that is where someone looking for relief looks.
+  GEN_LABEL: "Generated from the image (no file needed)",
   // The depth IMAGE lives with the bitmap it belongs to: on the decal for a floating one, on the
   // shared parameters for a projection, so every sheet of one projected decal reads the same map.
   target(L){ return L && L.proj ? L.proj : L; },
@@ -649,6 +656,33 @@ const ReliefUI = {
       const o = document.createElement("option"); o.value = k; o.textContent = ReliefUI.LABEL[k];
       sel.appendChild(o);
     }
+    const g = document.createElement("option"); g.value = "gen"; g.textContent = ReliefUI.GEN_LABEL;
+    sel.appendChild(g);
+  },
+  // The decal's own image as a height map (4.19 (6), `Relief.generate`), at no more than GEN_MAX on
+  // its longer side — the map is stretched onto the bitmap wherever it is read, so a 4096² marking
+  // gains nothing from a 4096² map but the cost: a 1024² generate is two box blurs over 1 M texels.
+  // The softening is kept on the Look as `heightGen`, which is also how the panel knows the map in
+  // hand is one it made and may make again when the slider moves. One undo step, through `change`.
+  generate(soften){
+    const L = decalOfSelection(), holder = ReliefUI.target(L), src = holder && holder.bmp;
+    if (!src) { setStatus("Select a decal layer first", "err"); return false; }
+    // A projected decal's panel has no Soften, Invert or preview (#rowDepth is the floating decal's),
+    // so it takes the softening it already has, or the default — never a slider it cannot see.
+    if (L.proj) soften = Relief.genOf(surfOf(L)) ?? Relief.GEN_SOFT;
+    const c = Relief.genCanvas(src, soften);
+    if (!c) { setStatus("The decal's image is one flat tone, so there is no height to read from it — load a depth map, or use Bevelled body", "err"); return false; }
+    let gave = false;
+    if (!ReliefUI.change((surf, t) => {
+      t.heightMap = c; t.heightName = "generated from the image"; surf.relief = "map"; surf.heightFrom = "depth"; surf.heightGen = soften;
+      if (!surfDeltas(surf).em) { surf.em = 8; gave = true; }
+    }, "generate depth map")) return false;
+    // With no _n on the slot the rebuild has said so already; that is the sentence to leave up.
+    const s = App.activeSlot;
+    if (s && !s.smooth) return true;
+    setStatus("Depth map generated from the decal's own image (" + c.width + "×" + c.height + ", softened " + soften + ") — light is high" +
+      (L.proj ? "" : "; tick Invert if the marking should be the low part") + (gave ? ". Emboss set to 8 so it has something to apply at" : ""), "ok");
+    return true;
   },
 // Two panels show the same state — a floating decal's and a projected one's — so one function puts
 // both right, along with the rows that only exist for one mode.
@@ -669,10 +703,27 @@ const ReliefUI = {
     const hm = tgt && tgt.heightMap;
     $("depthInfo").textContent = hm ? (tgt.heightName || "loaded") + " · " + hm.width + "×" + hm.height : "none loaded";
     $("btnDepthClear").disabled = !hm;
+    // The map in hand, as a picture: what the relief is being read from (4.19 (6)'s preview).
+    const pv = $("depthPreview"), pg = ctx2d(pv);
+    pg.clearRect(0, 0, pv.width, pv.height);
+    // Only while the relief reads a map (a normal map is integrated to show it, 87–358 ms the first
+    // time), and the way the relief reads it: turned over under Invert.
+    const shown = mode === "map" && hm && Relief.heightImage(tgt, surf);
+    if (shown) {
+      const k = Math.min(pv.width / shown.width, pv.height / shown.height);
+      pg.filter = surf && surf.heightInv ? "invert(1)" : "none";
+      pg.drawImage(shown, (pv.width - shown.width * k) / 2, (pv.height - shown.height * k) / 2, shown.width * k, shown.height * k);
+      pg.filter = "none";
+    }
+    const gen = Relief.genOf(surf);
+    if (gen != null) { $("depthGenSoft").value = gen; $("depthGenSoftVal").textContent = gen; }
   },
 // A relief change is a change to the decal's surface, so it goes back through whichever apply path
 // that decal has: a projection re-renders from its parameters — which is where its undo comes from
-// — and a floating decal rebuilds its derived layers where it stands.
+// — and a floating decal rebuilds its derived layers where it stands. A floating decal's change is
+// an undo step of its own: the Look before and after (each edit replaces the object, so the old one
+// is intact) and the depth map with its name. It had none — loading a depth map over another was
+// gone for good, and 4.19 (6)'s Generate, beside Load…, made that one click (its review, 2026-10-23).
   change(mutate, desc){
     const L = decalOfSelection(), s = App.activeSlot;
     if (!L) { setStatus("Select a decal layer first", "err"); return false; }
@@ -682,15 +733,29 @@ const ReliefUI = {
       mutate(L.proj.surf, L.proj);
       updateProjGroup(L.proj, desc, from);
     } else {
+      const was = { surf: L.surf, map: L.heightMap || null, name: L.heightName || null };
       L.surf = { ...(L.surf || { sm: 0, mt: 0, em: 6 }) };
       mutate(L.surf, L);
-      if (hasDerived(L)) { refreshDecalSurface(s, L); flushComposites(); }
-      else if (surfHasResponse(L.surf)) applyDecalSurface(s, L);
-      else setStatus("Relief set — it appears once the Look has an Emboss value to apply it at", "ok");
+      const now = { surf: L.surf, map: L.heightMap || null, name: L.heightName || null };
+      ReliefUI.rebuild(s, L, true);
+      pushAction(desc, () => ReliefUI.put(s, L, was), () => ReliefUI.put(s, L, now));
     }
     ReliefUI.sync();
     refreshLayerList();
     return true;
+  },
+  // A floating decal's surface rebuilt for the Look it now has (`say`: the first time, when there is
+  // nothing to rebuild yet, tell the user why nothing shows).
+  rebuild(s, L, say){
+    if (hasDerived(L)) { refreshDecalSurface(s, L); flushComposites(); }
+    else if (surfHasResponse(L.surf)) applyDecalSurface(s, L);
+    else if (say) setStatus("Relief set — it appears once the Look has an Emboss value to apply it at", "ok");
+  },
+  put(s, L, v){
+    L.surf = v.surf; L.heightMap = v.map; L.heightName = v.name;
+    ReliefUI.rebuild(s, L, false);
+    if (decalOfSelection() === L) ReliefUI.sync();
+    refreshLayerList();
   },
 };
 for (const id of ["reliefMode", "projRelief"]) $(id).onchange = e => {
@@ -698,6 +763,7 @@ for (const id of ["reliefMode", "projRelief"]) $(id).onchange = e => {
   // "Depth map" with no map loaded is a promise rather than a mode, so it asks for the file and
   // only commits once there is one (§4: a control that cannot do what it offers).
   if (v === "map" && !(tgt && tgt.heightMap)) { ReliefUI.sync(); $("rowDepth").style.display = ""; $("depthPick").click(); return; }
+  if (v === "gen") { if (!ReliefUI.generate(+$("depthGenSoft").value)) ReliefUI.sync(); return; }
   if (!ReliefUI.change(surf => surf.relief = v, "decal relief")) return;
   setStatus(v === "bevel" ? "Bevelled body — the marking gets a rounded edge " + Relief.bevel(surfOf(L)) + " px wide"
     : v === "map" ? "Relief follows the depth map" : "Relief is the outline again", "ok");
@@ -735,7 +801,14 @@ $("reliefCavity").onchange = e => {
               : "Cavity off — the decal's colour is its own again", "ok");
 };
 $("btnDepthLoad").onclick = () => $("depthPick").click();
-$("btnDepthClear").onclick = () => ReliefUI.change((surf, tgt) => { tgt.heightMap = null; tgt.heightName = null; surf.relief = "edge"; }, "remove depth map");
+$("btnDepthGen").onclick = () => ReliefUI.generate(+$("depthGenSoft").value);
+// Softening a map this panel made makes it again; with a loaded map it only sets the next generate.
+$("depthGenSoft").oninput = e => $("depthGenSoftVal").textContent = e.target.value;
+$("depthGenSoft").onchange = e => {
+  const L = decalOfSelection(), surf = L ? surfOf(L) : null;
+  if (Relief.genOf(surf) != null) ReliefUI.generate(+e.target.value);
+};
+$("btnDepthClear").onclick = () => ReliefUI.change((surf, tgt) => { tgt.heightMap = null; tgt.heightName = null; surf.relief = "edge"; delete surf.heightGen; }, "remove depth map");
 $("depthPick").onchange = async e => {
   const f = e.target.files && e.target.files[0];
   e.target.value = "";
@@ -747,7 +820,7 @@ $("depthPick").onchange = async e => {
     const kind = Relief.detect(img);
     let gave = false;
     ReliefUI.change((surf, tgt) => {
-      tgt.heightMap = img; tgt.heightName = f.name; surf.relief = "map"; surf.heightFrom = kind.from;
+      tgt.heightMap = img; tgt.heightName = f.name; surf.relief = "map"; surf.heightFrom = kind.from; delete surf.heightGen;
       // A depth map loaded onto a Look with no Emboss at all would change nothing and look broken.
       // Give it one, and say so — the alternative is a file picker that appears to do nothing.
       if (!surfDeltas(surf).em) { surf.em = 8; gave = true; }

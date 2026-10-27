@@ -109,10 +109,10 @@ const BRUSHRESET = `
   // sentence and moves when the cases are reordered — a fixture that fails for a reason that is
   // not a regression is a fixture that gets deleted.
   $("brushHint").textContent = "";
-  App.brush.size = 48; App.brush.opacity = 1; App.brush.hardness = .7; App.brush.value = 128; App.brush.spacing = .35;
+  App.brush.size = 48; App.brush.opacity = 1; App.brush.hardness = .7; App.brush.value = 128; App.brush.spacing = .15;
   // ROADMAP 4.50 (4) + 6.4's rows, the same way: Flow, Build up, what pressure drives, the string.
   Object.assign(App.brush, { flow: 1, build: false, pSize: true, pFlow: false, lazy: 0, curve: 1 });
-  for (const [id, v] of [["brushSize", 48], ["brushOpacity", 100], ["brushHardness", 70], ["brushValue", 128], ["brushSpacing", 35],
+  for (const [id, v] of [["brushSize", 48], ["brushOpacity", 100], ["brushHardness", 70], ["brushValue", 128], ["brushSpacing", 15],
                          ["brushFlow", 100], ["brushLazy", 0]]) {
     const el = document.getElementById(id); if (el) el.value = v;
     const lab = document.getElementById(id + "Val"); if (lab) lab.textContent = id === "brushLazy" ? "off" : String(v);
@@ -286,6 +286,51 @@ const CASES = [
       App.activeLayer = s.layers[1];
       refreshLayerList();
       return panel();` },
+  // ---- ROADMAP 4.58: which mip levels a node shows at — the Shows at row and the list's tag ----
+  // Only a node with a range has the row, so every case above is unchanged by it. No model is loaded
+  // here, so the row's distance is absent and the hint is the level-0 sentence alone.
+  { id: "layers-panel-props-levels", min: 1500,
+    what: "layers panel: a far-only layer with a soft edge — Shows at's three selects, its ✕, the level-0 hint, and mip 3+ on its row",
+    src: `${LSLOT}
+      App.selParts = new Set();
+      s.layers = [fillL("Base"), fillL("Far message", { levels: Levels.make(3, 15, 1) })];
+      App.activeLayer = s.layers[1];
+      refreshLayerList();
+      return panel();` },
+  { id: "layers-panel-props-levels-group", min: 1500,
+    what: "layers panel: a near-only group selected — Shows at on a group, no level-0 hint, and mip 0–2 on its row",
+    src: `${LSLOT}
+      App.selParts = new Set();
+      s.layers = [fillL("Base"), grp("Near look", [paint("Kill marks")], { levels: Levels.near(3) })];
+      App.activeLayer = s.layers[1];
+      refreshLayerList();
+      return panel();` },
+  // ---- ROADMAP 4.58 (c): a number keyed by level — the By distance row — and the level effects ----
+  // The row is there only on a content with keys (or once the layer menu asks), so no case above moves.
+  { id: "layers-panel-props-keys", min: 1500,
+    what: "layers panel: a fill keyed red at 0, green at 2 and blue at 4 with level 3 in hand — By distance, a bar per level, the level's colour, its ✕ and ✕ all, the plain colour read-only",
+    src: `${LSLOT}
+      App.selParts = new Set();
+      s.layers = [fillL("Base"), fillL("Holo", { keys: { color: [[0, "#ff0000"], [2, "#00ff00"], [4, "#0000ff"]] } })];
+      App.activeLayer = s.layers[1];
+      LayerProps.keySel = { uid: s.layers[1].uid, param: "color", level: 4 };
+      refreshLayerList();
+      const h = panel();
+      LayerProps.keySel = { uid: null, param: null, level: 0 };
+      return h;` },
+  { id: "level-effects-dialog", min: 1500,
+    what: "the level effects dialog: Holo foil's palette, first level, cycle and strength, then Distance camouflage on a texture with one group (the note, Add disabled), and the UserSkin line",
+    src: `${LSLOT}
+      s.layers = [fillL("Base"), grp("Only group", [paint("A")])];
+      const shot = () => { const ov = document.getElementById("modalHost").lastElementChild, h = ov.innerHTML; ov.querySelector(".x").click(); return h; };
+      LayerProps.presetId = "holo";
+      LayerProps.presetDialog(s);
+      const holo = shot();
+      LayerProps.presetId = "camo";
+      LayerProps.presetDialog(s);
+      const camo = shot();
+      LayerProps.presetId = null;
+      return holo + camo;` },
   // ---- ROADMAP 4.50 (5): a gradient's stop rows, captured before the gradient map reused them ----
   // `GradUI.stopRows` edits a gradient map's stops as well since 4.50 (5), which made it take the
   // record it edits as an argument. Both cases were captured against the build BEFORE that change
@@ -346,6 +391,17 @@ const CASES = [
       App.activeLayer = s.layers[0];
       refreshLayerList();
       return panel();` },
+  // ---- ROADMAP 4.55: a lattice's rows — its cells, fill and border with their switches, the width —
+  // above the pattern's own repeats, in place of the tile row ----
+  { id: "layers-panel-props-lattice-uv", min: 1500,
+    what: "layers panel: a lattice on the sheet — the cells, the fill and the border with their switches and colours, the border width, then the repeats",
+    src: `${LSLOT}
+      App.selParts = new Set();
+      s.layers = [fillL("Honeycomb", { color: "#262a30", pat: { space: "uv", repeat: 12, size: 1, angle: 0, x: 0, y: 0, sharp: 4 },
+        patImg: cv("#262a30"), patName: "lattice", lattice: { kind: "hex", fill: "#262a30", border: "#d8dde4", width: .08, fillOn: true, borderOn: false } })];
+      App.activeLayer = s.layers[0];
+      refreshLayerList();
+      return panel();` },
   { id: "layers-panel-props-pattern-model-normal", min: 1500,
     what: "layers panel: a pattern along the model on the normal map — the size in metres, the blend, and the warning",
     src: `${LSLOT}
@@ -380,7 +436,7 @@ const CASES = [
     // numbers' is `layers-panel-props-adjust`); their rows were checked by --dump before capture.
     ["invert", "an Invert effect — the kind select and its hint, and nothing to set", "color", { type: "invert" }, "rgb"],
     ["posterize", "a Posterize effect — one number and its hint", "color", { type: "posterize", levels: 6 }, "rgb"],
-    ["unknown", "an effect kind from a newer build — named as such, with no rows", "color", { type: "blur", radius: 3 }, "rgb"],
+    ["unknown", "an effect kind from a newer build — named as such, with no rows", "color", { type: "emboss", radius: 3 }, "rgb"],
   ].map(([k, what, ch, fx, sub]) => ({ id: "layers-panel-fx-" + k, min: 1500, what: "layers panel: " + what,
     src: `${LSLOT}
       App.selParts = new Set();
@@ -558,6 +614,24 @@ const CASES = [
       const html = document.getElementById("slotList").innerHTML;
       App.slotMenu = null;
       return html;` },
+  // The vehicle's jet-flame sheet (ROADMAP 4.13, item 18): the texture-only slot the desc gives the
+  // flame material, beside an ordinary one. Captured before the row learned to name it.
+  { id: "slots-list-flame", min: 300,
+    what: "texture slots: the vehicle's jet-flame sheet beside an ordinary loaded texture",
+    src: `
+      const N = 16, cv = () => mkCanvas(N, N);
+      const mk = (id, extra) => Object.assign({ id, layers: [], size: N, sizeH: N, missing: false,
+                                                baseC: cv(), composite: cv() }, extra || {});
+      const a = mk("hull_c", { smooth: cv(), metal: cv(), normal: cv(), covBase: new Uint8Array(N * N) });
+      const f = mk("jet_flame_diamonds", { noGeom: true, cStem: "jet_flame_diamonds" });
+      const matWas = new Map(App.matEffect);
+      App.matEffect.clear(); App.matEffect.set("jet_flame_diamonds", "jet_flame_diamonds");
+      App.slots = new Map([["hull_c", a], ["jet_flame_diamonds", f]]);
+      App.activeSlot = a; App.activeLayer = null; App.slotMenu = null;
+      refreshSlotList();
+      const html = document.getElementById("slotList").innerHTML;
+      App.matEffect.clear(); matWas.forEach((v, k) => App.matEffect.set(k, v));
+      return html;` },
   // The Channels panel the case above also refreshes, hashed on its own: it is the other 81-line
   // builder in ui/panels/slots.js (2.4), and until this case nothing looked at what it drew.
   { id: "channels-panel", min: 300,
@@ -619,6 +693,46 @@ const CASES = [
       } finally {
         GameDB.vehicleRows = keep.rows; GameDB.models = keep.models; GameDB.stems = keep.stems;
         GameUnits.byId = keep.units; App.vehicleKey = keep.key; App.skinUnits = keep.su;
+        document.getElementById("gameSearch").value = "";
+      }` },
+
+  // The update panel (ROADMAP 5.7): this build's notes, then a check that found two newer builds, then
+  // one that found nothing newer. Its own notes are stubbed and the version masked, so editing
+  // RELEASE_NOTES.md or bumping the version does not move the hash; what it holds is the panel.
+  { id: "updates-panel", min: 300,
+    what: "update panel: What's new, two newer builds with notes, and the newest-build answer",
+    src: `
+      const keep = Updates.ownNotes;
+      Updates.ownNotes = () => "### Fixed\\n\\n- **One** thing, with \`code\`\\n  and a second line.\\n\\nA paragraph.";
+      try {
+        const rel = (v, notes) => ({ ver: v, name: "v" + v, date: "2026-11-01", size: 3617008, notes, page: Updates.PAGE + "/tag/v" + v });
+        const a = Updates.panel({ whatsNew: true }).outerHTML;
+        const b = Updates.panel({ result: { kind: "newer", newer: [rel("2.0.0", "- big <b>change</b>"), rel("1.9.0", "")] } }).outerHTML;
+        const c = Updates.panel({ result: { kind: "newest" } }).outerHTML;
+        return (a + b + c).split(APP_VERSION).join("X");
+      } finally { Updates.ownNotes = keep; }` },
+
+  // The texture search's rows (ROADMAP 4.59 gave a readable one its *save*): one that opens, one at
+  // a higher tier, and one whose format nothing reads, which keeps no buttons at all.
+  { id: "search-texture-rows", min: 300,
+    what: "texture search: a readable row, a readable $hq row, and a row in a format the editor does not read",
+    src: `
+      const keep = { stems: GameDB.stems, tex: GameFilter.tex, cls: GameFilter.cls, q: document.getElementById("gameQuality").value };
+      try {
+        const en = (stem, tier, w, extra) => Object.assign({ stem, tier, w, h: w, size: 4096, supported: true, compName: "zstd", fmt: "DXT5" }, extra || {});
+        GameDB.stems = new Map([
+          ["hull_c", { stem: "hull_c", tiers: { base: en("hull_c", "base", 1024) } }],
+          ["hull_n", { stem: "hull_n", tiers: { hq: en("hull_n", "hq", 2048) } }],
+          ["hull_dmg", { stem: "hull_dmg", tiers: { base: en("hull_dmg", "base", 512, { supported: false, fmt: "R16F" }) } }],
+        ]);
+        document.getElementById("gameQuality").value = "auto";
+        setTexMode(true);
+        document.getElementById("gameSearch").value = "hull";
+        renderGameSearch();
+        return document.getElementById("gameList").innerHTML;
+      } finally {
+        GameDB.stems = keep.stems; GameFilter.tex = keep.tex; GameFilter.cls = keep.cls;
+        document.getElementById("gameQuality").value = keep.q;
         document.getElementById("gameSearch").value = "";
       }` },
 
@@ -799,6 +913,85 @@ const CASES = [
         App.matPaint = keep.mp; App.paintTex = keep.pt; App.paintColor = keep.pc; App.skinUnits = keep.su;
         CamoTile.unitStems = keep.us; CamoTile._stems = null; App.slots = keep.slots;
         $("expMode").value = keep.mode; $("expCamoBase").value = keep.base; Object.assign(CamoTile.view, keep.view);
+      }` },
+
+  // updateExportWarnings across the states it tells apart (fix plan 2026-10-23, step 6, captured before
+  // the function was split): each class and mode's notes, the camouflage cases, and the tile rows with
+  // their sliders' read-outs and the grid button's two halves.
+  { id: "export-warnings", min: 600,
+    what: "the pre-export warnings and the camo rows: tank replace_tex with alpha kept, set_tex with no camo found, Leave it, stock unread, My own pattern with and without the grid, aircraft set_tex",
+    src: `
+      const keep = { mp: App.matPaint, pt: App.paintTex, pc: App.paintColor, su: App.skinUnits, us: CamoTile.unitStems,
+        mode: $("expMode").value, base: $("expCamoBase").value, alpha: $("expAlpha").value, slots: App.slots, view: Object.assign({}, CamoTile.view) };
+      const unit = cls => [{ unit: { id: "us_t44_" + cls, name: "T44 " + cls, cls: cls, country: "" }, score: 100, on: true }];
+      const out = [];
+      const look = (cls, mode, base, alpha, stems) => {
+        App.skinUnits = unit(cls);
+        App.matPaint = new Map(stems ? [["hull", "us_camo_olive"]] : []);
+        CamoTile._stems = null;
+        $("expMode").value = mode; $("expCamoBase").value = base; $("expAlpha").value = alpha;
+        updateExportWarnings();
+        out.push([cls, mode, base, alpha, $("expMode").value, $("expWarn").outerHTML, $("rowCamoBase").style.display, $("rowCamoTile").style.display,
+          $("rowCamoCal").style.display, $("camoTileInfo").style.display, $("btnCamoTileCal").textContent, $("camoTileScaleVal").textContent,
+          $("camoTileRotVal").textContent].join(" / "));
+      };
+      try {
+        App.paintTex = new Map(); App.paintColor = new Map(); App.slots = new Map();
+        CamoTile.unitStems = () => new Set(["us_camo_olive"]);
+        look("tank", "replace_tex", "stock", "keep", true);
+        look("tank", "set_tex", "stock", "auto", false);
+        look("tank", "set_tex", "keep", "auto", true);
+        look("tank", "set_tex", "stock", "auto", true);
+        look("ship", "set_tex", "tile", "auto", true);
+        CamoTile.ensure(16); CamoTile.view.scale = .75; CamoTile.view.rot = 12;
+        look("tank", "set_tex", "tile", "auto", true);
+        look("air", "set_tex", "stock", "auto", true);
+        look("air", "replace_tex", "stock", "auto", true);
+        return out.join(" || ");
+      } finally {
+        App.matPaint = keep.mp; App.paintTex = keep.pt; App.paintColor = keep.pc; App.skinUnits = keep.su;
+        CamoTile.unitStems = keep.us; CamoTile._stems = null; App.slots = keep.slots;
+        $("expMode").value = keep.mode; $("expCamoBase").value = keep.base; $("expAlpha").value = keep.alpha; Object.assign(CamoTile.view, keep.view);
+        updateExportWarnings();
+      }` },
+
+  // ROADMAP 3.44: what the Export window's settings column SAYS — the line under Mode, Alpha and
+  // inverted roughness, the Applies-to list's two notes, the tile's scale line, and the DXT5 warning —
+  // each one line with the rest in its tooltip (the title is part of the markup, so a tooltip that
+  // loses its text moves the hash). Captured before the change, so the diff of `--dump` is the review.
+  { id: "export-notes", min: 400,
+    what: "Export window: the one-line notes under Mode / Alpha / roughness, Applies to's notes, the tile's scale line and the DXT5 warning, with their tooltips",
+    src: `
+      const N = 16, s = { id: "t44exp", size: N, nSize: N, layers: [], missing: false, baseC: mkCanvas(N, N), composite: mkCanvas(N, N) };
+      const keep = { mp: App.matPaint, pt: App.paintTex, pc: App.paintColor, su: App.skinUnits, us: CamoTile.unitStems,
+        mode: $("expMode").value, base: $("expCamoBase").value, alpha: $("expAlpha").value, rough: $("optInvRough").checked,
+        preset: $("expPreset").value, slots: App.slots, slot: App.activeSlot, view: Object.assign({}, CamoTile.view) };
+      try {
+        App.matPaint = new Map([["hull", "us_camo_olive"]]);
+        App.paintTex = new Map(); App.paintColor = new Map();
+        App.skinUnits = [
+          { unit: { id: "us_m1a2_sep3_abrams", name: "M1A2", cls: "tank", country: "" }, score: 100, on: true },
+          { unit: { id: "us_m1a2_other", name: "M1A2 other", cls: "tank", country: "" }, score: 100, on: false, sameModel: false, model: "m1a2_x" },
+          { unit: { id: "us_m1_related", name: "M1", cls: "tank", country: "" }, score: 50, on: false },
+        ];
+        CamoTile.unitStems = () => new Set(["us_camo_olive"]); CamoTile._stems = null;
+        App.slots = new Map([[s.id, s]]); App.activeSlot = s;
+        s.layers.push(LayerNode.of({ type: "decal", chan: "color", visible: true, name: "decal", canvas: mkCanvas(N, N) }));
+        CamoTile.ensure(16);
+        $("expPreset").value = "game"; $("expPreset").dispatchEvent(new Event("change"));
+        $("expMode").value = "set_tex"; $("expCamoBase").value = "tile"; $("expAlpha").value = "auto"; $("optInvRough").checked = true;
+        renderUnitList();
+        const out = [$("unitList").innerHTML, $("expWarn").outerHTML, $("camoTileInfo").outerHTML];
+        const notes = () => { ExportPreview.notes(); out.push($("expModeNote").outerHTML, $("expAlphaNote").outerHTML, $("expRoughNote").outerHTML); };
+        notes();
+        $("expAlpha").value = "keep"; $("optInvRough").checked = false; notes();
+        $("expMode").value = "replace_tex"; $("expAlpha").value = "auto"; notes();
+        return out.join(" | ");
+      } finally {
+        App.matPaint = keep.mp; App.paintTex = keep.pt; App.paintColor = keep.pc; App.skinUnits = keep.su;
+        CamoTile.unitStems = keep.us; CamoTile._stems = null; App.slots = keep.slots; App.activeSlot = keep.slot;
+        $("expMode").value = keep.mode; $("expCamoBase").value = keep.base; $("expAlpha").value = keep.alpha;
+        $("optInvRough").checked = keep.rough; $("expPreset").value = keep.preset; Object.assign(CamoTile.view, keep.view);
       }` },
 
   // ---- the Selection and Shape panels, added 2026-09-26 with ROADMAP 4.50 (9) ----
@@ -1063,6 +1256,27 @@ const CASES = [
         App.skinUnits = keepUnits; App.vehicleKey = keepKey; App.matSlot = keepMat;
         TankData.cache.delete("t44_tank");
       }`,
+  })),
+  // ROADMAP 3.42 + 4.57 (1): Export is one click and its settings are behind a gear inside the
+  // button. Captured in both browsers the page can find itself in — with the folder API (Chrome,
+  // Edge) and without it (Firefox), where the window says up front that Export is a zip and where
+  // to Extract here it, and "To War Thunder" is not offered. The button, the window's foot and the
+  // lines that change; the settings rows themselves are the sidebar's own (t50 drives them).
+  ...["chrome", "firefox"].map(kind => ({
+    id: "export-gear-" + kind, min: 600,
+    what: kind === "chrome"
+      ? "Export button with its gear, and the export window's foot, where the folder API exists"
+      : "the same where it does not (Firefox): the zip note, the button's zip tooltip, no To War Thunder",
+    src: `
+      const keepPick = window.showDirectoryPicker, keepGame = App.gameDir;
+      try {
+        ${kind === "firefox" ? "window.showDirectoryPicker = undefined;" : "if (!window.showDirectoryPicker) window.showDirectoryPicker = function(){};"}
+        App.gameDir = { name: "War Thunder" };    // the folder the note names — the user's, by name
+        TopWin.browserNote();
+        const mip = document.getElementById("optMips").closest(".row");
+        return [document.getElementById("btnExportGroup").outerHTML, document.getElementById("expZipNote").outerHTML,
+                mip.outerHTML, document.getElementById("winExportFoot").outerHTML].join(" | ");
+      } finally { window.showDirectoryPicker = keepPick; App.gameDir = keepGame; TopWin.browserNote(); }`,
   })),
 ];
 

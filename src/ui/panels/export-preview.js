@@ -11,15 +11,37 @@
 //     1/4-size mip beside the same crop point-sampled (what the GPU does with no chain), and the
 //     crop with the texels padSeams would bleed drawn in — the export's own padSeams, on the crop.
 //   * Camo under skin and Alpha change what the MODEL looks like: their preview is the viewport,
-//     which reads both (rebuildMaterials), and the sentence under each control says what it shows.
+//     which reads both (rebuildMaterials), and the line under each control says what it shows.
 //   * Mode and inverted roughness change SEMANTICS — what the game does with the file — and no
-//     picture previews that honestly; the sentence under the control is the preview.
+//     picture previews that honestly; the line under the control is the preview, and its tooltip
+//     carries the whole sentence (ROADMAP 3.44).
 // Nothing here touches a pixel of the export: the crop is a copy, and every heavy step runs in a
 // pool (CLAUDE.md §3.1). A refresh that is overtaken by a newer one throws its result away.
 const ExportPreview = {
   N: 64,                               // crop side, texels; shown at 2× so a 4×4 block is 8 px
   seq: 0, timer: 0, built: false, on: false,
   cv: {},                              // name → canvas
+
+  // Camo under skin ▸ My own pattern's rows, shown only where the game paints from a camo texture
+  // (set_tex) and the tile is the choice — a step of `updateExportWarnings`, moved here to bring that
+  // under CLAUDE.md §4's ceiling (fix plan 2026-10-23, step 6; `t44`'s export-warnings case held it).
+  tileRows(mode){
+    if (!$("rowCamoTile")) return;
+    const cal = mode === "set_tex" && CamoTile.on();
+    $("rowCamoTile").style.display = cal ? "" : "none";
+    // The Calibration grid's button and the scale line under it (ROADMAP 4.50 (6)).
+    $("rowCamoCal").style.display = $("camoTileInfo").style.display = cal ? "" : "none";
+    if (cal) Tip.set($("camoTileInfo"), CamoTile.readoutLine(), CamoTile.readout());
+    // One button, two halves (ROADMAP 3.45): what it will do is read off the tile, so an undo or a
+    // redo that moved the grid is followed without a flag anyone has to remember to set.
+    if (cal) $("btnCamoTileCal").textContent = CamoTile.calIn() ? "Remove grid" : "Calibration grid";
+    // The two preview sliders follow the state rather than lead it, so a restored project shows its own.
+    const v = CamoTile.view;
+    $("camoTileScale").value = String(Math.round(v.scale * 100));
+    $("camoTileRot").value = String(Math.round(v.rot));
+    $("camoTileScaleVal").textContent = Math.round(v.scale * 100) + "%";
+    $("camoTileRotVal").textContent = (v.rot > 0 ? "+" : "") + Math.round(v.rot) + "°";
+  },
 
   build(){
     if (this.built) return;
@@ -82,18 +104,18 @@ const ExportPreview = {
     const slot = App.activeSlot;
     const cap = (name, t) => { const e = $("pvCap_" + name); if (e) e.textContent = t; };
     const tag = (id, t) => { const e = $(id + "Tag"); if (e) e.textContent = t; };
-    const note = (id, t) => { const e = $(id + "Note"); if (e) e.textContent = t; };
+    const note = (id, line, more) => { const e = $(id + "Note"); if (e) Tip.set(e, line, more); };
     if (!slot || !slot.composite) {
       for (const n of Object.keys(this.cv)) ctx2d(this.cv[n]).clearRect(0, 0, this.cv[n].width, this.cv[n].height);
-      $("pvWhere").textContent = "Load a vehicle and pick a texture slot to see a crop of it here.";
+      Tip.set($("pvWhere"), "Load a vehicle and pick a texture slot to see a crop of it here.", "");
       tag("pvFmt", ""); tag("pvMip", ""); tag("pvPad", ""); note("pvFmt", ""); note("pvMip", ""); note("pvPad", "");
       return;
     }
     const seq = ++this.seq;
     const c = this.crop(slot), n = c.n;
     this.put("src", c.rgba, n);
-    $("pvWhere").textContent = slot.id + " · " + n + "×" + n + " texels at " + c.x + "," + c.y +
-      " — pan the 2-D view to move the crop";
+    Tip.set($("pvWhere"), slot.id + " · " + n + "×" + n + " texels at " + c.x + "," + c.y,
+      slot.id + " · " + n + "×" + n + " texels at " + c.x + "," + c.y + ", where the 2-D view is looking — pan the 2-D view to move the crop.");
     // ---- format: the one preview a user cannot get any other way ----
     const fmt = exportFormats().c;
     const FMT = { bc3: "DXT5 (BC3)", rgba8: "RGBA8", tga: "TGA" };
@@ -113,13 +135,14 @@ const ExportPreview = {
     if (out) {
       const d = this.diff(c.rgba, out);
       cap("out", "as exported — " + (d.max ? "up to " + d.max + " levels off" : "identical"));
-      note("pvFmt", d.max
-        ? d.changed + " % of texels moved by more than 8 levels. DXT5 keeps four colours per 4×4 block on one line — a " +
-          "hard edge with three hues in one block bleeds. Lossless (RGBA8) keeps every texel; the file is four times larger."
-        : "This crop survives DXT5 unchanged.");
+      if (d.max) note("pvFmt", d.changed + " % of texels moved by more than 8 levels.",
+        d.changed + " % of texels moved by more than 8 levels. DXT5 keeps four colours per 4×4 block on one line — a " +
+          "hard edge with three hues in one block bleeds. Lossless (RGBA8) keeps every texel; the file is four times larger.");
+      else note("pvFmt", "This crop survives DXT5 unchanged.", "");
     } else {
       cap("out", "as exported — identical");
-      note("pvFmt", (FMT[fmt] || fmt) + " is lossless: every texel ships as painted. The file is larger than DXT5 — watch the archive limit.");
+      note("pvFmt", (FMT[fmt] || fmt) + " is lossless: every texel ships as painted.",
+        (FMT[fmt] || fmt) + " is lossless: every texel ships as painted. The file is larger than DXT5 — watch the archive limit.");
     }
     // ---- at distance: the ¼ mip against a point sample ----
     const mips = $("optMips").checked;
@@ -128,16 +151,17 @@ const ExportPreview = {
     this.put("nomip", this.point4(c.rgba, n), n / 4);
     $("pvFig_mip").classList.toggle("chosen", mips);
     $("pvFig_nomip").classList.toggle("chosen", !mips);
-    note("pvMip", mips
-      ? "With a mip chain the game averages texels at range — smoother, and less shimmer. Turn it off if you play with older-video-card support: that mode samples a lower mip and angled surfaces blur."
-      : "With no chain the game picks single texels at range, so fine detail sparkles as the view moves. The game accepts it; its own extracted textures ship without one.");
+    if (mips) note("pvMip", "Averaged at range: smoother, less shimmer.",
+      "With a mip chain the game averages texels at range — smoother, and less shimmer. Turn it off if you play with older-video-card support: that mode samples a lower mip and angled surfaces blur.");
+    else note("pvMip", "Single texels at range: fine detail sparkles.",
+      "With no chain the game picks single texels at range, so fine detail sparkles as the view moves. The game accepts it; its own extracted textures ship without one.");
     // ---- seam padding: the export's own padSeams, on the crop ----
     const pad = $("optPad").checked;
     tag("pvPad", pad ? "on" : "off");
     const mask = getUVMask(slot, c.w, c.h);
     if (!mask) {
       this.put("pad", c.rgba, n);
-      note("pvPad", "No UV layout to pad against — an imported sheet with no model, or a slot no part uses.");
+      note("pvPad", "No UV layout to pad against.", "No UV layout to pad against — an imported sheet with no model, or a slot no part uses.");
     } else {
       const mcrop = new Uint8Array(n * n);
       let outside = 0;
@@ -154,9 +178,11 @@ const ExportPreview = {
         else { padded[k] >>= 2; padded[k+1] >>= 2; padded[k+2] >>= 2; padded[k+3] = 255; }
       }
       this.put("pad", padded, n);
-      note("pvPad", !outside ? "This crop is inside one island — nothing to pad here; pan to an island edge to see it."
-        : pad ? bled + " of the " + outside + " texels outside the islands in this crop are filled from the nearest edge (tinted), " + dist + " texels deep, so the renderer's filtering never reads the void and no dark rim shows at a seam."
-        : "Off: the " + outside + " texels outside the islands stay as they are, and bilinear filtering at every island edge reads them — a dark rim in game.");
+      if (!outside) note("pvPad", "Inside one island — nothing to pad here.", "This crop is inside one island — nothing to pad here; pan to an island edge to see it.");
+      else if (pad) note("pvPad", bled + " of the " + outside + " texels outside the islands are filled from the nearest edge, " + dist + " deep.",
+        bled + " of the " + outside + " texels outside the islands in this crop are filled from the nearest edge (tinted), " + dist + " texels deep, so the renderer's filtering never reads the void and no dark rim shows at a seam.");
+      else note("pvPad", "Off: island edges show a dark rim in game.",
+        "Off: the " + outside + " texels outside the islands stay as they are, and bilinear filtering at every island edge reads them — a dark rim in game.");
     }
   },
   diff(a, b){
@@ -187,34 +213,40 @@ const ExportPreview = {
     }
     return out;
   },
-  // ---- the settings no picture previews honestly: one sentence each, under the control ----
+  // ---- the settings no picture previews honestly: one line each under the control, and the ----
+  // ---- whole sentence in its tooltip (ROADMAP 3.44, Tip in ui/dom.js) ----
   notes(){
-    const set = (id, t) => { const e = $(id); if (e) e.textContent = t; };
+    const set = (id, line, more) => { const e = $(id); if (e) Tip.set(e, line, more); };
     const cls = vehicleClass(), mode = exportMode(), auto = $("expMode").value === "auto";
     const CLS = { tank: "a ground vehicle", ship: "a ship", air: "an aircraft", heli: "a helicopter" };
+    const what = CLS[cls] || "a " + cls;
+    const why = auto ? " Auto picked it because this is " + what + "." : "";
     set("expModeNote", mode === "set_tex"
-      ? "set_tex: the game keeps the vehicle's own texture and lays your sheet beside it as camo_skin_tex, so in-game decals and the condition wear still work; your alpha decides where the player's camouflage shows through."
-        + (auto ? " Auto picked it because this is " + (CLS[cls] || "a " + cls) + "." : "")
-      : "replace_tex: your sheet replaces the game's texture outright — the only form an aircraft can take. In-game decals and wear then come only from what you painted, and the alpha is the real paint mask."
-        + (auto ? " Auto picked it because this is " + (CLS[cls] || "a " + cls) + "." : ""));
+      ? "set_tex: in-game decals and wear still work." + (auto ? " Auto, for " + what + "." : "")
+      : "replace_tex: your sheet replaces the game's texture." + (auto ? " Auto, for " + what + "." : ""),
+      mode === "set_tex"
+      ? "set_tex: the game keeps the vehicle's own texture and lays your sheet beside it as camo_skin_tex, so in-game decals and the condition wear still work; your alpha decides where the player's camouflage shows through." + why
+      : "replace_tex: your sheet replaces the game's texture outright — the only form an aircraft can take. In-game decals and wear then come only from what you painted, and the alpha is the real paint mask." + why);
     const slot = App.activeSlot;
     const alpha = $("expAlpha").value;
-    let a;
-    if (!slot) a = "";
+    if (!slot) set("expAlphaNote", "");
     else {
       const cx = ExportCollect.ctx(true);
       const keep = ExportCollect.wantsMask(cx, slot);
-      const why = chanHasLayers(slot, "wear") ? "you painted a wear mask, and a painted mask always wins"
-        : alpha === "keep" ? "you asked for it"
-        : alpha === "opaque" ? "you asked for it"
-        : cx.groundPaint ? "auto: a set_tex skin ships opaque, the way every published ground skin does — the vehicle's own texture supplies the wear"
-        : "auto: with replace_tex the sheet is the albedo and its alpha is the paint mask";
-      a = (keep ? "The alpha is kept" : "The alpha ships fully opaque (255)") + " — " + why + ". The 3-D view shows it: " +
-        (keep ? "where the sheet is not fully opaque, the camouflage under it shows through." : "the sheet covers the camouflage everywhere.");
+      // [the line's reason, the tooltip's]
+      const because = chanHasLayers(slot, "wear") ? ["you painted a wear mask", "you painted a wear mask, and a painted mask always wins"]
+        : alpha === "keep" || alpha === "opaque" ? ["as you set it", "you asked for it"]
+        : cx.groundPaint ? ["auto, for set_tex", "auto: a set_tex skin ships opaque, the way every published ground skin does — the vehicle's own texture supplies the wear"]
+        : ["auto, for replace_tex", "auto: with replace_tex the sheet is the albedo and its alpha is the paint mask"];
+      const head = keep ? "The alpha is kept" : "The alpha ships fully opaque (255)";
+      set("expAlphaNote", head + " — " + because[0] + ".", head + " — " + because[1] + ". The 3-D view shows it: " +
+        (keep ? "where the sheet is not fully opaque, the camouflage under it shows through." : "the sheet covers the camouflage everywhere."));
     }
-    set("expAlphaNote", a);
-    set("expRoughNote", $("optInvRough").checked
-      ? "The _n red channel is written as it is: inverted roughness, the game's own form since 2022. Textures pulled from the game are already in it."
-      : "The red channel is converted from plain smoothness with the post-2022 curve, 1 − (1 − 0.7·s)³. Only for a sheet you authored as smoothness — converting a game texture twice makes everything glossier.");
+    if ($("optInvRough").checked)
+      set("expRoughNote", "_n red is written as it is: inverted roughness.",
+        "The _n red channel is written as it is: inverted roughness, the game's own form since 2022. Textures pulled from the game are already in it.");
+    else
+      set("expRoughNote", "_n red is converted from smoothness — not for game textures.",
+        "The red channel is converted from plain smoothness with the post-2022 curve, 1 − (1 − 0.7·s)³. Only for a sheet you authored as smoothness — converting a game texture twice makes everything glossier.");
   },
 };

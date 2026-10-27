@@ -100,7 +100,7 @@ function camoPins(){
       : p.source === "white" ? flatCamoSheet([255, 255, 255])
       : flatCamoSheet([128, 128, 128]);
     return { stem: p.stem, fileName: p.fileName, source: p.source,
-      data: writeDDS([{ w: sheet.width, h: sheet.height, rgba: sheet.rgba }], { bc3: false }) };
+      data: BCnEnc.writeDDS([{ w: sheet.width, h: sheet.height, rgba: sheet.rgba }], { bc3: false }) };
   });
 }
 // A UserSkins .blk. `set_tex` with param camo_skin_tex is what the CDK requires for ground

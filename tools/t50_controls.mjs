@@ -822,7 +822,7 @@ const BODY = `async function(){
   var tga29 = function(r, g, b, a, W){ W = W || 8; var H = W, u = new Uint8Array(18 + W * H * 4);
     u[2] = 2; u[12] = W & 255; u[13] = W >> 8; u[14] = H & 255; u[15] = H >> 8; u[16] = 32; u[17] = 0x20;
     for (var i = 0; i < W * H; i++) { var q = 18 + i * 4; u[q] = b; u[q+1] = g; u[q+2] = r; u[q+3] = a == null ? 255 : a; } return u; };
-  var dec29 = function(bytes, name){ var d = parseTGA(bytes.buffer.slice(0)); d.raw = bytes.buffer.slice(0); d.rawName = name; d.fileName = name; return d; };
+  var dec29 = function(bytes, name){ var d = TGA.parseTGA(bytes.buffer.slice(0)); d.raw = bytes.buffer.slice(0); d.rawName = name; d.fileName = name; return d; };
   var px29 = function(cv){ var d = ctx2d(cv).getImageData(1, 1, 1, 1).data; return [d[0], d[1], d[2]]; };
   var fresh29 = function(){
     App.decoded = new Map(); App.slots = new Map(); App.undoStack.length = 0; App.redoStack.length = 0; App.geomData = null;
@@ -904,9 +904,16 @@ const BODY = `async function(){
   var ringPx = (function(){ if (!SelOverlay.canvas) return null; var d = ctx2d(SelOverlay.canvas).getImageData(0, 0, SelOverlay.canvas.width, SelOverlay.canvas.height).data;
     var D = SelOverlay.canvas.width, edge = 0, inside = 0, outside = 0;
     var at = function(x, y){ return d[(y * D + x) * 4 + 3]; };
-    edge = at(Math.round(D * 15 / 64), Math.round(D * 32 / 64)); inside = at(Math.round(D * 32 / 64), Math.round(D * 32 / 64)); outside = at(2, 2);
+    edge = at(Math.round(D * 16.5 / 64), Math.round(D * 32 / 64)); inside = at(Math.round(D * 32 / 64), Math.round(D * 32 / 64));
+    outside = at(Math.round(D * 15 / 64), Math.round(D * 32 / 64)) + at(2, 2);
     return { edge: edge, inside: inside, outside: outside }; })();
   out.dring.px = ringPx;
+  // the same footprint see-through (a weathered or soft decal): still a rim and a wash, not a sticker
+  ctx2d(lay35).clearRect(0, 0, N35, N35); ctx2d(lay35).fillStyle = "rgba(0,255,0,.8)"; ctx2d(lay35).fillRect(16, 16, 32, 32);
+  SelOverlay.reset(); SelOverlay.sync();
+  out.dring.soft = (function(){ if (!SelOverlay.canvas) return null; var D = SelOverlay.canvas.width;
+    var d = ctx2d(SelOverlay.canvas).getImageData(0, 0, D, D).data, at = function(x, y){ return d[(y * D + x) * 4 + 3]; };
+    return { edge: at(Math.round(D * 16.5 / 64), Math.round(D * 32 / 64)), inside: at(Math.round(D * 32 / 64), Math.round(D * 32 / 64)) }; })();
   App.activeLayer = null; SelOverlay.sync();
   out.dring.after = SelOverlay.meshes.length;
   SelOverlay.reset();
@@ -934,6 +941,32 @@ const BODY = `async function(){
                 catcherGone: !scene.children.some(function(c){ return c.material && c.material.isShadowMaterial; }),
                 cast: !!App.keyLight && App.keyLight.castShadow };
   out.shot = o37;
+  // ---- 4.50 (13): the Market preview — a 16:9 frame over the live view, and a render of exactly it ----
+  // The oracle is a render of the WHOLE view at the view's own aspect, cropped to the frame's rows by
+  // hand: the framed render must put the model where that crop has it. Same camera, same supersample.
+  ShotFrame.show();
+  var fr = ShotFrame.rect(), fb = ShotFrame.box && ShotFrame.box.getBoundingClientRect(), wr = document.getElementById("view3dwrap").getBoundingClientRect();
+  var m13 = { rect: fr, box: fb ? [fb.left - wr.left, fb.top - wr.top, fb.width, fb.height] : null, take: !!document.getElementById("btnShotFrameTake") };
+  var FW = 192, FH = Math.round(FW * fr.h / fr.w), VH = Math.round(FW * fr.vh / fr.w);
+  // both transparent, so the model is its opaque texels; the opaque one is checked for its background
+  var framed = Shot.render(FW, FH, { frame: fr });
+  var whole = Shot.render(Math.round(FW * fr.vw / fr.w), VH);
+  var solidAt = function(cv, x0, y0, w, h){
+    var d = ctx2d(cv).getImageData(x0, y0, w, h).data, n = 0, sx = 0, sy = 0;
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] >= 250) { n++; sx += x; sy += y; }
+    return n ? [sx / n, sy / n, n] : null;
+  };
+  var ox = Math.round((whole.width - FW) / 2), oy = Math.round((whole.height - FH) / 2);
+  m13.framed = solidAt(framed, 0, 0, FW, FH); m13.crop = solidAt(whole, ox, oy, FW, FH);
+  var opq = Shot.render(32, 18, { frame: fr, opaque: true });
+  var fd = ctx2d(opq).getImageData(0, 0, 1, 1).data; m13.corner = [fd[0], fd[1], fd[2], fd[3]];
+  m13.after = { view: !!(camera.view && camera.view.enabled), aspect: camera.aspect, aspectWas: r37.aspect };
+  // Esc is left to whatever else is open (review of 4.50 (13)): the frame stays, and Cancel takes it down
+  window.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", bubbles: true }));
+  m13.escKept = !!document.getElementById("shotFrame");
+  document.getElementById("btnShotFrameCancel").onclick();
+  m13.escGone = !document.getElementById("shotFrame");
+  out.market = m13;
   scene.remove(mg37); box37.geometry.dispose(); box37.material.dispose();
   modelGroup = r37.mg; App.meshes = r37.meshes; App.matSlot = r37.matSlot; App.selParts = r37.sel;
   cam.theta = r37.theta; cam.phi = r37.phi; cam.dist = r37.dist; cam.target.copy(r37.target); syncCamera();
@@ -948,13 +981,61 @@ const BODY = `async function(){
   w29.setIn = !!document.querySelector("#winSettings #optUndoBudget");
   w29.sidebar = [].slice.call(document.querySelectorAll("#rightbar .section h3")).map(function(h){ return h.firstChild.textContent.trim(); });
   // (b) one window at a time, the button toggles, Escape closes, and nothing dims the page
-  document.getElementById("btnExport").click();
-  w29.open1 = TopWin.open + ":" + document.getElementById("winExport").style.display + ":" + (document.getElementById("btnExport").className.indexOf("active") >= 0);
+  // ROADMAP 3.42: Export is one click — it exports at once, with the current settings, and opens
+  // nothing; the gear inside it is what opens the settings. doExport is stood in for, so the click
+  // is read rather than run (t40 runs the real one).
+  var realExp29 = window.doExport, calls29 = [];
+  window.doExport = function(toDir){ calls29.push(toDir); };
+  try { document.getElementById("btnExport").click(); } finally { window.doExport = realExp29; }
+  w29.oneClick = { calls: calls29.slice(), open: TopWin.open, label: document.getElementById("btnExport").textContent.trim(),
+    gearIn: !!document.querySelector("#btnExportGroup #btnExportGear svg") };
+  // A fresh profile exports without mipmaps (3.42 (4)): the shipped default, as Reset reads it.
+  var mipRow29 = PREFS.find(function(r){ return r.id === "mips"; });
+  w29.mipsDef = mipRow29 && mipRow29.def;
+  // A browser without the folder API (Firefox) is told before the first click (4.57 (1)).
+  var pickWas29 = window.showDirectoryPicker;
+  window.showDirectoryPicker = undefined; TopWin.browserNote();
+  w29.ff = { note: document.getElementById("expZipNote").style.display !== "none" ? document.getElementById("expZipNote").textContent : "",
+    title: document.getElementById("btnExport").title, toWT: document.getElementById("btnExportGame").style.display };
+  window.showDirectoryPicker = pickWas29; TopWin.browserNote();
+  w29.chrome = { note: document.getElementById("expZipNote").style.display, toWT: document.getElementById("btnExportGame").style.display };
+  document.getElementById("btnExportGear").click();
+  w29.open1 = TopWin.open + ":" + document.getElementById("winExport").style.display + ":" + (document.getElementById("btnExportGear").className.indexOf("active") >= 0);
   w29.noBackdrop = !document.querySelector(".modal");
   document.getElementById("btnSettingsWin").click();
   w29.open2 = TopWin.open + ":" + document.getElementById("winExport").style.display;
   document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", bubbles: true }));
   w29.afterEsc = TopWin.open;
+  // ROADMAP 3.43: the window closes by itself — after an export from its foot has finished, on a
+  // pointer-down in either view, and when a tool starts from the keyboard — and not on a press inside
+  // it, not while an export is running, and not after one that failed or was cancelled, so its
+  // message stays in sight. The press is aimed at each view's label: the canvases' own handlers take
+  // pointer capture, which a synthetic pointer is refused, and the close is the VIEW's listener.
+  // The one-click check above ran Export through TopWin.run, whose end is a turn away; let it end.
+  await new Promise(function(r){ setTimeout(r, 0); });
+  var w43 = {}, gear43 = document.getElementById("btnExportGear");
+  var open43 = function(){ if (TopWin.open !== "winExport") gear43.click(); return TopWin.open === "winExport"; };
+  var down43 = function(sel){ document.querySelector(sel).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })); return TopWin.open; };
+  var key43 = function(code){ var o = { code: code, bubbles: true }; window.dispatchEvent(new KeyboardEvent("keydown", o)); window.dispatchEvent(new KeyboardEvent("keyup", o)); return TopWin.open; };
+  open43(); w43.in3d = down43("#view3dwrap .viewlabel");
+  open43(); w43.in2d = down43("#view2dwrap .viewlabel");
+  open43(); w43.inside = down43("#winExport #expMode");
+  TopWin.busy++; w43.busy = down43("#view3dwrap .viewlabel"); TopWin.busy--;
+  open43(); var selWas43 = SelectUI.on; w43.keyM = key43("KeyM"); if (SelectUI.on !== selWas43) SelectUI.setOn(selWas43);
+  open43(); w43.keyB = key43("KeyB"); setPaint3d(!App.paint3d);
+  var realExp43 = window.doExport, realSave43 = window.saveProject, answer43, seen43 = [];
+  window.doExport = async function(toDir){ seen43.push(toDir + ":" + TopWin.busy); return answer43; };
+  window.saveProject = async function(){ seen43.push("save:" + TopWin.busy); return answer43; };
+  try {
+    answer43 = undefined; open43(); await document.getElementById("btnExportZip").onclick(); w43.zipFailed = TopWin.open;
+    answer43 = true; open43(); await document.getElementById("btnExportZip").onclick(); w43.zipDone = TopWin.open;
+    open43(); await document.getElementById("btnExportGame").onclick(); w43.gameDone = TopWin.open;
+    open43(); await document.getElementById("btnExportProj").onclick(); w43.projDone = TopWin.open;
+    answer43 = false; open43(); await document.getElementById("btnExportProj").onclick(); w43.projFailed = TopWin.open;
+  } finally { window.doExport = realExp43; window.saveProject = realSave43; }
+  w43.seen = seen43; w43.busyAfter = TopWin.busy;
+  TopWin.close();
+  w29.close43 = w43;
   // (c) docked at load with no float button and no pref row a stored false could undo it with
   // (3.36); dock(false) still works, for the day floating is fixed (3.37)
   var dockBtn = document.getElementById("btnViewDock");
@@ -984,7 +1065,21 @@ const BODY = `async function(){
   document.getElementById("expPreset").value = "game"; document.getElementById("expPreset").onchange();
   document.getElementById("optPad").checked = true; document.getElementById("optMips").checked = true;
   TopWin.show("winExport");
-  await ExportPreview.refresh();
+  // The window and the preset each SCHEDULE a refresh 250 ms out, and a refresh overtaken by a newer
+  // one throws its result away (ui/panels/export-preview.js). Under a loaded machine — the suite's
+  // lanes, 2026-10-22 — this test's own refresh took longer than 250 ms, the scheduled one overtook
+  // it, and the checks read a half-drawn panel. Dropping the pending one first was not enough (a
+  // refresh can still start while ours awaits the pool), so: refresh until one runs to its end with
+  // no newer one started under it — seq moved by exactly our own.
+  var pvSettle = async function(){
+    for (var k = 0; k < 20; k++) {
+      clearTimeout(ExportPreview.timer);
+      var s0 = ExportPreview.seq;
+      await ExportPreview.refresh();
+      if (ExportPreview.seq === s0 + 1) return;
+    }
+  };
+  await pvSettle();
   var pvText = function(id){ var e = document.getElementById(id); return e ? e.textContent : "(missing)"; };
   w29.bc3 = { tag: pvText("pvFmtTag"), cap: pvText("pvCap_out"), note: pvText("pvFmtNote").slice(0, 60), where: pvText("pvWhere") };
   w29.pad = { tag: pvText("pvPadTag"), note: pvText("pvPadNote") };
@@ -995,12 +1090,12 @@ const BODY = `async function(){
   for (var pi = 0; pi < srcPx.length; pi++) if (Math.abs(srcPx[pi] - outPx[pi]) > 8) nd++;
   w29.bc3.texelsMoved = nd / 4;
   document.getElementById("expPreset").value = "lossless"; document.getElementById("expPreset").onchange();
-  await ExportPreview.refresh();
+  await pvSettle();
   w29.rgba8 = { tag: pvText("pvFmtTag"), cap: pvText("pvCap_out") };
   srcPx = pxOf("src"); outPx = pxOf("out"); nd = 0;
   for (pi = 0; pi < srcPx.length; pi++) if (srcPx[pi] !== outPx[pi]) nd++;
   w29.rgba8.texelsMoved = nd / 4;
-  document.getElementById("optPad").checked = false; await ExportPreview.refresh();
+  document.getElementById("optPad").checked = false; await pvSettle();
   w29.padOff = { tag: pvText("pvPadTag"), note: pvText("pvPadNote").slice(0, 40) };
   TopWin.close();
   document.getElementById("expPreset").value = presetWas29; document.getElementById("expPreset").onchange();
@@ -1112,7 +1207,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 600), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -1484,9 +1579,11 @@ R.is(T.tag === "INPUT" && T.before === "0", `the rotation readout is a number fi
 R.is(T.rot === 12.5 && T.undo === 1 && T.undone === 0, `a typed angle is applied as one undo step (${T.rot}, ${T.undo} step, undone ${T.undone})`);
 R.is(/Already square/.test(T.squareIdle) && T.squared === 90, `Square on a 2-D decal is the nearest right angle (100 → ${T.squared}), and says when there is nothing to do`);
 console.log(`   ring: ${RG.meshes} overlay mesh(es) with a projected decal selected, ${RG.after} after; alpha edge ${RG.px && RG.px.edge} inside ${RG.px && RG.px.inside} outside ${RG.px && RG.px.outside}`);
+R.is(RG.soft && RG.soft.edge > 200 && RG.soft.inside < 60,
+  `and so is a see-through decal's: a footprint at alpha 0.8 keeps its rim (${RG.soft && RG.soft.edge}) and its faint middle (${RG.soft && RG.soft.inside}) — erosion multiplies alphas, so it is hardened first (review of 3.39 (1))`);
 R.is(RG.meshes === 1 && RG.after === 0, `selecting a projected decal puts the overlay on the model (${RG.meshes}) and deselecting takes it off (${RG.after})`);
-R.is(RG.px && RG.px.edge > 200 && RG.px.inside > 40 && RG.px.inside < 140 && RG.px.outside === 0,
-  `and it is a RING round the footprint — solid at the edge (${RG.px && RG.px.edge}), faint inside (${RG.px && RG.px.inside}), nothing outside (${RG.px && RG.px.outside})`);
+R.is(RG.px && RG.px.edge > 200 && RG.px.inside > 20 && RG.px.inside < 60 && RG.px.outside === 0,
+  `and it is a RING along the footprint's edge — strong just inside it (${RG.px && RG.px.edge}), a faint wash in the middle that leaves the texture readable (${RG.px && RG.px.inside}, ROADMAP 3.39 (1)), nothing outside, where in UV space another part may lie (${RG.px && RG.px.outside})`);
 
 console.log("\n=== a promo image: transparent PNG with a shadow (4.37) ===");
 const SH = o.shot;
@@ -1499,15 +1596,40 @@ R.is(SH.shadow > 100 && SH.shadowSample && SH.shadowSample[0] < 30 && SH.shadowS
 R.is(SH.after.bg && SH.after.clearAlpha === SH.after.clearAlphaWas && !SH.after.shadows && !SH.after.cast && SH.after.catcherGone && Math.abs(SH.after.aspect - SH.after.aspectWas) < 1e-9,
   `afterwards the scene is as it was: background back, clear alpha ${SH.after.clearAlpha} (was ${SH.after.clearAlphaWas}), shadows ${SH.after.shadows ? "still on" : "off"}, catcher gone, aspect back`);
 
+const MK = o.market || {};
+console.log(`   market: frame ${JSON.stringify(MK.rect)} drawn at ${JSON.stringify(MK.box)} · model centroid framed ${JSON.stringify(MK.framed)} vs the whole view cropped ${JSON.stringify(MK.crop)} · corner ${JSON.stringify(MK.corner)} · after ${JSON.stringify(MK.after)}`);
+R.is(MK.rect && Math.abs(MK.rect.w / MK.rect.h - 16 / 9) < 1e-6 && (Math.abs(MK.rect.w - MK.rect.vw) < 1e-6 || Math.abs(MK.rect.h - MK.rect.vh) < 1e-6)
+  && MK.box && Math.abs(MK.box[2] - MK.rect.w) < 1.5 && Math.abs(MK.box[0] - MK.rect.x) < 1.5 && Math.abs(MK.box[1] - MK.rect.y) < 1.5 && MK.take,
+  `the Market preview's frame is the largest 16:9 box centred in the 3-D view, drawn where it says, with its Take button (ROADMAP 4.50 (13))`);
+R.is(MK.framed && MK.crop && Math.abs(MK.framed[0] - MK.crop[0]) < 1 && Math.abs(MK.framed[1] - MK.crop[1]) < 1 && Math.abs(MK.framed[2] - MK.crop[2]) < MK.crop[2] * .03,
+  `and Take renders exactly what the frame holds: the model sits where a crop of the whole view has it (centroid ${MK.framed && MK.framed.slice(0, 2).map(v => v.toFixed(2))} vs ${MK.crop && MK.crop.slice(0, 2).map(v => v.toFixed(2))}, ${MK.framed && MK.framed[2]} vs ${MK.crop && MK.crop[2]} px)`);
+R.is(MK.corner && MK.corner[3] === 255 && MK.after && !MK.after.view && Math.abs(MK.after.aspect - MK.after.aspectWas) < 1e-9 && MK.escKept && MK.escGone,
+  `on the view's own background (corner alpha ${MK.corner && MK.corner[3]}), the camera's offset cleared and its aspect back afterwards; Esc is left to the dialogs and menus, and Cancel takes the frame down`);
+
 console.log("\n=== 3.29: the export settings are a window under the top bar, with a preview of each ===");
 const W = o.win29 || {};
 R.is(W.expIn && W.viewIn && W.poseIn && W.setIn,
   "Skin & export and Settings moved into their windows, View & scene and Moving parts docked in the sidebar — the same elements, every id intact");
 R.is(Array.isArray(W.sidebar) && !W.sidebar.some(s => /export|Settings/i.test(s)) && W.sidebar.some(s => /Brush/.test(s)) && W.sidebar.some(s => /View/.test(s)),
   `the right sidebar holds what is painted with, and View & scene: ${(W.sidebar || []).join(" · ")}`);
-R.is(W.open1 === "winExport::true" && W.noBackdrop, `Export as… opens its window, lights its button, and dims nothing (${W.open1})`);
+R.is(W.oneClick && JSON.stringify(W.oneClick.calls) === "[true]" && W.oneClick.open === null && W.oneClick.label === "Export" && W.oneClick.gearIn,
+  `Export is one click: it runs the export to War Thunder at once and opens no window; the gear sits inside the button (${JSON.stringify(W.oneClick)})`);
+R.is(W.mipsDef === false, `a fresh profile exports without mipmaps — the shipped default Reset puts back (${W.mipsDef})`);
+R.is(W.ff && /Extract here/.test(W.ff.note) && /UserSkins/.test(W.ff.note) && /\.zip/.test(W.ff.title) && W.ff.toWT === "none"
+  && W.chrome && W.chrome.note === "none" && W.chrome.toWT === "",
+  `without the folder API the export window says before any click that Export downloads a zip and where to Extract here it, the button says so, and "To War Thunder" is gone; with it, neither (${JSON.stringify(W.ff)})`);
+R.is(W.open1 === "winExport::true" && W.noBackdrop, `the gear opens the export settings, lights itself, and dims nothing (${W.open1})`);
 R.is(W.open2 === "winSettings:none", `opening Settings closes Export — one window at a time (${W.open2})`);
 R.is(W.afterEsc === null, "and Escape closes whichever is up");
+{ const C = W.close43 || {};
+  R.is(C.in3d === null && C.in2d === null && C.keyM === null && C.keyB === null,
+    "the Export window closes on a press in the 3-D view, in the 2-D view, and when a tool starts from the keyboard (M, B) — ROADMAP 3.43 (" + JSON.stringify(C) + ")");
+  R.is(C.inside === "winExport" && C.busy === "winExport",
+    "but not on a press inside it, nor while an export is running — its progress stays in sight (" + C.inside + ", " + C.busy + ")");
+  R.is(C.zipDone === null && C.gameDone === null && C.projDone === null && C.zipFailed === "winExport" && C.projFailed === "winExport",
+    "it closes after an export from its foot has finished — To War Thunder, Download .zip, Save project — and stays open after one that failed or was cancelled (" + JSON.stringify(C) + ")");
+  R.is(JSON.stringify(C.seen) === JSON.stringify(["false:1", "false:1", "true:1", "save:1", "save:1"]) && C.busyAfter === 0,
+    "each foot export runs marked as running, and the mark is gone after it (" + JSON.stringify(C.seen) + ", " + C.busyAfter + ")"); }
 // Into the right column's one scrolling pane since ROADMAP 3.6 — the column itself no longer scrolls.
 R.is(W.dockedTo === "rightPane,rightPane" && W.noRow && W.floatHidden,
   `View & scene and Moving parts are docked at load (${W.dockedTo}), the float button is hidden, and no ui.viewDock row can float them from a stored value (3.36)`);
@@ -1578,18 +1700,23 @@ const KEYS = {
   Question: { key: "?", code: "Slash", windowsVirtualKeyCode: 191, nativeVirtualKeyCode: 191, modifiers: 8, text: "?", unmodifiedText: "/" },
 };
 const H = await evalInPage({ browser, timeoutMs: 120000, keep: argv.includes("--keep"), drive: async ({ cdp, evaluate }) => {
-  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  // Two frames in the page after each event, not a fixed 100–400 ms (ROADMAP 0.6 (b)): CDP's
+  // Input.dispatchKeyEvent / dispatchMouseEvent answer once the page has handled the event, and every
+  // handler here is synchronous, so a frame is margin, not a guess. Measured 2026-10-24: with no wait
+  // at all every check of this section passed (255 of 255); the ~9 s of sleeps it had guarded nothing
+  // the checks read.
+  const frames = () => evaluate("new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ r(true); }); }); })");
   const press = async k => {
     const d = KEYS[k];
     await cdp.send("Input.dispatchKeyEvent", Object.assign({ type: d.text ? "keyDown" : "rawKeyDown" }, d));
     const up = Object.assign({ type: "keyUp" }, d); delete up.text; delete up.unmodifiedText;
     await cdp.send("Input.dispatchKeyEvent", up);
-    await sleep(120);
+    await frames();
   };
   const clickAt = async (x, y) => {
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
       await cdp.send("Input.dispatchMouseEvent", Object.assign({ type, x, y }, type === "mouseMoved" ? {} : { button: "left", clickCount: 1 }));
-    await sleep(120);
+    await frames();
   };
   const STATE = `(function(){
     var h = document.getElementById("helpOverlay"), w = document.getElementById("winExport");
@@ -1601,17 +1728,19 @@ const H = await evalInPage({ browser, timeoutMs: 120000, keep: argv.includes("--
       x: (function(){ var b = document.getElementById("btnHelpClose"); if (!b) return null; var q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })() };
   })()`;
   await evaluate(`new Promise(r => document.readyState === "complete" ? r() : addEventListener("load", () => r()))`);
-  await sleep(400);
+  await evaluate("App.bootSettled.then(function(){ return true; })"); await frames();   // what the boot left running
   const out = {};
   for (const [w, h] of [[1920, 1080], [1280, 720]]) {
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false });
-    await sleep(300);
+    // until the page has taken the new size
+    for (let t = Date.now(); Date.now() - t < 10000 && !(await evaluate(`innerWidth === ${w} && innerHeight === ${h}`));) await frames();
+    await frames();
     const o = out[w + "x" + h] = {};
     await evaluate(`(document.getElementById("welcome").style.display = "none", true)`);
     await press("Question");      o.open = await evaluate(STATE);
     await press("Escape");        o.esc = await evaluate(STATE);
     // with the Export window up: the guide over it, Esc takes the guide first and the window second
-    await evaluate(`(TopWin.show("winExport"), true)`); await sleep(200);
+    await evaluate(`(TopWin.show("winExport"), true)`); await frames();
     await press("Question");      o.winOpen = await evaluate(STATE);
     await press("Escape");        o.winEsc1 = await evaluate(STATE);
     await press("Escape");        o.winEsc2 = await evaluate(STATE);
@@ -1629,17 +1758,17 @@ const H = await evalInPage({ browser, timeoutMs: 120000, keep: argv.includes("--
     // closed both. And `?` with a choice dialog up opened the guide BEHIND it (2026-10-10 review).
     const dialog = `(window.__t50cd = "open", choiceDialog("t50", [{ label: "OK", value: 1 }]).then(v => { window.__t50cd = v; }), true)`;
     const withCd = async () => Object.assign(await evaluate(STATE), { cd: await evaluate(`window.__t50cd`) });
-    await press("Question");      await evaluate(dialog); await sleep(100);
+    await press("Question");      await evaluate(dialog); await frames();
     await press("Escape");        o.dlg1 = await withCd();
     await press("Escape");        o.dlg2 = await withCd();
-    await press("Question");      await evaluate(`(StatusLog.open("pin"), true)`); await sleep(100);
+    await press("Question");      await evaluate(`(StatusLog.open("pin"), true)`); await frames();
     await press("Escape");        o.log1 = Object.assign(await evaluate(STATE), { log: await evaluate(`StatusLog.mode`) });
     await press("Escape");        o.log2 = await evaluate(STATE);
     const menuUp = `[...document.body.children].some(e => e.textContent === "t50 item")`;
-    await press("Question");      await evaluate(`(popupMenu({ clientX: 200, clientY: 200 }, [{ label: "t50 item", run(){} }]), true)`); await sleep(100);
+    await press("Question");      await evaluate(`(popupMenu({ clientX: 200, clientY: 200 }, [{ label: "t50 item", run(){} }]), true)`); await frames();
     await press("Escape");        o.menu1 = Object.assign(await evaluate(STATE), { menu: await evaluate(menuUp) });
     await press("Escape");        o.menu2 = await evaluate(STATE);
-    await evaluate(dialog); await sleep(100);
+    await evaluate(dialog); await frames();
     await press("Question");      o.under = await withCd();
     await press("Escape");        o.under2 = await withCd();
     // leave nothing up for the next size, whichever way the checks went
@@ -1653,8 +1782,8 @@ const H = await evalInPage({ browser, timeoutMs: 120000, keep: argv.includes("--
     // first Escape the dialog or Messages was gone AND the window, the guide still up over nothing
     // (measured with real key events at 1600×900, the 2026-10-10 review's second round).
     for (const [k, raise] of [["wDlg", dialog], ["wLog", `(StatusLog.open("pin"), true)`]]) {
-      await evaluate(`(window.__t50cd = null, TopWin.show("winExport"), true)`); await sleep(200);
-      await press("Question");      await evaluate(raise); await sleep(100);
+      await evaluate(`(window.__t50cd = null, TopWin.show("winExport"), true)`); await frames();
+      await press("Question");      await evaluate(raise); await frames();
       await press("Escape");        const a = Object.assign(await withCd(), { log: await evaluate(`StatusLog.mode`) });
       await press("Escape");        const b = await evaluate(STATE);
       await press("Escape");        const c = await evaluate(STATE);

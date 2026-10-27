@@ -1,5 +1,8 @@
 "use strict";
 /*==ZSTD==*/
+// One scope per module (ROADMAP 2.3): the body below is private, `Zstd` — returned at the end — is
+// the only name this module puts into the shared scope. Not re-indented; see `codecs/dds.js`.
+const Zstd = (() => {
 // ---------- zstd decoder (decode-only, with dictionary support) ----------
 // Zstandard's own single-file decoder (lib/decompress + lib/common, BSD-3/GPL-2 dual-licensed
 // and freely redistributable) built to WASM with wasi-sdk: 85 KB, no imports but random_get.
@@ -63,4 +66,6 @@ function zstdDec(src, ddict){
   ex.zdec_free(p);
   return out;
 }
+return { zstdAvailable, zstdInit, zstdDict, zstdDec };
+})();
 /*==ENDZSTD==*/

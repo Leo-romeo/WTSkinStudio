@@ -14,13 +14,13 @@ import fs from "fs";
 import path from "path";
 import { installOodle } from "./oodle_lift.mjs";
 import { fileURLToPath } from "url";
-import { installOrExit } from "./wtdir.mjs";
+import { installOrExit, isDirEntry } from "./wtdir.mjs";
 
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url)).replace(/\\/g, "/");
 const WT = installOrExit();   // tools/wtdir.mjs: WT_DIR, else Steam's library list, else the usual folders
 const src = fs.readFileSync(HTML, "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + n + " missing");
   return src.slice(a + 1, b);
 };
@@ -31,8 +31,8 @@ if (!globalThis.atob) globalThis.atob = s => Buffer.from(s, "base64").toString("
 // shim, which is what stood here until 2026-09-20 and had been broken since the page stopped
 // carrying RAD's blob.
 installOodle(src);
-const Z = new Function(section("ZSTD") + "\nreturn { zstdDec };")();
-globalThis.zstdDec = Z.zstdDec;
+const Z = new Function(section("ZSTD") + "\nreturn { zstdDec: Zstd.zstdDec };")();
+globalThis.Zstd = { zstdDec: Z.zstdDec };   // the sections reach it as Zstd.zstdDec (ROADMAP 2.3)
 const MOD = new Function(section("MODEL") +
   "\nreturn { grpParseFront, GRP_CLS, grpDecompress, MReader, loadSkeletonBytes };")();
 const A2D = new Function(section("A2D") +
@@ -46,7 +46,7 @@ function walk(dir, out = [], depth = 0) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walk(p, out, depth + 1); }
+    if (isDirEntry(e, p)) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walk(p, out, depth + 1); }
     else if (/\.grp$/i.test(e.name)) out.push(p);
   }
   return out;

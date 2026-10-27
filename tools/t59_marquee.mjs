@@ -564,6 +564,41 @@ const BODY = `async function(){
   out.br.overlayUnlit = !!(App.meshes.get("tri").children[0] &&
     App.meshes.get("tri").children[0].material.isMeshBasicMaterial &&
     !App.meshes.get("tri").children[0].material.depthWrite);
+  // 3.39 (1): the overlay MARKS the shape without covering it — every tinted texel is a selected
+  // one, the strongest is the rim (never solid), and the inside is a faint wash
+  out.br.look = (function(){
+    var t = Marquee.tint, m = Marquee.shape();
+    if (!t || !m) return null;
+    var td = ctx2d(t).getImageData(0, 0, t.width, t.height).data;
+    var mc = mkCanvas(t.width, t.height); ctx2d(mc).drawImage(m, 0, 0, t.width, t.height);
+    var md = ctx2d(mc).getImageData(0, 0, t.width, t.height).data;
+    var outside = 0, rim = 0, wash = 0, max = 0;
+    for (var i = 3; i < td.length; i += 4) {
+      var a = td[i]; if (!a) continue;
+      if (!md[i]) outside++;
+      if (a > max) max = a;
+      if (a >= 200) rim++; else if (a >= 20 && a <= 60) wash++;
+    }
+    return { outside: outside, rim: rim, wash: wash, max: max };
+  })();
+  // 3.39 (3): H hides it in both views and the selection stays in force; the panel says so; a
+  // NEW selection shows itself again
+  var kids = function(){ return App.meshes.get("tri").children.length + App.meshes.get("far").children.length; };
+  var key = function(code){
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: code, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: code, bubbles: true }));
+  };
+  key("KeyH"); SelOverlay.sync();
+  out.br.hide = { shown: Marquee.shown, kids: kids(), still: !!Marquee.rect() && !!Marquee.stencil(App.activeSlot),
+    info: $("selInfo").textContent, btn: $("btnSelShow").textContent, status: $("status").textContent };
+  // hidden, a press inside it is not a grab of it (review of 3.39 (3)): nothing drawn moves unseen
+  var rH = Marquee.rect(), cx = rH.x + rH.w / 2, cy = rH.y + rH.h / 2;
+  out.br.hide.grabHidden = Marquee.shown === false && SelectUI.on && (SelectUI.down({ shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, button: 0, preventDefault: function(){} }, { x: cx, y: cy, vx: 0, vy: 0 }), SelectUI.d && SelectUI.d.id);
+  SelectUI.d = null;
+  key("KeyH"); SelOverlay.sync();
+  out.br.hide.back = { shown: Marquee.shown, kids: kids(), btn: $("btnSelShow").textContent };
+  $("btnSelShow").onclick(); SelectUI.fromParts(); SelOverlay.sync();
+  out.br.hide.renewed = { shown: Marquee.shown, kids: kids() };
   // ... and back the other way: the parts under these islands, REPLACING the part selection
   App.selParts.clear(); App.selParts.add("far");
   SelectUI.toParts();
@@ -716,7 +751,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -963,6 +998,17 @@ R.is(B.overlayKids === 2 && B.overlaySharesGeom,
   "the selection is on the MODEL as well: one overlay per part on this sheet, sharing the part's own geometry rather than a copy of it");
 R.is(B.overlayUnlit, "unlit and depth-write off, so it reads the same on a shadowed underside as on a lit deck and never fights the surface it sits on");
 R.is(B.overlayGone === 0, "and it comes off when the selection does");
+var LK = B.look || {}, HD = B.hide || {};
+console.log(`   look: max alpha ${LK.max}, ${LK.rim} rim texels, ${LK.wash} wash texels, ${LK.outside} outside the shape · hidden: ${JSON.stringify(HD)}`);
+R.is(LK.outside === 0 && LK.rim > 0 && LK.wash > 0 && LK.max <= 231,
+  `it marks the shape without covering it (ROADMAP 3.39 (1)): a rim at most ${LK.max}/255 along the edge (${LK.rim} texels), a faint wash inside (${LK.wash}), and nothing outside the selected texels (${LK.outside}) — the rim is inside because outside an island in UV is another part`);
+R.is(HD.shown === false && HD.kids === 0 && HD.still && /Hidden/.test(HD.info || "") && HD.btn === "Show" && /hidden/i.test(HD.status || ""),
+  `H hides it (3.39 (3)): off the model (${HD.kids} overlays), the selection still in force (${HD.still}), and the panel says so — "${HD.btn}", “${HD.info}”`);
+R.is(HD.grabHidden === "new", `and a press inside the hidden selection starts a new one rather than moving it unseen (${HD.grabHidden})`);
+R.is(HD.back && HD.back.shown && HD.back.kids === 2 && HD.back.btn === "Hide",
+  `H again shows it (${HD.back && HD.back.kids} overlays, "${HD.back && HD.back.btn}")`);
+R.is(HD.renewed && HD.renewed.shown && HD.renewed.kids === 2,
+  `hidden, then a NEW selection shows itself (${HD.renewed && HD.renewed.kids} overlays) — a selection made where nothing draws it is the invisible mode 3.9 was about`);
 R.is(B.panelStays && /part/i.test(B.partInfo || ""),
   "the panel stays put and carries the part count, so the two grains are one panel instead of two tabs");
 R.is(B.bridgeOffNoIslands, "with no islands selected the reverse bridge is disabled rather than offering to act on nothing");

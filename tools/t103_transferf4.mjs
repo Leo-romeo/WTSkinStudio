@@ -27,13 +27,14 @@ import { A, grp, WT } from "./arms.mjs";
 import { installOodle } from "./oodle_lift.mjs";
 import { makeReport } from "./headless.mjs";
 import { fileURLToPath } from "url";
+import { isDirEntry } from "./wtdir.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url)).replace(/\\/g, "/");
 const src = fs.readFileSync(HTML, "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + n + " not in the page");
   return src.slice(a + 1, b);
 };
@@ -43,12 +44,12 @@ const ms = t0 => Number(process.hrtime.bigint() - t0) / 1e6;
 globalThis.ZSTD_WASM_B64 = /const ZSTD_WASM_B64 = "([^"]*)";/.exec(src)[1];
 const MOD = new Function(section("MODEL") + "\nreturn { loadDynModelBytes, loadSkeletonBytes, buildDynModelGeometry };")();
 const BLK = new Function(section("ZSTD") + "\n" + section("BLK") + "\n" + section("VROMFS") +
-  "\nreturn { loadGameResDesc, descGetModel, buildDescBind, descMatName, zstdDec, zstdDict };")();
-globalThis.zstdDec = BLK.zstdDec; globalThis.zstdDict = BLK.zstdDict;
+  "\nreturn { loadGameResDesc, descGetModel, buildDescBind, descMatName, zstdDec: Zstd.zstdDec, zstdDict: Zstd.zstdDict };")();
+globalThis.Zstd = { zstdDec: BLK.zstdDec, zstdDict: BLK.zstdDict };   // the sections reach it as Zstd.* (ROADMAP 2.3)
 installOodle(src);
 const GEO = new Function("descMatName", section("OBJ") + "\n" + section("GEOMDATA") + "\nreturn { geomDataFromExtracted };")(BLK.descMatName);
 const { Transfer, padSeams } = new Function(section("UVTRI") + "\n" + section("ENCODE") + "\n" + section("TRANSFER") + "\nreturn { Transfer, padSeams };")();
-const DDS = new Function(section("DDS") + "\n" + section("BCNDEC") + "\nreturn { decodeBCn, decodeBC7, decodeBC4Tex };")();
+const DDS = new Function(section("DDS") + "\n" + section("BCNDEC") + "\nreturn { decodeBCn: BCnDec.decodeBCn, decodeBC7: BCnDec.decodeBC7, decodeBC4Tex: BCnDec.decodeBC4Tex };")();
 // The app's effect rule (core/state.js), read out of the page so this cannot drift from it.
 const EFFECT_RE = (() => {
   const m = /const EFFECT_RE = \/([^\n]+)\/;/.exec(src);
@@ -67,7 +68,7 @@ function walk(dir, re, out = [], depth = 0) {
   catch { return out; }                                // an unreadable folder is "nothing here", as the scan treats it
   for (const e of ents) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walk(p, re, out, depth + 1); }
+    if (isDirEntry(e, p)) { if (/^(win32|win64|linux64|mac|sound|video|movies|easyanticheat|launcher|userskins|\.)/i.test(e.name)) continue; walk(p, re, out, depth + 1); }
     else if (re.test(e.name)) out.push(p);
   }
   return out;
@@ -121,7 +122,7 @@ async function decode(rec) {
   let raw;
   if (comp === 0) raw = new Uint8Array(body);
   else if (comp === 0x20) raw = BLK.zstdDec(new Uint8Array(body));
-  else if (comp === 0x60) raw = globalThis.oodleDecompress(await globalThis.ensureOodle(), new Uint8Array(body), memSz);
+  else if (comp === 0x60) raw = Oodle.oodleDecompress(await Oodle.ensureOodle(), new Uint8Array(body), memSz);
   else if (comp === 0x80) raw = new Uint8Array(zlib.inflateSync(body));
   else throw new Error("comp " + comp);
   const bb = (fmt === "DXT1" || fmt === "ATI1") ? 8 : 16;

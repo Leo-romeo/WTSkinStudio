@@ -116,10 +116,16 @@ const BODY = `async function(){
 
   // ---- the panel: no Apply, a pick calls the loader, the menu is the game's ----
   var keepAfc = armamentForCurrentUnit, keepLWL = loadWeaponLoadout, keepUnload = unloadWeapons, keepGd = App.gameDir, keepEx = App.extracted;
-  var calls = [];
+  var calls = [], gate = null;
+  // Waits for a condition rather than for a time: the fixed 5 / 120 / 10 ms sleeps this block used to
+  // take were the whole test's flake under three lanes (a stalled page let the first load finish before
+  // the second pick, or the queued load not yet finish by the read — 87/88 twice at 7f0e525, which did
+  // not touch this code). The first load is held on a gate the test opens, so "in flight" is a fact.
+  var until = function(f){ return new Promise(function(res){ var t0 = performance.now();
+    (function tick(){ if (f() || performance.now() - t0 > 5000) res(); else setTimeout(tick, 5); })(); }); };
   try {
     armamentForCurrentUnit = function(){ return { unit: "t73_unit", arm: arm }; };
-    loadWeaponLoadout = async function(a, lo){ calls.push({ name: lo.name, assign: lo.assign.map(function(x){ return x.slot + ":" + x.preset; }).join(",") }); await new Promise(function(r){ setTimeout(r, 30); }); };
+    loadWeaponLoadout = async function(a, lo){ calls.push({ name: lo.name, assign: lo.assign.map(function(x){ return x.slot + ":" + x.preset; }).join(",") }); if (gate) await gate; };
     unloadWeapons = function(){ calls.push({ name: "(unload)" }); };
     App.gameDir = { name: "fake-t73" };
     var wtm = function(tz){ return [[1,0,0,0],[0,1,0,0],[0,0,1,tz],[0,0,0,1]]; };
@@ -140,8 +146,9 @@ const BODY = `async function(){
       chosen: [].map.call(el.querySelectorAll(".hpitem.on .t"), function(i){ return i.textContent; }).join("|") };
     // pick the Sidewinder: the loader is called with that one station filled
     var items = el.querySelectorAll(".hpitem");
+    var release; gate = new Promise(function(r){ release = r; });
     items[1].click();
-    await new Promise(function(r){ setTimeout(r, 5); });
+    await until(function(){ return calls.length === 1; });
     out.pick = { calls: calls.slice(), chosen: [].map.call(document.querySelectorAll("#weaponList .hpitem.on .t"), function(i){ return i.textContent; }).join("|"),
       mass: (document.querySelector("#weaponList .hpmass") || {}).textContent || "" };
     // two more picks while the first load is still in flight: they queue into ONE call with the latest build
@@ -151,12 +158,13 @@ const BODY = `async function(){
     chips2 = document.querySelectorAll("#weaponList .hp");
     chips2[1].click();                                                         // the tier-only centreline chip
     document.querySelectorAll("#weaponList .hpitem")[0].click();               // its tank
-    await new Promise(function(r){ setTimeout(r, 120); });
+    gate = null; release();
+    await until(function(){ return calls.length === 2 && !WeaponsPanel.busy && !WeaponsPanel.want; });
     out.queued = { calls: calls.slice(), busy: !!WeaponsPanel.busy, want: !!WeaponsPanel.want };
     // Empty on every station: the loader is not called, the stores are unloaded
     App.weaponsLoaded.set("t73 #1", { parts: [] });                  // something IS on the aircraft
     ArmBuild.clear(); WeaponsPanel.hang(arm, "t73_unit");
-    await new Promise(function(r){ setTimeout(r, 10); });
+    await until(function(){ return calls[calls.length - 1].name === "(unload)"; });
     App.weaponsLoaded.delete("t73 #1");
     out.emptied = calls.slice(-1)[0];
   } finally {
@@ -166,7 +174,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }

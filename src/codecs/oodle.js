@@ -1,4 +1,7 @@
 /*==OODLE==*/
+// One scope per module (ROADMAP 2.3): the body below is private, `Oodle` — returned at the end — is
+// the only name this module puts into the shared scope. Not re-indented; see `codecs/dds.js`.
+const Oodle = (() => {
 // ---- Oodle-format (Kraken/Leviathan) decompressor seam ----
 // **Nothing here names a decoder, deliberately.** Which one is behind these four functions is a
 // build-time choice, and this file ships in every build. Since 2026-09-14 the default — the one
@@ -109,4 +112,6 @@ function oodleDecompress(ex, data, rawSize){
     return new Uint8Array(ex.memory.buffer, dst, rawSize).slice();
   } finally { ex.oodle_free(src); ex.oodle_free(dst); }
 }
+return { oodleAvailable, oodleImpl, entryBlockReason, ensureOodle, oodleDecompress };
+})();
 /*==ENDOODLE==*/

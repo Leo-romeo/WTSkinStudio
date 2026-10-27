@@ -102,6 +102,13 @@ const BODY = `async function(){
   out.laid.info = document.getElementById("pathInfo").textContent;
   needsRender(); await frame(); await frame();
   out.overlay = { shown: PathOverlay.shown, visible: !!(PathOverlay.group && PathOverlay.group.visible) };
+  // ---- a click on the line puts a point in it, on the model too; Delete takes it out (4.52 (2)) ----
+  click(V3(0, -.5, 0));
+  out.ins = { n: P.pts.length, sel: PathUI.sel, at: P.pts[1] ? [P.pts[1].x, P.pts[1].y].map(function(v){ return Math.round(v * 1000) / 1000; }) : null };
+  needsRender(); await frame();
+  out.ins.ring = !!(PathOverlay.sel && PathOverlay.sel.visible);
+  document.dispatchEvent(new KeyboardEvent("keydown", { code: "Delete", key: "Delete", bubbles: true }));
+  out.ins.after = P.pts.length; out.ins.layer = s.layers.length === 1 && s.layers[0] === L;
   // the sheet's pointer refuses to add to a path on the model
   var before2d = P.pts.length;
   out.cross2d = { took: PathUI.down({ altKey: false, ctrlKey: false, button: 0 }, { x: 10, y: 10 }), n: P.pts.length === before2d };
@@ -182,7 +189,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, html, expr: pageExpr(BODY, 400), timeoutMs: 120000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, html, expr: pageExpr(BODY), timeoutMs: 120000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -195,6 +202,9 @@ R.is(r.laid.pts && r.laid.pts.every((p, i) => near(p[0], [0, 1, 1, 0][i], .01) &
   `…each node where it was clicked, in metres along the screen's right and up, at depth 0 (${JSON.stringify(r.laid.pts)})`);
 R.is(/on the model/.test(r.laid.info), `the panel says where the path is (${r.laid.info})`);
 R.is(r.overlay.shown && r.overlay.visible, "the path is drawn over the 3-D view");
+R.is(r.ins.n === 5 && r.ins.sel === 1 && r.ins.ring && JSON.stringify(r.ins.at) === JSON.stringify([0.5, 0]),
+  `a click on the path's line on the model puts a point in it, selected and ringed (${r.ins.n} points, the new one at ${r.ins.at} m in the path's plane, halfway along its first side) (ROADMAP 4.52 (2))`);
+R.is(r.ins.after === 4 && r.ins.layer, `…and Delete takes it out, not the layer (${r.ins.after} points)`);
 R.is(r.cross2d.took === true && r.cross2d.n, "a click on the sheet does not add to a path on the model");
 
 const [q0, q1, q2, q3] = r.fill.q;

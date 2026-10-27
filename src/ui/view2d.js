@@ -63,7 +63,8 @@ const Draw2D = {
     if (ch === "wear" && !src) src = App.compare ? s.baseC : s.composite;
     // an explicit channel view wins over whatever the brush happens to be set to
     if (App.chanView && App.chanView !== "shaded") src = chanViewCanvas(s, App.chanView) || src;
-    return src || (App.compare ? (s.baseC || s.composite) : s.composite);
+    // The Level control: that mip level of the sheet, from the views' own chain (4.58 (b)).
+    return LevelView.in2d(s, src || (App.compare ? (s.baseC || s.composite) : s.composite));
   },
   // Only the part of the sheet that is actually on screen. At 8192² zoomed in, blitting the whole
   // sheet and letting the clip discard it cost 533 ms a frame against 51 ms for the visible slice —
@@ -322,18 +323,26 @@ const Draw2D = {
       g.strokeStyle = "rgba(127,224,255,.5)";
       g.beginPath(); g.moveTo(v2.cursor.x, v2.cursor.y); g.lineTo(at.x, at.y); g.stroke();
     }
-    // The outline of the dab (ROADMAP 4.50 (10)): a square tip is drawn as its square, at its own
-    // Angle — before the stroke says which way it is heading — and every other tip as the circle its
-    // Size spans. The inner line is where a soft edge stops being opaque, for the tips Hardness shapes.
+    // The outline of the dab (ROADMAP 4.50 (10), 3.41 (2)), at its Angle and — mid-stroke, with Follow
+    // on — turned the way the stroke heads: the Round as the circle its Size spans, the Square as its
+    // square, and every other tip as its own coverage traced at half (`Tips.outline`). The inner line is
+    // where a soft edge stops being opaque, for the tips Hardness shapes.
     const T = Tips.of(App.brush), hard = Math.max(0, Math.min(1, App.brush.hardness));
+    const turn = Tips.cursorTurn(T, App.brush, stroke && stroke.dirs ? stroke.dirs[0] : null);
     const outline = (k, alpha) => {
       g.strokeStyle = "rgba(127,224,255," + alpha + ")";
       g.beginPath();
-      if (T.id !== "square") g.arc(at.x, at.y, r * k, 0, Math.PI * 2);
-      else {
-        const a = (+App.brush.angle || 0) * Math.PI / 180, c = Math.cos(a) * r * k, s = Math.sin(a) * r * k;
+      const c = Math.cos(turn) * r * k, s = Math.sin(turn) * r * k;
+      if (T.id === "round") g.arc(at.x, at.y, r * k, 0, Math.PI * 2);
+      else if (T.id === "square") {
         g.moveTo(at.x + c - s, at.y + s + c); g.lineTo(at.x - c - s, at.y - s + c);
         g.lineTo(at.x - c + s, at.y - s - c); g.lineTo(at.x + c + s, at.y + s - c); g.closePath();
+      } else {
+        const S = Tips.outline(T);
+        for (let i = 0; i < S.length; i += 4) {
+          g.moveTo(at.x + S[i] * c - S[i + 1] * s, at.y + S[i] * s + S[i + 1] * c);
+          g.lineTo(at.x + S[i + 2] * c - S[i + 3] * s, at.y + S[i + 2] * s + S[i + 3] * c);
+        }
       }
       g.stroke();
     };
@@ -367,7 +376,7 @@ function draw2DNow(){
   g.fillRect(0, 0, cnv2.width, cnv2.height);
   const s = App.activeSlot;
   if (!s || !s.composite) return;
-  g.imageSmoothingEnabled = v2.sc < 3;
+  g.imageSmoothingEnabled = v2.sc < 3 && !LevelView.at2d;   // a level is shown texel for texel
   g.setTransform(v2.sc, 0, 0, v2.sc, v2.ox, v2.oy);
   Draw2D.tile(g, s);                          // before the early return: a repeat can be in view when the sheet is not
   const D = Draw2D.window(s, g);
@@ -517,13 +526,15 @@ cnv2.addEventListener("pointermove", e => {
   // the same one.
   if (App.paint3d) { v2.cursor = p; draw2D(); }
   if (stroke) {
-    // Every sample the move carries — a pen's coalesced ones, each at its own pressure — through the
-    // Smoothing string (ROADMAP 4.50 (4)). A mouse with Smoothing off is the one sample it always was.
+    // Every sample the move carries — its coalesced ones, a pen's each at its own pressure and a
+    // mouse's too since 2026-10-22 (`Pen.samples`) — through the Smoothing string (ROADMAP 4.50 (4)).
+    const t0 = Rec.clock();
     for (const q of Pen.follow(stroke, e, App.brush.lazy)) {
       stroke.p = q.p;
       const tp = view2px({ clientX: q.x, clientY: q.y });
       stampAt(tp.x, tp.y); Mirror.stamp(tp, null);
     }
+    Rec.span("move", t0);
     // Where the paint is going while the string trails: the ring is drawn there (Draw2D.ring).
     v2.lazy = App.brush.lazy > 0 && stroke.string ? view2px({ clientX: stroke.string.x, clientY: stroke.string.y }) : null;
   }
@@ -564,6 +575,7 @@ function adjustBrushSize(d){
   $("brushSize").value = App.brush.size; $("brushSizeVal").textContent = App.brush.size;
   brushStamp._key = null;
   refreshBrushCursor();                                      // [ / ] and Alt+wheel resize the indicators too
+  BrushPanel.sampleSoon();                                   // …and the sample stroke (3.41 (3))
 }
 // Alt+click picks from the channel the ACTIVE BRUSH writes. It used to read slot.composite — the
 // albedo — whatever the tool was, and write App.brush.color, which the surface brushes never read:
@@ -615,7 +627,7 @@ function pickColorFrom(slot, x, y){
     const shown = shownColorAt(slot, x, y);
     const rgb = shown || [d[0], d[1], d[2]];
     const hex = "#" + rgb.map(v => v.toString(16).padStart(2, "0")).join("");
-    App.brush.color = hex; $("brushColor").value = hex; brushStamp._key = null;
+    App.brush.color = hex; $("brushColor").value = hex; brushStamp._key = null; BrushPanel.syncCycle();
     // Only say it when it made a difference: on an aircraft, or on a fully covered texel, the two
     // answers are the same number and the note would be noise on every pick.
     const moved = shown && shown.some((v, i) => v !== d[i]);
@@ -633,6 +645,7 @@ function pickColorFrom(slot, x, y){
   App.brush.value = v;
   $("brushValue").value = v; $("brushValueVal").textContent = v;
   brushStamp._key = null;
+  BrushPanel.sampleSoon();
   setStatus("Picked " + (CHAN_LABEL[ch] || ch).toLowerCase() + " " + v, "ok");
 }
 cnv2.addEventListener("contextmenu", e => e.preventDefault());

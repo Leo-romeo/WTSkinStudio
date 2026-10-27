@@ -60,7 +60,7 @@ const BODY = `async function(){
   var entry = function(name, bytes){ return { name: name, bytes: async function(){ return bytes.slice(); } }; };
   var blk = function(name, text){ return entry(name, new TextEncoder().encode(text)); };
   var decodedFrom = function(bytes, name){
-    var d = parseTGA(bytes.buffer.slice(0));
+    var d = TGA.parseTGA(bytes.buffer.slice(0));
     d.raw = bytes.buffer.slice(0); d.rawName = name; d.fileName = name;
     return d;
   };
@@ -318,7 +318,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep"), timeoutMs: 90000 });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep"), timeoutMs: 90000 });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -349,8 +349,8 @@ console.log("\n=== _n is unpacked, not pasted as colour ===");
 console.log(`   smooth ${rgb(o.main.smooth)}, metal ${rgb(o.main.metal)}, normal ${rgb(o.main.normal)}   (the file is rgba 90,10,200,77)`);
 R.is(near(o.main.smooth, [90, 90, 90], 4), `R becomes smoothness (${rgb(o.main.smooth)}) — the file's red channel, greyscale`);
 R.is(near(o.main.metal, [200, 200, 200], 4), `B becomes metallicity (${rgb(o.main.metal)}) — CLAUDE.md §1's packing; read as colour all three would be ${rgb([90, 10, 200])}`);
-R.is(!!o.main.normal && Math.abs(o.main.normal[0] - 10) <= 4 && Math.abs(o.main.normal[1] - 77) <= 4,
-  `G and A become the normal's X and Y (${rgb(o.main.normal)}) — the alpha is a channel here, not transparency`);
+R.is(!!o.main.normal && Math.abs(o.main.normal[0] - 77) <= 4 && Math.abs(o.main.normal[1] - 10) <= 4,
+  `A and G become the normal's X and Y (${rgb(o.main.normal)}) — the alpha is a channel here, not transparency (1.24)`);
 
 console.log("\n=== a camouflage stem is a pin, not a slot texture ===");
 console.log(`   skinCamo ${JSON.stringify(o.main.camoKeys)}, colour ${rgb(o.main.camoColor)}`);
@@ -463,7 +463,7 @@ R.is(AN.smoothBefore === false && !!AN.smooth,
   `a slot that had no surface stack gets one (had ${AN.smoothBefore})`);
 R.is(AN.stem === "turret_n", `named from the slot rather than from the file (${AN.stem}, was ${AN.stemBefore})`);
 R.is(near(AN.smooth, [140, 140, 140], 4) && near(AN.metal, [220, 220, 220], 4)
-  && !!AN.normal && Math.abs(AN.normal[0] - 20) <= 4 && Math.abs(AN.normal[1] - 60) <= 4,
+  && !!AN.normal && Math.abs(AN.normal[0] - 60) <= 4 && Math.abs(AN.normal[1] - 20) <= 4,   // X from A, Y from G (1.24)
   `and it is unpacked on the way in, not adopted as colour (smooth ${rgb(AN.smooth)}, metal ${rgb(AN.metal)}, normal ${rgb(AN.normal)})`);
 R.is(near(AN.albedo, [0, 255, 0], 8),
   `while the albedo beside it is untouched (${rgb(AN.albedo)}) — the two halves of a slot are replaced independently`);

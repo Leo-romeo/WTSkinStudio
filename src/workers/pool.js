@@ -51,8 +51,15 @@ function sectionSource(names){
 // Two pieces on purpose: `core` is the code, `core + dispatch` is what a worker runs. The inline
 // fallback evaluates `core` alone, so it never has to strip the message plumbing back out with a
 // regex over source that may contain the same words.
+//
+// The worker's source ends with a `//# sourceURL` naming the pool, `pool/<name>.js`: what a stack
+// trace, DevTools and the console's "Uncaught" line call it, where it was a fresh `blob:` URL every
+// run. It is one script per pool, so its line numbers count from the first section the pool names,
+// each headed `// ---- NAME ----`. The page's own scripts are named after their src/ files the same
+// way, by the build (tools/build.mjs).
 function poolSource(cfg){
   const core = sectionSource(cfg.sections || []) + "\n" + (cfg.ops || "");
+  const url = "pool/" + String(cfg.name || "pool").replace(/[^\w.-]/g, "_") + ".js";
   return { core, src: core + `
 self.onmessage = function(e){
   var d = e.data;
@@ -73,7 +80,7 @@ self.onmessage = function(e){
     if (out && typeof out.then === "function") out.then(send, fail);
     else send(out);
   } catch (err) { fail(err); }
-};` };
+};` + "\n//# sourceURL=" + url };
 }
 // Wire one worker's replies back to the job that is waiting for them. A worker that DIES takes its
 // job with it, so that job is failed loudly — leaving the caller's promise pending forever is
@@ -90,7 +97,15 @@ function poolAttach(P, w, drain){
   };
   w.onerror = ev => {
     const job = w.busy && P.pending.get(w.busy);
-    if (job) { P.pending.delete(w.busy); job.reject(new Error("[" + P.name + "] worker failed: " + (ev.message || "unknown"))); }
+    if (job) {
+      // The job's caller hears of it, so the page must not as well. An error a worker leaves
+      // unhandled is handed on to the window unless this cancels it (measured 2026-10-17, Chrome
+      // 155), and the page's trap (core/errors.js) would then say the one failure twice.
+      ev.preventDefault();
+      P.pending.delete(w.busy);
+      job.reject(new Error("[" + P.name + "] worker failed: " + (ev.message || "unknown") +
+        (ev.filename ? " (" + ev.filename + ":" + ev.lineno + ")" : "")));
+    }
     w.busy = null;
     drain();
   };

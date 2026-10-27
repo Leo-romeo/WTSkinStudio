@@ -3,6 +3,16 @@
 // The directive sits INSIDE the marker, and that is deliberate: DDS leads the section list of
 // every worker pool, so a lifted body that starts here is what makes the worker strict too. Every
 // other module puts `"use strict"` above its marker, where it governs the script and nothing else.
+// ---- One scope per module (ROADMAP 2.3, decided A 2026-10-21) ----
+// Everything below is this module's own: the IIFE gives it a scope of its own, and the object it
+// returns at the end — `DDS` — is the one name it puts into the page's shared scope. A caller says
+// `DDS.parseDDS(buf)`. The body is deliberately NOT re-indented, so a line's history still reads as
+// it did, and the names inside are the names they always had, so a grep for `parseDDS` still finds
+// every use. The pools lift this section by its marker exactly as before: in a worker it defines
+// `DDS` the same way, and the pools' ops call through it. `codecs/` was the first layer converted
+// because it is pure, DOM-free and what the pools lift (2.3's order); `codecs/wtlz.js` was already
+// one namespace, `WTLZ`, and is never edited here (CLAUDE.md §0.2).
+const DDS = (() => {
 const DDS_MAGIC = 0x20534444;
 // ---- A DDS in two halves: the header arithmetic, and the pixels ----
 // These used to be one closure, which meant the only way to decode a level was to parse the whole
@@ -59,9 +69,9 @@ function ddsDecodeLevel(buf, info, i){
     return decodeMasked(new Uint8Array(buf, L.off, L.bytes), L.w, L.h, 32,
       fmt === "BGRA8" ? [0xff0000, 0xff00, 0xff, 0xff000000] : [0xff, 0xff00, 0xff0000, 0xff000000]);
   const src = new Uint8Array(buf, L.off, L.bytes);
-  if (fmt === "BC7") return decodeBC7(src, L.w, L.h);
-  if (fmt === "BC4") return decodeBC4Tex(src, L.w, L.h);
-  return decodeBCn(src, L.w, L.h, fmt);
+  if (fmt === "BC7") return BCnDec.decodeBC7(src, L.w, L.h);
+  if (fmt === "BC4") return BCnDec.decodeBC4Tex(src, L.w, L.h);
+  return BCnDec.decodeBCn(src, L.w, L.h, fmt);
 }
 // Only level 0 is decoded up front. Every reader in the app takes mips[0] and throws the rest
 // away, but a full chain is another third of the pixels — 1.4 s of the 4.4 s a skin's BC7 sheets
@@ -110,7 +120,9 @@ function writeBCnDDS(fmt, w, h, data){
   out.set(data, headLen);
   return out;
 }
-function maskShift(m){ let s = 0; if (!m) return {s:0, bits:0}; while (!((m >>> s) & 1)) s++; let b = 0; while ((m >>> (s + b)) & 1) b++; return {s, bits:b}; }
+// `s + b < 32` is the bound: a shift wraps at 32, so for a crafted 0xFFFFFFFF mask `m >>> 32` is `m`
+// again and the count never ended — on the main thread and in the decode pool (ROADMAP 1.21 (1), t23).
+function maskShift(m){ let s = 0; if (!m) return {s:0, bits:0}; while (!((m >>> s) & 1)) s++; let b = 0; while (s + b < 32 && (m >>> (s + b)) & 1) b++; return {s, bits:b}; }
 function decodeMasked(src, w, h, bitCount, masks){
   const n = w * h;
   const out = new Uint8ClampedArray(n * 4);
@@ -156,4 +168,39 @@ function decodeMasked(src, w, h, bitCount, masks){
   }
   return out;
 }
+// Fit RGBA pixels inside `max` on their longer side, aspect kept, each output texel the area-weighted
+// mean of the source texels its footprint covers (a box filter that handles a fractional ratio, so
+// 12 800 → 8192 weighs each source texel by how much of it falls in the footprint). Pixels that
+// already fit come back untouched. Built for ROADMAP 1.26: a UserSkin shipped `empty_glass` as a
+// 12 800² DXT5 — 655 MB as pixels, past the largest sheet the editor holds (8192) — and every step
+// after the decode (the slot's canvases, its composite, its upload) scaled with that area. Streams one
+// output row at a time, so its scratch is one source row of sums, not a second copy of the sheet.
+function fitRGBA(rgba, w, h, max){
+  if (w <= max && h <= max) return { w, h, rgba };
+  const s = Math.max(w, h) / max;
+  const dw = Math.max(1, Math.min(max, Math.round(w / s))), dh = Math.max(1, Math.min(max, Math.round(h / s)));
+  const fx = w / dw, fy = h / dh, norm = 1 / (fx * fy);
+  const out = new Uint8ClampedArray(dw * dh * 4), row = new Float64Array(w * 4);
+  for (let y = 0; y < dh; y++) {
+    const a = y * fy, b = Math.min(h, (y + 1) * fy);
+    row.fill(0);
+    for (let j = Math.floor(a); j < b; j++) {
+      const wy = Math.min(j + 1, b) - Math.max(j, a), o = j * w * 4;
+      for (let i = 0; i < w * 4; i++) row[i] += rgba[o + i] * wy;
+    }
+    for (let x = 0; x < dw; x++) {
+      const c = x * fx, d = Math.min(w, (x + 1) * fx);
+      let r = 0, g = 0, bl = 0, al = 0;
+      for (let i = Math.floor(c); i < d; i++) {
+        const wx = Math.min(i + 1, d) - Math.max(i, c), q = i * 4;
+        r += row[q] * wx; g += row[q + 1] * wx; bl += row[q + 2] * wx; al += row[q + 3] * wx;
+      }
+      const p = (y * dw + x) * 4;
+      out[p] = r * norm; out[p + 1] = g * norm; out[p + 2] = bl * norm; out[p + 3] = al * norm;   // a clamped array rounds
+    }
+  }
+  return { w: dw, h: dh, rgba: out };
+}
+return { DDS_MAGIC, ddsInfo, ddsDecodeLevel, ddsMips, parseDDS, writeBCnDDS, maskShift, decodeMasked, fitRGBA };
+})();
 /*==ENDDDS==*/

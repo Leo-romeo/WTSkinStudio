@@ -44,6 +44,9 @@ window.addEventListener("keydown", e => {
   // physical key codes — layout independent (works on non-Latin keyboards)
   if (cam.fly && ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"].includes(e.code)) { flyKeys.add(e.code); e.preventDefault(); return; }
   if (e.code === "Space") v2.space = true;
+  // A tool started from the keyboard closes the Export window, as a press in a view does (ROADMAP
+  // 3.43): B paint, M marquee, K islands, L lasso, W wand, T text — the tool keys below.
+  if (!e.ctrlKey && !e.metaKey && !e.repeat && ["KeyB", "KeyM", "KeyK", "KeyL", "KeyW", "KeyT"].includes(e.code)) TopWin.closeExport();
   if (e.code === "KeyB" && !e.ctrlKey && !e.metaKey) setPaint3d(!App.paint3d);
   if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey) setFly(!cam.fly);
   // G armed the Moving mode until 2026-10-17; a decal is dragged directly now, so G is free again.
@@ -69,6 +72,8 @@ window.addEventListener("keydown", e => {
   // also fly mode's forward — the fly branch above returns first, so while flying it stays forward.
   if (e.code === "KeyL" && !e.ctrlKey && !e.metaKey && !e.repeat) SelectUI.toggleKind("lasso");
   if (e.code === "KeyW" && !e.ctrlKey && !e.metaKey && !e.repeat) SelectUI.toggleKind("wand");
+  // Show / hide the selection overlay (3.39 (3)) — Photoshop's Show Extras is Ctrl+H, which is Solo here.
+  if (e.code === "KeyH" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) SelectUI.toggleShown();
   // A lasso being drawn owns Enter (close), Esc (drop it — not the selection under it) and Backspace
   // (take back a corner), and answers them before anything else that listens for the same keys.
   if (SelectUI.lasso && !/input|textarea/i.test((e.target && e.target.tagName) || "")) {
@@ -91,12 +96,23 @@ window.addEventListener("keydown", e => {
   // ---- the shape tool (ROADMAP 6.1) ----
   // Esc throws the path away and is checked BEFORE the marquee's Esc, so one key does not mean two
   // things at once; Backspace drops the last point, which is the other half of drawing one.
-  if (e.code === "Escape" && PathUI.on && PathUI.path && PathUI.path.pts.length) {
+  if (e.code === "Escape" && PathUI.on && (PathUI.layer || PathUI.path && PathUI.path.pts.length)) {
     e.preventDefault(); PathUI.clear(); setStatus("Path cleared", "ok"); return;
   }
   if (e.code === "Backspace" && PathUI.on && PathUI.path && PathUI.path.pts.length && !/input|textarea/i.test((e.target && e.target.tagName) || "")) {
     e.preventDefault();
     PathUI.pop();
+    return;
+  }
+  // Delete takes the selected node (4.52 (2)) — and while a path is being drawn it is the shape
+  // tool's key whether or not a node is selected, checked here before the layer stack's own Delete
+  // below. The review of 4.52 (2) found two ways the first version let it through to delete the
+  // layer under the path: a second quick press (the first had cleared the selection), and focus left
+  // on the Angle slider (the guard above lets range sliders through, and this branch skipped inputs).
+  if (e.code === "Delete" && PathUI.on && PathUI.path && PathUI.path.pts.length) {
+    e.preventDefault();
+    if (PathUI.remove(PathUI.sel)) setStatus("Point removed", "ok");
+    else setStatus("Click a point to select it — then Delete removes it. Esc clears the whole path", "");
     return;
   }
   if (e.code === "Escape" && !App.placing && Marquee.rect()) { e.preventDefault(); Marquee.act("clear selection", () => { Marquee.none(); setStatus("Selection cleared", "ok"); }); }
@@ -195,6 +211,7 @@ function setCompare(on){
     // than swapped; chanViewCanvas keys its cache on App.compare so this costs one rebuild a press.
     if (App.chanView && App.chanView !== "shaded") refreshChannelTextures(s);
   }
+  LevelView.refreshAll();                                     // a sheet's own levels are the edit's too (4.58 (b))
   $("btnCompare").classList.toggle("active", !!on);
   needsRender();
   draw2D();
@@ -211,17 +228,9 @@ function pushPalette(col){
   if (p.length > 10) p.pop();
   renderPalette();
 }
-function renderPalette(){
-  const el = $("palette");
-  el.innerHTML = "";
-  for (const c of App.palette || []) {
-    const b = document.createElement("div");
-    b.title = c;
-    b.style.cssText = "width:18px;height:18px;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:" + c;
-    b.onclick = () => { App.brush.color = c; $("brushColor").value = c; brushStamp._key = null; };
-    el.appendChild(b);
-  }
-}
+// The row is the swatch panel's now (ui/panels/swatches.js, 4.50 (12)): recent colours are one of
+// its libraries, redrawn only while that one is shown.
+function renderPalette(){ if (Swatches.lib === "recent") Swatches.render(); }
 document.querySelectorAll("[data-vm]").forEach(b => b.onclick = () => Layout.setViewMode(b.dataset.vm));
 $("btnSides").onclick = () => {
   const hide = $("leftbar").style.display !== "none";

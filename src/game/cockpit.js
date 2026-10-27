@@ -46,6 +46,19 @@ const Cockpit = {
   // The cockpit body's own material→texture map, qualified — merged into rebindMaterials' lookup
   // while that body is on screen, the way a store's map is.
   bind(){ const b = App.bodies.cockpit; return (b && b.bind) || null; },
+  // Every sheet the cockpit body binds, lower-cased — what `gcDecoded` must keep while the exterior
+  // is on screen (ROADMAP 1.26). `extract` decodes them and its load ends in a rebuild with the
+  // exterior still current, so no slot names them yet; at 64 decoded sheets or more that rebuild
+  // released them all, and the switch then bound the cockpit to empty placeholders — measured on the
+  // F-16A, whose two bodies bind 27 and 85 sheets. They are the vehicle's, kept as the exterior's are.
+  // Null when a cockpit body exists with no desc bind (a project opened without the game folder):
+  // which embedded sheets are its is then unknown, so `gcDecoded` releases nothing until it is shown.
+  sheets(){
+    const b = this.bind(), out = new Set();
+    if (App.bodies.cockpit && !b) return null;
+    if (b) for (const e of b.map.values()) { if (e.c) out.add(e.c.toLowerCase()); if (e.n) out.add(e.n.toLowerCase()); }
+    return out;
+  },
   // The fields of a body: the live App while it is on screen, its stash otherwise. Null for a body
   // that does not exist.
   fields(body){

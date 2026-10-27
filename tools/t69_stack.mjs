@@ -90,7 +90,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -114,7 +114,9 @@ R.is(r.report.some(x => /resampled from 128×128 to 256×256/.test(x)) && r.repo
   "the report names each adaptation: " + r.report.join("; "));
 R.is(r.landed && r.composited.shown === 255 && r.composited.hidden === 0x40,
   `it lands on the slot as its top node and composites: red ${r.composited.shown} where the group mask shows it, base grey ${r.composited.hidden} where it hides it`);
-R.is(/newer build/.test(r.newer) && /format 6/.test(r.newer), `a stack from a newer build is refused: “${r.newer}”`);
+// One past what this build reads, whatever that is: the number moved from 5 to 6 with path layers (4.52 (3)).
+const fm = /format (\d+), this build reads (\d+)/.exec(r.newer || "");
+R.is(/newer build/.test(r.newer) && fm && +fm[1] === +fm[2] + 1, `a stack from a newer build is refused: “${r.newer}”`);
 R.is(/not a WT Skin Studio stack/.test(r.notOne), `a zip that is not a stack is refused by name: “${r.notOne}”`);
 
 const errs = (r.__errs || []).filter(e => !/three|jszip|cdnjs|net::|Failed to load/i.test(e));

@@ -23,7 +23,7 @@ const OUT = process.argv[2] || path.join(ROOT, "tools", "_t28_projector.html");
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section");
   return src.slice(a + 1, b);
 };

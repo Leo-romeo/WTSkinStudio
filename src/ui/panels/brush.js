@@ -113,7 +113,7 @@ function selectLayerForBrush(mode){
   // "Already right" is now about the SLOT, not the layer: a layer carrying colour and smoothness is
   // already the right home for either brush, and jumping out of it to a sibling would undo the one
   // thing (e) is for.
-  const takes = c => c && c.kind === "paint" && !c.proj && !c.derived;
+  const takes = c => c && c.kind === "paint" && !c.proj && !c.derived && !c.shape;
   const mineNow = cur && !isGroup(cur) ? LayerNode.contentOn(cur, ch) : null;
   if (takes(mineNow)) return false;
   const kids = layerLeaves(ctx.group.children);
@@ -161,6 +161,11 @@ const BrushTools = {
   // selection, which is why Panel line's depth went back to 40 each time you reached for it: it was
   // written as a sensible starting point and behaved as a reset. It is a seed now — read once.
   SEED: { mask: 0, height: 40, smooth: 160, metal: 220, wear: 200 },
+  // …and where a tool's Spacing starts when it is not the slider's (2026-10-22). Panel line's stamps
+  // ADD into a height field (`embossInto`), so a groove is the sum of the stamps over it: at the
+  // colour brush's 15 % it would carve 2.3× as deep as at the 35 % its depth was set by. A colour
+  // dab stops at Opacity, so there the lower default costs only a firmer edge (`Pen.SPACING`).
+  SPACING: { height: .35 },
   // Colour is deliberately NOT per tool: one colour across the tools is what people expect, and
   // only one tool reads it.
   FIELDS: [
@@ -185,6 +190,14 @@ const BrushTools = {
     { k: "angle",    el: "brushAngle",    scale: 1 },
     { k: "angleJit", el: "brushAngleJit", scale: 100 },
     { k: "follow",   el: "brushFollow",   check: true },
+    // ROADMAP 4.56: the colour along the stroke, and how long one cycle of it is. `opt` is a select
+    // of fixed choices, which — unlike the tip — has no library behind it to consult.
+    { k: "cycle",    el: "brushCycle",    opt: true },
+    { k: "cycleLen", el: "brushCycleLen", scale: 1 },
+    // ROADMAP 4.50 (11): the Retouch brush's kind, strength and tones — kept with it, like its size.
+    { k: "retouch",  el: "brushRetouch",  opt: true },
+    { k: "strength", el: "brushStrength", scale: 100 },
+    { k: "range",    el: "brushRange",    opt: true },
   ],
   field(k){ return BrushTools.FIELDS.find(f => f.k === k) || null; },
   // The build's own defaults, read off the markup rather than written down a second time — the same
@@ -196,10 +209,11 @@ const BrushTools = {
     for (const f of BrushTools.FIELDS) {
       const el = $(f.el);
       o[f.k] = f.check ? !!(el && el.defaultChecked)
-        : f.pick ? (el ? ([...el.options].find(x => x.defaultSelected) || el.options[0] || { value: "" }).value : "")
+        : f.pick || f.opt ? (el ? ([...el.options].find(x => x.defaultSelected) || el.options[0] || { value: "" }).value : "")
         : el ? +el.defaultValue / f.scale : 0;
     }
     if (m in BrushTools.SEED) o.value = BrushTools.SEED[m];
+    if (m in BrushTools.SPACING) o.spacing = BrushTools.SPACING[m];
     return o;
   },
   // A row stored before a field existed — every row saved before Flow, 2026-09-25 — takes the build's
@@ -220,7 +234,7 @@ const BrushTools = {
     const o = BrushTools.row(m);
     for (const f of BrushTools.FIELDS) {
       const v = App.brush[f.k];
-      if (f.check ? typeof v === "boolean" : f.pick ? typeof v === "string" : typeof v === "number" && isFinite(v)) o[f.k] = v;
+      if (f.check ? typeof v === "boolean" : f.pick || f.opt ? typeof v === "string" : typeof v === "number" && isFinite(v)) o[f.k] = v;
     }
   },
   // ...and what the tool being picked up was left at.
@@ -229,6 +243,8 @@ const BrushTools = {
     for (const f of BrushTools.FIELDS) BrushTools.put(f, o[f.k]);
     brushStamp._key = null;
     refreshBrushCursor();
+    BrushPanel.syncCycle(); BrushPanel.syncPattern();
+    BrushPanel.syncRetouch();                  // the rows follow the tool's own kind, now it is loaded
   },
   // One setting into its control and the live brush. The slider is written first and the state read
   // back OUT of it, so a stored value outside a slider's range ends up clamped in both rather than in
@@ -239,6 +255,12 @@ const BrushTools = {
     if (!f) return;
     if (f.pick) { if (typeof v === "string") BrushPanel.setTip(v); return; }
     const el = $(f.el);
+    // A select takes only one of its own options; anything else leaves it where it is.
+    if (f.opt) {
+      if (typeof v !== "string" || !el || ![...el.options].some(o => o.value === v)) return;
+      el.value = v; App.brush[f.k] = v;
+      return;
+    }
     if (f.check) {
       if (typeof v !== "boolean") return;
       if (el) el.checked = v;
@@ -289,6 +311,7 @@ function syncBrushOptionRows(){
   const ph = $("pickHint");
   if (ph) ph.textContent = m === "mask" ? "Alt-paint reveals" : "Alt-click picks";
   $("rowClone").style.display = App.brush.tool === "clone" ? "" : "none";
+  BrushPanel.syncRetouch();
   // A Panel line stroke is a height field that ADDS, so it always builds up and Opacity is already
   // its per-dab depth: Flow and Build up would be a second knob on the same thing (4.50 (4) + 6.4).
   const field = App.brush.tool === "height";
@@ -298,7 +321,10 @@ function syncBrushOptionRows(){
   // tip to choose and takes none of the dynamics — `stampAt`'s height branch never asks for either.
   $("rowTip").style.display = field ? "none" : "";
   $("brushDyn").style.display = field ? "none" : "";
+  $("rowSample").style.display = field ? "none" : "";           // nor a stamp to lay a sample with
+  if (field) BrushPanel.tipGrid(false);
   BrushPanel.syncTip();
+  BrushPanel.syncCycle(); BrushPanel.syncPattern();
   BrushPanel.cloneHint();
 }
 // The Clone's one line of state, on its row: whether Alt+click has set a source on this slot yet,
@@ -310,6 +336,13 @@ const BrushPanel = {
   CURVES: [0.5, 1, 2],
   // The Smoothing readout: the string's length in screen pixels, or "off".
   lazyText(n){ return n > 0 ? String(n) : "off"; },
+  // The Retouch rows (4.50 (11)): the kind and Strength for the tool, the tones for dodge and burn.
+  syncRetouch(){
+    const on = App.brush.tool === "retouch", k = App.brush.retouch;
+    $("rowRetouch").style.display = on ? "" : "none";
+    $("rowStrength").style.display = on ? "" : "none";
+    $("rowRange").style.display = on && (k === "dodge" || k === "burn") ? "" : "none";
+  },
   cloneHint(){
     const el = $("cloneHint");
     if (!el || App.brush.tool !== "clone") return;
@@ -333,6 +366,8 @@ const BrushPanel = {
     if (el) el.value = App.brush.tip;
     brushStamp._key = null;
     BrushPanel.syncTip();
+    const grid = $("tipGrid");
+    if (grid && !grid.hidden) for (const c of grid.children) c.setAttribute("aria-selected", String(c.dataset.tip === App.brush.tip));
   },
   // What the tip decides on the panel: Hardness shows for the two tips it shapes (and for Panel line,
   // which has no tip), the angle rows for a tip that looks different turned, Remove for a tip the
@@ -352,8 +387,12 @@ const BrushPanel = {
   // 2026-10-10). Every tip now sits on the panel the way the app's icons do.
   tipPreview(){
     const c = $("tipPreview");
-    if (!c) return;
-    const T = Tips.get(App.brush.tip), n = c.width, m = n - 4;
+    if (c) BrushPanel.drawTip(c, App.brush.tip);
+    BrushPanel.sampleSoon();
+  },
+  // One tip drawn into a square canvas, as above: the preview, and every cell of the tip grid.
+  drawTip(c, id){
+    const T = Tips.get(id), n = c.width, m = n - 4;
     let W = m, H = m, cov;
     if (T.cov) {
       if (T.w >= T.h) H = Math.max(1, Math.round(m * T.h / T.w)); else W = Math.max(1, Math.round(m * T.w / T.h));
@@ -366,6 +405,133 @@ const BrushPanel = {
     }
     g.putImageData(img, 0, 0);
   },
+
+  // ---- every tip by its look (ROADMAP 3.41 (1)) ----
+  // A `<select>` cannot show a picture, so a loaded tip was a file name until it was picked. The
+  // preview opens a grid of every tip in the select's order — the four built in, then the library —
+  // each drawn by `drawTip`, the one picture the preview already showed. The select stays: it is the
+  // list a keyboard and a screen reader use, and what the settings rows are read back from. Built
+  // as the popover 3.30's brush bar opens later, so it is anchored to nothing but its row.
+  TIP_CELL: 36,
+  tipGrid(open){
+    const grid = $("tipGrid"), btn = $("btnTipPick");
+    if (!grid) return;
+    const on = open == null ? grid.hidden : !!open;
+    grid.hidden = !on;
+    if (btn) btn.setAttribute("aria-expanded", String(on));
+    // Focus goes to the tip in hand, so the keys that work the grid (Escape, the arrows) reach it.
+    if (on) { BrushPanel.fillTipGrid(); const cur = grid.querySelector('[aria-selected="true"]') || grid.firstChild; if (cur) cur.focus(); }
+  },
+  fillTipGrid(){
+    const grid = $("tipGrid"), sel = $("brushTip");
+    if (!grid || !sel) return;
+    grid.textContent = "";
+    for (const o of sel.options) {
+      const b = document.createElement("button"), c = document.createElement("canvas");
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", String(o.value === App.brush.tip));
+      b.title = o.textContent;
+      b.dataset.tip = o.value;
+      c.width = c.height = BrushPanel.TIP_CELL;
+      BrushPanel.drawTip(c, o.value);
+      b.appendChild(c);
+      b.onclick = () => { BrushPanel.setTip(o.value); refreshBrushCursor(); BrushPanel.tipGrid(false); $("btnTipPick").focus(); };
+      grid.appendChild(b);
+    }
+  },
+
+  // ---- the sample stroke (ROADMAP 3.41 (3)) ----
+  // `Pen.sample`'s dabs, laid the way `stampAt` lays them: each into a stroke buffer at the dab's
+  // flow (Flow, or Opacity × Flow under Build up), in the tip, turned when the tip turns, coloured
+  // when the colour cycles — and the buffer onto the canvas once, at what Opacity leaves it. The
+  // stamp is made at the sample's size by `brushStamp.make`, the code the stroke's own comes from.
+  // The eraser has no paint of its own, so its sample is drawn in the panel's light grey: what it
+  // takes away. Redrawn once a frame however many controls moved in it.
+  sample(){
+    const c = $("brushSample");
+    if (!c) return;
+    const b = App.brush, W = c.width, H = c.height, g = ctx2d(c);
+    g.clearRect(0, 0, W, H);
+    if (b.tool === "height" || b.tool === "none") return;
+    const { size, dabs } = Pen.sample(b, W, H), T = Tips.get(b.tip);
+    const ink = b.tool === "eraser" ? "#e2e2e2" : brushStamp.ink(b);
+    const stamp = brushStamp.make(T, Math.max(2, Math.round(size)), b.hardness, ink);
+    const buf = BrushPanel._sbuf || (BrushPanel._sbuf = mkCanvas(W, H)), bg = ctx2d(buf), dep = Pen.deposit(b);
+    // The cycle is in brush sizes, and `run` was measured at the sample's size — so it is asked of
+    // the brush at that size, or a 400-texel brush would show a tenth of the colours its stroke has.
+    const lut = Pen.cycles(b) && b.cycle !== "hue" ? Gradient.holoLut(b.cycle) : null, bs = Object.assign({}, b, { size });
+    bg.clearRect(0, 0, W, H);
+    for (const d of dabs) {
+      const turn = T.turns ? d.angle : 0, tint = Pen.ink(bs, d.run, lut);
+      bg.globalAlpha = dep.dab * d.flow;
+      if (tint) Tips.layIn(bg, stamp, d.x, d.y, d.size, turn, 2 * Tips.reach(stamp, d.size, turn), null, null, tint);
+      else Tips.lay(bg, stamp, d.x, d.y, d.size, turn);
+    }
+    bg.globalAlpha = 1;
+    g.globalAlpha = dep.apply;
+    g.drawImage(buf, 0, 0);
+    g.globalAlpha = 1;
+  },
+  sampleSoon(){
+    if (BrushPanel._sraf) return;
+    BrushPanel._sraf = requestAnimationFrame(() => { BrushPanel._sraf = 0; BrushPanel.sample(); });
+  },
+
+  // ---- the colour along the stroke (ROADMAP 4.56) ----
+  // The presets are `Gradient.HOLO`'s, listed after Off and Hue at boot (main.js), before the
+  // settings are applied — a stored preset has to be an option by then, or the row refuses it.
+  cycleOptions(){
+    const sel = $("brushCycle");
+    if (!sel) return;
+    for (const P of Gradient.HOLO) {
+      const o = document.createElement("option");
+      o.value = P.id; o.textContent = P.name;
+      sel.appendChild(o);
+    }
+  },
+  // Which rows the cycle shows, and the one case that looks broken: Hue on a grey brush, which has
+  // no hue to turn. Only the colour brush takes it, so on another tool the row says so rather than
+  // being a setting that does nothing.
+  syncCycle(){
+    const b = App.brush, colour = b.tool === "brush" && b.chan === "color" && b.target === "content";
+    const on = colour && b.cycle && b.cycle !== "off";
+    const len = $("rowCycleLen"), hint = $("cycleHint"), sel = $("brushCycle");
+    if (sel) sel.disabled = !colour;
+    if (len) len.style.display = on ? "" : "none";
+    let say = "";
+    if (!colour && b.cycle && b.cycle !== "off") say = "Only the colour brush changes colour along a stroke.";
+    else if (on && b.cycle === "hue") { const [r, g, bl] = Pen.hex(b.color); if (r === g && g === bl) say = "The brush colour is grey, so it has no hue to turn — pick a colour, or a preset."; }
+    if (hint) { hint.textContent = say; hint.style.display = say ? "" : "none"; }
+    BrushPanel.sampleSoon();
+  },
+  // ---- the pattern brush (ROADMAP 4.55) ----
+  // The record onto the brush and its rows — the one write, which the rows, the settings file and a
+  // test all go through. Clamped by `Procedural.brushPatClone`, so a stored value out of range or a
+  // shape this build does not draw comes back as one it does.
+  setPattern(rec){
+    const p = App.brush.pattern = Procedural.brushPatClone(rec);
+    $("brushPatKind").value = p.kind;
+    $("brushPatFillOn").checked = p.fillOn; $("brushPatFill").value = p.fill;
+    $("brushPatBorderOn").checked = p.borderOn; $("brushPatBorder").value = p.border;
+    $("brushPatWidth").value = Math.round(p.width * 100); $("brushPatWidthVal").textContent = Math.round(p.width * 100) + "%";
+    $("brushPatSize").value = +p.size.toFixed(3);
+    $("brushPatAngle").value = Math.round(p.angle); $("brushPatAngleVal").textContent = Math.round(p.angle) + "°";
+    BrushPanel.syncPattern();
+  },
+  editPattern(edit){ BrushPanel.setPattern(Object.assign({}, App.brush.pattern, edit)); },
+  // Which rows show, and what a pattern cannot do with the brush as it is: only the colour brush lays
+  // one, and only on the model through the projected brush (`ProjBrush.cellsWhy` refuses the rest).
+  syncPattern(){
+    const b = App.brush, p = b.pattern || {}, on = !!p.kind && p.kind !== "off", colour = b.tool === "brush" && b.chan === "color" && b.target === "content";
+    $("patRows").style.display = on ? "" : "none";
+    let say = "";
+    if (on && !colour) say = "Only the colour brush lays a pattern — this tool paints as it always does.";
+    else if (on && !b.proj3d) say = "A pattern is revealed on the model by the Projected 3-D brush — turn it on under More brush options.";
+    else if (on) say = "Paint in the 3-D view: each cell a stroke reaches is laid whole.";
+    const hint = $("patHint");
+    hint.textContent = say; hint.style.display = say ? "" : "none";
+    if (on && colour && b.proj3d) ProjBrush.warm();
+  },
   // The loaded tips, listed after the four built in.
   tipOptions(){
     const sel = $("brushTip");
@@ -377,6 +543,7 @@ const BrushPanel = {
       sel.appendChild(o);
     }
     sel.value = App.brush.tip;
+    if (!$("tipGrid").hidden) BrushPanel.fillTipGrid();
   },
   // The library has been read (main.js, once boot is done): list it, and settle a tip id a stored
   // setting named before it could be checked.
@@ -428,7 +595,8 @@ const BrushPanel = {
 $("brushHeal").onchange = e => { App.brush.heal = e.target.checked; };
 // `cursor` = this slider changes the brush footprint, so the ring and the 2-D outline have to be
 // redrawn at the new size without waiting for the pointer to move.
-const bindRange = (id, fn, cursor) => { $(id).oninput = e => { fn(+e.target.value); const v = $(id + "Val"); if (v) v.textContent = e.target.value; brushStamp._key = null; if (cursor) refreshBrushCursor(); }; };
+// Every one of them can change the sample stroke, so each asks for it (once a frame — 3.41 (3)).
+const bindRange = (id, fn, cursor) => { $(id).oninput = e => { fn(+e.target.value); const v = $(id + "Val"); if (v) v.textContent = e.target.value; brushStamp._key = null; if (cursor) refreshBrushCursor(); BrushPanel.sampleSoon(); }; };
 bindRange("brushSize", v => App.brush.size = v, true);
 bindRange("brushOpacity", v => App.brush.opacity = v / 100);
 bindRange("brushHardness", v => { App.brush.hardness = v / 100; BrushPanel.tipPreview(); }, true);
@@ -437,14 +605,31 @@ bindRange("brushSpacing", v => App.brush.spacing = v / 100);
 // ROADMAP 4.50 (4) + 6.4 — none of these touches the stamp: Flow is applied as the dab's alpha when
 // it is drawn and pressure scales it there, which is why `brushStamp._key` did not grow.
 bindRange("brushFlow", v => App.brush.flow = v / 100);
-$("brushBuild").onchange = e => { App.brush.build = e.target.checked; };
+$("brushBuild").onchange = e => { App.brush.build = e.target.checked; BrushPanel.sampleSoon(); };
 $("penSize").onchange = e => { App.brush.pSize = e.target.checked; };
 $("penFlow").onchange = e => { App.brush.pFlow = e.target.checked; };
 $("penCurve").onchange = e => { App.brush.curve = BrushPanel.CURVES.includes(+e.target.value) ? +e.target.value : 1; };
+$("brushProj").onchange = e => { App.brush.proj3d = e.target.checked; BrushPanel.syncPattern(); };
+$("brushFace").oninput = e => { App.brush.face = ProjBrush.faceOf(e.target.value); $("brushFaceVal").textContent = App.brush.face + "°"; };
 // ROADMAP 4.50 (10). The tip is in the stamp's key; the dynamics are not — they are applied when each
 // dab is drawn (`Pen.dab`) — so only the tip and the Angle change what the cursor shows.
 $("brushTip").onchange = e => { BrushPanel.setTip(e.target.value); refreshBrushCursor(); };
 $("btnTipLoad").onclick = () => $("tipPick").click();
+$("btnTipPick").onclick = () => BrushPanel.tipGrid();
+// The grid closes the way a popover does: Escape (back to the button that opened it), or a press
+// anywhere else. Escape is taken only while it is open, so it is left to everything else otherwise.
+$("tipGrid").addEventListener("keydown", e => {
+  const cells = [...$("tipGrid").children], i = cells.indexOf(document.activeElement);
+  const to = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: cells.length - 1 }[e.code];
+  if (e.code === "Escape") { BrushPanel.tipGrid(false); $("btnTipPick").focus(); }
+  else if (to != null && cells.length) cells[Math.max(0, Math.min(cells.length - 1, to))].focus();
+  else return;
+  e.preventDefault(); e.stopPropagation();
+});
+document.addEventListener("pointerdown", e => {
+  const grid = $("tipGrid");
+  if (grid && !grid.hidden && !grid.contains(e.target) && !$("btnTipPick").contains(e.target)) BrushPanel.tipGrid(false);
+}, true);
 $("tipPick").onchange = async e => {
   const f = e.target.files[0];
   e.target.value = "";                          // so the same file can be picked twice
@@ -456,7 +641,20 @@ bindRange("brushFlowJit", v => App.brush.flowJit = v / 100);
 bindRange("brushScatter", v => App.brush.scatter = v / 100);
 bindRange("brushAngle", v => App.brush.angle = v, true);
 bindRange("brushAngleJit", v => App.brush.angleJit = v / 100);
-$("brushFollow").onchange = e => { App.brush.follow = e.target.checked; };
+$("brushFollow").onchange = e => { App.brush.follow = e.target.checked; BrushPanel.sampleSoon(); };
+$("brushCycle").onchange = e => { App.brush.cycle = e.target.value; BrushPanel.syncCycle(); };
+$("brushPatKind").onchange = e => BrushPanel.editPattern({ kind: e.target.value });
+$("brushPatFillOn").onchange = e => BrushPanel.editPattern({ fillOn: e.target.checked });
+$("brushPatBorderOn").onchange = e => BrushPanel.editPattern({ borderOn: e.target.checked });
+$("brushPatFill").oninput = e => BrushPanel.editPattern({ fill: e.target.value });
+$("brushPatBorder").oninput = e => BrushPanel.editPattern({ border: e.target.value });
+$("brushPatWidth").oninput = e => BrushPanel.editPattern({ width: +e.target.value / 100 });
+$("brushPatSize").onchange = e => BrushPanel.editPattern({ size: +e.target.value });
+$("brushPatAngle").oninput = e => BrushPanel.editPattern({ angle: +e.target.value });
+$("brushRetouch").onchange = e => { App.brush.retouch = e.target.value; BrushPanel.syncRetouch(); };
+$("brushRange").onchange = e => { App.brush.range = e.target.value; };
+bindRange("brushStrength", v => App.brush.strength = v / 100);
+bindRange("brushCycleLen", v => App.brush.cycleLen = v);
 $("brushLazy").oninput = e => { App.brush.lazy = +e.target.value; $("brushLazyVal").textContent = BrushPanel.lazyText(App.brush.lazy); };
 // Every one of these is "the user is adjusting symmetry", which is what the mirror plane's own
 // switch calls a preview (ROADMAP 3.13) — so none of them consults `symOn` any more: where the
@@ -505,7 +703,7 @@ for (const id of ["symOn", "symAxis", "symOff", "symPlaneVis"]) {
   el.closest(".row").addEventListener("mouseenter", () => updateSymPlane(true));
   el.closest(".row").addEventListener("mouseleave", () => updateSymPlane());
 }
-$("brushColor").oninput = e => { App.brush.color = e.target.value; brushStamp._key = null; };
+$("brushColor").oninput = e => { App.brush.color = e.target.value; brushStamp._key = null; BrushPanel.syncCycle(); };
 // ROADMAP 3.29(4) asked whether this button had become "what deleting the affected layers does".
 // Measured 2026-09-20: it had not. Five paths still write the BASE _n sheets and none is a layer —
 // a baked look, a raw-channel edit, a replaced _n file, a merged weapon skin, a project restoring

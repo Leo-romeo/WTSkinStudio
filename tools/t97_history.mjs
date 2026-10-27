@@ -424,7 +424,7 @@ async function realInput(cdp, evaluate){
 const r = await evalInPage({ browser, timeoutMs: 120000, keep: argv.includes("--keep"),
   chromeArgs: ["--js-flags=--expose-gc", "--window-size=1280,960"],
   drive: async ({ cdp, evaluate }) => {
-    const res = await evaluate(pageExpr(BODY, 400));
+    const res = await evaluate(pageExpr(BODY));
     if (!res || res.__threw) return res;
     res.real = await realInput(cdp, evaluate);
     const b = await evaluate(`({ errs: (window.__boot || {}).errs || [], rejs: (window.__boot || {}).rejs || [] })`);

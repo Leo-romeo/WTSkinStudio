@@ -136,6 +136,9 @@ const Marquee = {
     Marquee.tint = keep ? shape.tint : null;
     Marquee.islands = keep ? shape.islands : null;
     if (Marquee.bitsOf && Marquee.bitsOf.mask !== Marquee.mask) Marquee.bitsOf = null;
+    // A NEW selection is shown even if the last one was hidden (3.39 (3)): a selection made where
+    // nothing draws it is the invisible mode 3.9 was reported for, and H puts it away again.
+    Marquee.shown = true;
     Marquee.rev++;
     SelectUI.sync();
     draw2D();
@@ -215,7 +218,7 @@ const Marquee = {
     }
     if (sn.islands && sn.islands.size) Marquee.setIslands(new Set(sn.islands));
     else if (sn.bits) Marquee.putBits(SelShape.unpack(sn.bits.packed, sn.bits.S.w * sn.bits.S.h), sn.bits.S, sn.bits.b, sn.bits.packed);
-    else if (sn.shape) Marquee.set(sn.r, { mask: sn.shape, tint: Marquee.tintOf(sn.shape), islands: null });
+    else if (sn.shape) Marquee.set(sn.r, { mask: sn.shape, tint: Marquee.tintOf(sn.shape, sn.r), islands: null });
     else Marquee.set(sn.r);
   },
   // Run `fn` and record whatever it did to the selection as one undo step. Nothing is pushed when
@@ -247,7 +250,7 @@ const Marquee = {
       setStatus("That island covers no texel of this sheet — it is thinner than a texel at this size", "err");
       return null;
     }
-    return Marquee.set(box, { mask, tint: Marquee.tintOf(mask), islands: new Set(ids) });
+    return Marquee.set(box, { mask, tint: Marquee.tintOf(mask, box), islands: new Set(ids) });
   },
 
   // ---- ROADMAP 4.28(g): the two bridges between a selection and a mask ----
@@ -303,14 +306,87 @@ const Marquee = {
   // The accent copy of a stencil, for the 2-D overlay. Built once per selection rather than per
   // frame: tinting needs a `source-in` fill into a scratch, and doing that inside draw2D would put
   // a full-sheet composite in the rAF the whole of §3 exists to keep empty.
-  tintOf(mask){
-    const t = mkCanvas(mask.width, mask.height), g = ctx2d(t);
-    g.drawImage(mask, 0, 0);
-    g.globalCompositeOperation = "source-in";
-    g.fillStyle = Marquee.ACCENT;
-    g.fillRect(0, 0, t.width, t.height);
-    g.globalCompositeOperation = "source-over";
-    return t;
+  // `box` is the selection's rectangle in sheet texels: the shape lies inside it, so the work does too.
+  tintOf(mask, box){
+    const sh = Marquee.sheet(), k = sh ? mask.width / sh.W : 1;
+    return Marquee.outline(mask, mkCanvas(mask.width, mask.height),
+      box && { x: box.x * k, y: box.y * k, w: box.w * k, h: box.h * k });
+  },
+
+  // ---- how a stencil is SHOWN: a rim and a wash, not a sticker (ROADMAP 3.39 (1)) ----
+  // Reported 2026-10-21 with a wand-picked star on a tail: the tint was the accent at 0.42 on the
+  // model and 0.32 in 2-D, flat over the whole shape, and it read as an opaque light-blue sticker —
+  // the star's own colour and its weathering, the things you selected it to judge, could not be
+  // seen. So the region is drawn the way Photoshop and Substance draw theirs: a solid line along its
+  // edge says WHERE, and a wash faint enough to keep the texture's luminance says WHICH SIDE.
+  //
+  // The rim is INSIDE the stencil — the stencil minus itself eroded — and never outside it. These
+  // canvases are UV space: past an island's edge is gutter, or another island that is somewhere else
+  // on the vehicle entirely, so a rim dilated outward (what the decal ring used to be) lands on the
+  // model in places that have nothing to do with the selection. Inside, every rim texel is a texel
+  // the selection holds.
+  //
+  // Erosion is the stencil `destination-in` itself shifted eight ways by `r` mask texels: a texel
+  // stays only if all eight neighbours at that reach are in. A feature thinner than 2r has no inside
+  // and comes out all rim, which is the right picture of it. `r` grows with the mask so the line
+  // keeps its width on the model whatever the sheet size (4 texels on a 2048² mask, 8 on the sheet).
+  //
+  // Fourteen draws, once per selection change and never per frame — but over the WHOLE mask they
+  // were 199–232 ms at 2048² (40–48 at 1024²) in the suite's software-rasterised Chrome, against
+  // 32 for the flat tint they replace (2026-10-23, a 1×1 getImageData either side). So given `R`, the
+  // selection's box in `dst`'s pixels, the work is done over that box grown by r + 1 and nothing
+  // else: the stencil is empty outside its box, so every shifted copy reads empty there too and the
+  // result is exact, not approximate. A box a quarter of the mask across measured 27 ms there, half
+  // across 66; only a selection as big as the sheet still pays the whole 200.
+  RIM: .9,
+  WASH: .14,
+  outline(src, dst, R){
+    const W = dst.width, H = dst.height, r = Math.max(2, Math.round(Math.max(W, H) / 512));
+    const x0 = R ? Math.max(0, Math.floor(R.x) - r - 1) : 0, y0 = R ? Math.max(0, Math.floor(R.y) - r - 1) : 0;
+    const x1 = R ? Math.min(W, Math.ceil(R.x + R.w) + r + 1) : W, y1 = R ? Math.min(H, Math.ceil(R.y + R.h) + r + 1) : H;
+    const w = x1 - x0, h = y1 - y0, g = ctx2d(dst);
+    Composite.reset(g); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+    if (w <= 0 || h <= 0) return dst;
+    const st = Composite.scratch("_selSt", w, h), er = Composite.scratch("_selEr", w, h);
+    const gs = ctx2d(st), ge = ctx2d(er);
+    for (const x of [gs, ge]) { Composite.reset(x); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, w, h); }
+    // the stencil in the accent, whatever colour it came in (a mask is white, a decal is its image)
+    const kx = src.width / W, ky = src.height / H;
+    gs.drawImage(src, x0 * kx, y0 * ky, w * kx, h * ky, 0, 0, w, h);
+    // Hardened, 1 − (1 − a)^8, before anything is eroded: erosion multiplies nine alphas, so a decal
+    // whose image is see-through stayed rim all the way in — a footprint at alpha 0.8 came out 161 in
+    // the middle against 184 on its rim, and at 0.5 the two were the same 115 (review of 3.39 (1),
+    // 2026-10-23). A selection's stencil is all or nothing, so this changes it nowhere but its
+    // antialiased edge. Three self-draws, `source-over`: the canvas-compositing route to "at least
+    // this much" that `hardenMask` used to take for part stencils.
+    for (let i = 0; i < 3; i++) gs.drawImage(st, 0, 0);
+    gs.globalCompositeOperation = "source-in"; gs.fillStyle = Marquee.ACCENT; gs.fillRect(0, 0, w, h);
+    Composite.reset(gs);
+    ge.drawImage(st, 0, 0);
+    ge.globalCompositeOperation = "destination-in";
+    for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r], [r, -r], [-r, r]]) ge.drawImage(st, dx, dy);
+    Composite.reset(ge);
+    g.globalAlpha = Marquee.RIM; g.drawImage(st, x0, y0);
+    g.globalAlpha = 1; g.globalCompositeOperation = "destination-out"; g.drawImage(er, x0, y0);
+    g.globalCompositeOperation = "source-over"; g.globalAlpha = Marquee.WASH; g.drawImage(er, x0, y0);
+    Composite.reset(g);
+    return dst;
+  },
+
+  // ---- and a way to put it away without deselecting (ROADMAP 3.39 (3)) ----
+  // "There is no way to hide the overlay without deselecting": turning the tool off keeps the
+  // selection, rightly, and so kept the tint over the texture being painted. Photoshop's answer is
+  // Show Extras (Ctrl+H — here Ctrl+H is already Solo, so H alone). Hidden, the selection still
+  // confines the brush in both views and every verb still acts on it; only the drawing goes: the
+  // tint and outline in 2-D, the overlay on the model, and the selected decal's ring there, which
+  // is the same overlay (`SelOverlay`). The decal's 2-D frame stays — its handles are controls.
+  // Not saved and not undone: it is a view setting, like the coverage tint.
+  shown: true,
+  setShown(on){
+    Marquee.shown = !!on;
+    SelectUI.sync();
+    draw2D();
+    needsRender();
   },
   // Is anything selected at all — a rectangle, a shape inside one, or a set of parts? Cheap, so a
   // panel can ask it while enabling a button; `stencil` allocates and is for when you mean it.
@@ -364,7 +440,7 @@ const Marquee = {
     const box = { x: Math.floor(x0 / D.k), y: Math.floor(y0 / D.k),
                   w: Math.ceil((x1 - x0 + 1) / D.k), h: Math.ceil((y1 - y0 + 1) / D.k) };
     Marquee.act("selection from mask", () => {
-      Marquee.set(box, { mask, tint: Marquee.tintOf(mask), islands: null });
+      Marquee.set(box, { mask, tint: Marquee.tintOf(mask, box), islands: null });
       if (!SelectUI.on) SelectUI.setOn(true);
     });
     setStatus("Selected what “" + L.name + "”'s mask shows — Fill, Clear, Crop and Copy follow the shape, not the box round it", "ok");
@@ -463,8 +539,8 @@ const Marquee = {
     const fx = S.w / sh.W, fy = S.h / sh.H;
     const mask = Marquee.stencilOf(bits, S, maskDims(sh.W, sh.H), b);
     const x = Math.floor(b.x0 / fx), y = Math.floor(b.y0 / fy);
-    Marquee.set({ x, y, w: Math.ceil((b.x1 + 1) / fx) - x, h: Math.ceil((b.y1 + 1) / fy) - y },
-      { mask, tint: Marquee.tintOf(mask), islands: null });
+    const box = { x, y, w: Math.ceil((b.x1 + 1) / fx) - x, h: Math.ceil((b.y1 + 1) / fy) - y };
+    Marquee.set(box, { mask, tint: Marquee.tintOf(mask, box), islands: null });
     Marquee.bitsOf = { mask, bits, S: { w: S.w, h: S.h, k: S.k }, b, packed: packed || SelShape.pack(bits) };
     return true;
   },
@@ -565,22 +641,36 @@ const Marquee = {
   // 0–70 ms and 69–86 ms, over 222–249 and 323–362 ms of clock. At 2048² it is 74 ms for a patch.
   // `read(y0, n)` hands back rows at `S` — `rowsOf`, or what the 2-D view shows (`Draw2D.shownRows`).
   // Yields the share read so far; returns the selection's bytes, how many, and their box.
-  *colourSteps(read, S, sx, sy, c, t, contig){
+  //
+  // With `edge` (the wand row's Edge box, 3.39 (2)) the rows of the box the flood took are read once
+  // more, a band at a time with a row either side, for `SelShape.edge`'s ring: the progress runs to
+  // a half for the match and on to the end for the ring. Only the box's rows — a patch's ring costs a
+  // patch, and colour range over the whole sheet costs a second read, which is what it costs.
+  *colourSteps(read, S, sx, sy, c, t, contig, edge){
     const m = new Uint8Array(S.w * S.h), R = SelShape.runs(m, S.w, S.h, null, 0, 0);
-    const band = Math.max(1, Math.floor(Marquee.BAND / S.w));
+    const band = Math.max(1, Math.floor(Marquee.BAND / S.w)), share = edge ? .5 : 1;
     for (let y0 = 0; y0 < S.h; y0 += band) {
       const n = Math.min(band, S.h - y0);
       SelShape.near(read(y0, n), S.w * n, c, t, m, y0 * S.w);
       SelShape.runs(m, S.w, S.h, R, y0, y0 + n);          // colour range needs them too: its count and box
-      yield (y0 + n) / S.h;
+      yield share * (y0 + n) / S.h;
     }
-    if (!contig) return Object.assign({ bits: m }, SelShape.tally(R, S.h));
-    const info = {}, bits = SelShape.walk(R, S.w, S.h, sx, sy, null, info);
-    return { bits, n: info.n, box: info.box };
+    let got;
+    if (!contig) got = Object.assign({ bits: m }, SelShape.tally(R, S.h));
+    else { const info = {}; got = { bits: SelShape.walk(R, S.w, S.h, sx, sy, null, info), n: info.n, box: info.box }; }
+    if (!edge || !got.box) return got;
+    const out = got.bits.slice(), info = { n: got.n, box: { ...got.box } }, B = got.box;
+    const ya = Math.max(0, B.y0 - 1), yb = Math.min(S.h, B.y1 + 2);
+    for (let y0 = ya; y0 < yb; y0 += band) {
+      const n = Math.min(band, yb - y0), r0 = Math.max(0, y0 - 1), r1 = Math.min(S.h, y0 + n + 1);
+      SelShape.edge(read(r0, r1 - r0), S.w, S.h, r0, y0, y0 + n, got.bits, c, t, out, info);
+      yield .5 + .5 * (y0 + n - ya) / (yb - ya);
+    }
+    return { bits: out, n: info.n, box: info.box };
   },
   // Where a wand click starts: the sheet, the resolution it is read at, the seed texel and its colour.
   // `src` is a canvas, or a row reader like `rowsOf`'s.
-  colourJob(src, x, y, tol, contig){
+  colourJob(src, x, y, tol, contig, edge){
     const sh = Marquee.sheet();
     if (!sh || !src) { setStatus("Open a texture slot first", "err"); return null; }
     const S = Marquee.dims(sh.W, sh.H), fx = S.w / sh.W, fy = S.h / sh.H;
@@ -588,7 +678,7 @@ const Marquee = {
     const sx = Math.max(0, Math.min(S.w - 1, Math.floor(x * fx))), sy = Math.max(0, Math.min(S.h - 1, Math.floor(y * fy)));
     const row = read(sy, 1), o = sx * 4, c = [row[o], row[o + 1], row[o + 2], row[o + 3]];
     const t = Math.max(0, Math.min(255, Math.round(+tol || 0)));
-    return { sh, S, fx, fy, c, contig, steps: Marquee.colourSteps(read, S, sx, sy, c, t, contig) };
+    return { sh, S, fx, fy, c, contig, steps: Marquee.colourSteps(read, S, sx, sy, c, t, contig, edge) };
   },
   // …and where it ends: the bytes put in force as one undo step, and what the status line needs.
   colourDone(job, got, op){
@@ -599,8 +689,8 @@ const Marquee = {
   // Every texel of `src` within `tol` of the colour at (x, y), in sheet texels: the magic wand with
   // `contig`, colour range without. Returns what was sampled, so the caller can say which colour it
   // took; null if it could not run.
-  fromColour(src, x, y, tol, contig, op){
-    const job = Marquee.colourJob(src, x, y, tol, contig);
+  fromColour(src, x, y, tol, contig, op, edge){
+    const job = Marquee.colourJob(src, x, y, tol, contig, edge);
     if (!job) return null;
     let st;
     do st = job.steps.next(); while (!st.done);
@@ -610,8 +700,8 @@ const Marquee = {
   // runs it. `bar` is SelectUI's progress bar — it opens only if the click is still reading at 200 ms
   // — and a cancel there ends it with nothing changed. Null too when the sheet was switched or resized
   // under it, since its bytes would then describe another texture.
-  async fromColourAsync(src, x, y, tol, contig, op, bar){
-    const job = Marquee.colourJob(src, x, y, tol, contig);
+  async fromColourAsync(src, x, y, tol, contig, op, bar, edge){
+    const job = Marquee.colourJob(src, x, y, tol, contig, edge);
     if (!job) return null;
     let st;
     while (!(st = job.steps.next()).done) {

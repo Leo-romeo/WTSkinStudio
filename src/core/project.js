@@ -7,7 +7,29 @@
 // been written into every project since v1 and NOTHING had ever read it: a file from a newer
 // build was half-applied, layer by layer, until something threw. It is checked now, so a project
 // this build cannot read is refused with a sentence instead of a partial restore.
-const PROJ_VERSION = 5;
+//
+// **Version 6 (2026-10-23) is written only by a file that holds a path layer** (ROADMAP 4.52 (3)): a
+// paint content carrying `shape`, the recipe its pixels are redrawn from. The pixels are stored as
+// every paint layer's are, so a version 5 reader could SHOW the file — but it would drop the recipe
+// on its next save, and a reshapeable path would become a picture with nothing said. So a version 5
+// build refuses such a file with the gate's sentence, and a file with no path layer still says 5 and
+// opens in it. PROJ_VERSION is what this build READS; `ProjNode.PLAIN` is what a file without one says.
+//
+// **Version 7 (2026-10-24) is written only by a file holding level content** (ROADMAP 4.58): a node
+// limited to some mip levels (`levels`, editor/levels.js). A version 6 reader would show such a file
+// with every far-only layer drawn at close range, and re-save it without the ranges — so it refuses
+// it with the gate's sentence, and a file without level content still says 5, or 6 with a path layer.
+// This build reads 5, 6 and 7 (t57 holds both directions).
+//
+// **Version 8 (2026-10-25) is written only by a file holding an edited surface sheet** (a slot's
+// `normalFile`, ROADMAP 1.24 (b)). That sheet is the editor's normal, X in red and Y in green, and
+// until 1.24 the importer filled it the wrong way round — red from the `_n`'s G, green from its A —
+// so a file before 8 stores the base it was given in that order, and this build turns it on load
+// (`NSheet.turn`) to keep the vehicle's own slopes where they were. A version 7 build would read an
+// 8's sheet with nothing turned and export the stock slopes across the diagonal, so it refuses it.
+// Layers are not turned: what was painted or drawn on the normal channel was always meant as X red,
+// Y green, and the fix is that it now reaches the game that way. This build reads 5 to 8 (t169).
+const PROJ_VERSION = 8;
 function toCanvas(img){
   if (img instanceof HTMLCanvasElement) return img;
   const c = mkCanvas(img.width, img.height);
@@ -28,15 +50,106 @@ function canvasBlob(c){ return new Promise(res => c.toBlob(res, "image/png")); }
 // reload would otherwise only move the half that happened to be selected) and `seq`, a counter for
 // files old enough to have no proj id.
 const ProjNode = {
-  // A project file is input from anywhere: someone else's .wtproj can be opened as easily as one's
-  // own. Panels put blend, colour and adjustment values into markup (`value="${...}"`), so each is
-  // forced to its known shape here, the one place they come in — a crafted string in any of them
-  // was markup in the panel (review 2026-10-10).
+  // A project file is input from anywhere: someone else's .wtproj — or .wtstack, which is this same
+  // reader — opens as easily as one's own. So every field is forced to the shape this build reads,
+  // here, the one place a node comes in (review 2026-10-10, finished 2026-10-17):
+  //   * what panels put into markup (`value="${...}"`, `${CHAN_LABEL[ch] || ch}`): a blend, a colour,
+  //     the adjustment numbers, and a channel's NAME — a crafted string in any of them was markup in
+  //     the panel;
+  //   * what the rest of the app reads as a number, a flag or a record: opacity, the blend-if band
+  //     (`toneOf`), a decal's placement, Look and text record (`placeOf`, `lookOf`, `textOf`) and a
+  //     projection's parameters (`projOf`) — a string scale threw out of the layer panel (`toFixed`),
+  //     a mirror or a parts list that was not one threw from an edit, a NaN band hid its layer.
+  // What this build does not read is kept as it came where a later build may want it back — an
+  // effect of an unknown kind, a key a Look or a text record does not have here — and is inert.
+  // game/weapon-skin.js merges a .wtproj through these same functions. tools/t140_crafted.mjs holds
+  // a crafted record for each field, and the round trip of everything this build writes.
   blendOf(v){ return COLOR_BLENDS.includes(v) || GREY_BLENDS.includes(v) || v === "pass through" ? v : "normal"; },
   hexOf(v){ const m = /^#?([0-9a-f]{6})$/i.exec(String(v == null ? "" : v)); return m ? "#" + m[1] : v == null ? v : "#808080"; },
   numOf(v, d){ v = +v; return isFinite(v) ? v : d; },
+  // numOf, with `d` where the file has nothing at all (`+null` is 0, which is a value), and held to
+  // [lo, hi]
+  finOf(v, d){ return v == null ? d : ProjNode.numOf(v, d); },
+  inOf(v, lo, hi, d){ v = ProjNode.finOf(v, d); return v < lo ? lo : v > hi ? hi : v; },
   hsbcOf(m){ const R = Effect.HSBC_REST; return { hue: ProjNode.numOf(m.hue, R.hue), sat: ProjNode.numOf(m.sat, R.sat),
                                                   bright: ProjNode.numOf(m.bright, R.bright), contrast: ProjNode.numOf(m.contrast, R.contrast) }; },
+  // A record is an object: a string spread into one is its characters, and a number spreads into none.
+  recOf(v){ return v && typeof v === "object" && !Array.isArray(v) ? v : null; },
+  // A slot under a channel this build has no sheet for is not kept: there is nothing to draw it on,
+  // and its name would be markup where the panel labels it.
+  chanOf(ch){ return CHANNELS.some(c => c.id === ch) ? ch : null; },
+  // Blend-if's band (4.44's third): which sheet it reads, three numbers, two switches, a colour —
+  // each its shape, in the order and with only the keys it came with, so a key it lacks reads as it
+  // always did. `+"x"` is NaN in the compositor, and a NaN band hides its layer everywhere.
+  TONE: { src: v => v === "color" ? "color" : "lum", lo: v => ProjNode.inOf(v, 0, 1, 0), hi: v => ProjNode.inOf(v, 0, 1, 1),
+          soft: v => ProjNode.inOf(v, 0, 1, 0), invert: v => !!v, on: v => v !== false, color: v => ProjNode.hexOf(v) },
+  toneOf(t){
+    t = ProjNode.recOf(t);
+    if (!t) return null;
+    const T = {};
+    for (const k of Object.keys(t)) if (Object.keys(ProjNode.TONE).includes(k)) T[k] = ProjNode.TONE[k](t[k]);
+    return T;
+  },
+  // A floating decal's placement, on its image content. The centre is a fraction of the sheet and
+  // may sit off it — a click on the model puts it at the hit's UV — so it is made a number and not
+  // clamped; the scale is a positive number, a flip a flag, a mirrored copy a point or nothing.
+  placeOf(m){
+    const sym = ProjNode.recOf(m.sym), f = ProjNode.finOf, scale = f(m.scale, 1);
+    return { x: f(m.x, .5), y: f(m.y, .5), scale: scale > 0 ? scale : 1, rot: f(m.rot, 0), flip: !!m.flip,
+             sym: sym && { x: f(sym.x, .5), y: f(sym.y, .5) }, surf: ProjNode.lookOf(m.surf) };
+  },
+  // A decal's Look (`surf`): four deltas, an outline and a shadow (DecalStyle), the relief. Its
+  // readers clamp what they read; what none of them can do is take a Look that is a string, which the
+  // style sliders write into, or a number that is a word. So: an object, numbers that are numbers
+  // (widths and the shadow's strength never below zero), colours #rrggbb, and a key this build does
+  // not read kept as it came. How far an outline reaches is bounded where it is drawn
+  // (DecalStyle.pad): a width is a share of the bitmap's side, and a crop to content takes it past
+  // the sliders on purpose (`DecalStyle.refit`), so no number here could bound the pixels.
+  LOOK: { num: ["sm", "mt", "em", "wr", "shx", "shy", "bevel", "cavity"], pos: ["ol", "sh", "shb"], hex: ["olc", "shc"] },
+  // 4.19 (6): the softening a generated depth map was made with. Anything but a number in the
+  // slider's range is dropped — the panel reads its presence as "this map is ours to remake".
+  GEN_MAX: 16,
+  lookOf(v){
+    v = ProjNode.recOf(v);
+    if (!v) return null;
+    const L = { ...v }, K = ProjNode.LOOK;
+    for (const k of K.num) if (k in L) L[k] = ProjNode.numOf(L[k], 0);
+    for (const k of K.pos) if (k in L) L[k] = Math.max(0, ProjNode.numOf(L[k], 0));
+    for (const k of K.hex) if (k in L) L[k] = ProjNode.hexOf(L[k]);
+    if ("heightGen" in L) { const g = L.heightGen; if (typeof g !== "number" || !(g >= 0 && g <= ProjNode.GEN_MAX)) delete L.heightGen; else L.heightGen = Math.round(g); }
+    return L;
+  },
+  // A text decal's record (4.50 (3)) is kept as it came — TextDecal.norm reads every field of it
+  // where the text is drawn or edited, and a field a later build added is not this build's to drop —
+  // provided it IS a record, or a picture becomes an "Edit text…" decal; and its font id is an id
+  // (`TextDecal.hash`, base 36), because the one raw reader is the save, which embeds that font file.
+  textOf(t){
+    t = ProjNode.recOf(t);
+    if (!t) return null;
+    const T = { ...t };
+    if (T.fontId != null && !(typeof T.fontId === "string" && /^[0-9a-z]{1,16}$/.test(T.fontId))) T.fontId = null;
+    return T;
+  },
+  // A projected decal's parameters: the fields `saveContent` writes, read back one by one — not
+  // spread, because a projection also carries what a file must not supply (its bitmap, its depth
+  // image, its styled copies). A frame that is not four 3-vectors cannot be projected from, so the
+  // decal comes back as the pixels it painted, the way a .wtstack flattens one (null). The rest is
+  // held to the ranges every writer keeps it in: a string scale or depth threw from `toFixed` in the
+  // panel, and parts that were not a list from every edit's undo snapshot (`projParamsClone`).
+  projOf(p, id, bmp){
+    const f = ProjNode.recOf(p.frame), v3 = a => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite);
+    if (!f || !v3(f.p) || !v3(f.n) || !v3(f.r) || !v3(f.u)) return null;
+    const P = { id, frame: { p: f.p.slice(), n: f.n.slice(), r: f.r.slice(), u: f.u.slice() },
+      scale: ProjNode.inOf(p.scale, ProjSource.SCALE_MIN, ProjSource.SCALE_MAX, 1), rot: ProjNode.finOf(p.rot, 0),
+      flip: !!p.flip, sym2: !!p.sym2, sym2Read: !!p.sym2Read, parts: Array.isArray(p.parts) ? p.parts.filter(x => typeof x === "string") : null,
+      surf: ProjNode.lookOf(p.surf), depth: ProjNode.inOf(p.depth, .2, 12, PROJ_DEPTH_DEF), wrap: ProjNode.inOf(p.wrap, 0, 1, PROJ_WRAP_DEF), bmp };
+    if (typeof p.name === "string") P.name = p.name;
+    const t = ProjNode.textOf(p.text);
+    if (t) P.text = t;
+    return P;
+  },
+  idOf(v){ return typeof v === "string" ? v : typeof v === "number" && isFinite(v) ? String(v) : ""; },
+  PLAIN: 5,                    // the version a file with no path layer and no level content says (see PROJ_VERSION)
   async save(L, ctx){
     if (isGroup(L)) {
       const gm = { type: "group", name: L.name, visible: L.visible, opacity: L.opacity, blend: L.blend,
@@ -46,6 +159,7 @@ const ProjNode = {
       if (L.maskRef) gm.maskRef = L.maskRef;
       if (L.tone) gm.tone = { ...L.tone };
       if (L.uid) gm.uid = L.uid;
+      ProjNode.saveLevels(L, gm, ctx);
       for (const c of L.children) gm.children.push(await ProjNode.save(c, ctx));
       return gm;
     }
@@ -70,11 +184,23 @@ const ProjNode = {
     // that has never heard of it shows the layer unmasked, which is the honest degradation.
     if (L.tone) lm.tone = { ...L.tone };
     if (L.uid) lm.uid = L.uid;
+    ProjNode.saveLevels(L, lm, ctx);
     return lm;
+  },
+  // Which mip levels a node shows at (4.58): three numbers, no pixels — and the reason a file says 7.
+  // The version only rises: a path layer written after a node with levels leaves it at 7.
+  saveLevels(L, m, ctx){
+    const r = Levels.read(L.levels);
+    if (!r) return;
+    m.levels = r;
+    ctx.version = Math.max(ctx.version || 0, 7);
   },
   // One channel slot. The fields are the same ones the flat record carried; what moved is which
   // object they hang off, because they were always the CONTENT's and never the layer's.
-  async saveContent(c, ctx){
+  async saveContent(cIn, ctx){
+    // A content with keys (4.58 (c)) is written as level 0 shows it, keys beside: the plain numbers
+    // are what a build that has never heard of keys draws, and level 0 is what the views show.
+    const c = Levels.keyed(cIn) ? Object.assign(Levels.content(cIn, 0), { keys: cIn.keys }) : cIn;
     const m = { kind: c.kind };
     if (c.kind === "fill") {
       m.color = c.color;
@@ -90,6 +216,9 @@ const ProjNode = {
         m.pat = Procedural.patClone(c.pat);
         m.patFile = await ctx.put(toCanvas(c.patImg));
         if (c.patName) m.patName = c.patName;
+        // a lattice's tile is stored as its picture too, and its record beside it so it is edited
+        // as a lattice again — additive: an older build repeats the picture (4.55)
+        if (c.lattice) m.lattice = Procedural.latticeClone(c.lattice);
       }
     }
     if (c.kind === "effect") {
@@ -111,7 +240,12 @@ const ProjNode = {
       // heard of text draws, which is exactly the lettering.
       if (c.text) m.text = { ...c.text };
     }
+    // A number keyed by mip level (4.58 (c)): numbers, no pixels, and like a range the reason a file
+    // says 7 — a version 6 build would draw the plain number, level 0's, at every level.
+    const keys = Levels.keyed(c) ? Levels.readKeys(c.keys, c) : null;
+    if (keys) { m.keys = keys; ctx.version = Math.max(ctx.version || 0, 7); }
     if (c.kind === "paint") m.canvasFile = await ctx.put(c.canvas);
+    if (c.kind === "paint" && c.shape) { m.shape = PathLayer.save(c.shape); ctx.version = Math.max(ctx.version || 0, 6); }   // see PROJ_VERSION
     // A content's own flags. `derived` marks a decal's surface response since 4.28(f) — it is the
     // permission a rebuild needs to replace this slot, so a file that lost it would come back with
     // a gloss nothing refreshes and nothing can explain. `visible` and `opacity` belong to the
@@ -132,8 +266,9 @@ const ProjNode = {
       // readable pixels until the first re-render — a nudge, or 4.2's re-edit — and then turned its
       // lettering backwards. Additive: a file without it reads as a true reflection, which is what
       // every copy written before the field was (found 2026-09-25, landing the re-edit).
-      // `text` is a projected text decal's record (4.50 (3)); additive like `sym2Read`, and
-      // `sharedProj` spreads it back without being told.
+      // `text` is a projected text decal's record (4.50 (3)); additive like `sym2Read`. Every field
+      // here is read back BY NAME in `projOf`, so a new one is named there too — t140's round trip
+      // of a projection with every field set fails the day one is not.
       m.proj = { id: c.proj.id, frame: c.proj.frame, scale: c.proj.scale, rot: c.proj.rot, flip: !!c.proj.flip,
         sym2: !!c.proj.sym2, sym2Read: !!c.proj.sym2Read, name: c.proj.name, parts: c.proj.parts || null, surf: c.proj.surf || null,
         depth: c.proj.depth == null ? PROJ_DEPTH_DEF : c.proj.depth,
@@ -146,12 +281,15 @@ const ProjNode = {
   async load(lm, ctx){
     if (lm.type === "group") {
       const G = { type: "group", name: lm.name, visible: lm.visible !== false,
-                  opacity: lm.opacity == null ? 1 : lm.opacity, blend: ProjNode.blendOf(lm.blend),
+                  opacity: ProjNode.inOf(lm.opacity, 0, 1, 1), blend: ProjNode.blendOf(lm.blend),
                   collapsed: !!lm.collapsed, mask: null, parts: null, children: [] };
       G.scope = ProjNode.scopeOf(lm);
       if (lm.maskFile) G.mask = await ctx.img(lm.maskFile);
       if (lm.maskRef) G.maskRef = lm.maskRef;
-      if (lm.tone) G.tone = { ...lm.tone };
+      const tone = ProjNode.toneOf(lm.tone);
+      if (tone) G.tone = tone;
+      const lv = Levels.read(lm.levels);
+      if (lv) G.levels = lv;
       G.uid = lm.uid || LayerNode.newUid();
       for (const c of (lm.children || [])) G.children.push(await ProjNode.load(c, ctx));
       return lm.surfGroup ? ProjNode.foldSurfGroup(G) : G;
@@ -159,32 +297,36 @@ const ProjNode = {
     // Version 5 stores the slots; version 4 and below store one flat record with a `chan` tag on
     // it, which `LayerNode.of` turns into a single-slot bundle. Two shapes, one node out.
     if (lm.chans) {
-      const N = { name: lm.name, visible: lm.visible !== false, opacity: lm.opacity == null ? 1 : lm.opacity,
+      const N = { name: lm.name, visible: lm.visible !== false, opacity: ProjNode.inOf(lm.opacity, 0, 1, 1),
                   blend: ProjNode.blendOf(lm.blend), chans: {} };
-      for (const ch of Object.keys(lm.chans)) N.chans[ch] = await ProjNode.loadContent(lm.chans[ch], ctx);
+      for (const ch of Object.keys(lm.chans))
+        if (ProjNode.chanOf(ch) && ProjNode.recOf(lm.chans[ch])) N.chans[ch] = await ProjNode.loadContent(lm.chans[ch], ctx);
       N.scope = ProjNode.scopeOf(lm);
       if (lm.link) N.link = lm.link;
       if (lm.surfKey) N.surfKey = lm.surfKey;    // read only, so the fold below can still see it
       if (lm.maskFile) N.mask = await ctx.img(lm.maskFile);
       if (lm.maskRef) N.maskRef = lm.maskRef;
-      if (lm.tone) N.tone = { ...lm.tone };
+      const tone = ProjNode.toneOf(lm.tone);
+      if (tone) N.tone = tone;
+      const lv = Levels.read(lm.levels);         // version 7 (4.58), held to its shape like the rest
+      if (lv) N.levels = lv;
       if (lm.uid) N.uid = lm.uid;                // else LayerNode.of gives it one
       return LayerNode.of(N);
     }
-    const L = { type: lm.type, name: lm.name, visible: lm.visible, opacity: lm.opacity, blend: ProjNode.blendOf(lm.blend) };
+    const L = { type: lm.type, name: lm.name, visible: lm.visible, opacity: ProjNode.inOf(lm.opacity, 0, 1, 1), blend: ProjNode.blendOf(lm.blend) };
     if (lm.type === "fill") L.color = ProjNode.hexOf(lm.color);
     if (lm.type === "adjust") Object.assign(L, ProjNode.hsbcOf(lm));
     if (lm.type === "decal") {
-      Object.assign(L, { x: lm.x, y: lm.y, scale: lm.scale, rot: lm.rot, flip: lm.flip, sym: lm.sym || null, surf: lm.surf || null });
+      Object.assign(L, ProjNode.placeOf(lm));
       L.bmp = await ctx.img(lm.bmpFile);
       if (lm.heightFile) { L.heightMap = await ctx.img(lm.heightFile); L.heightName = lm.heightName || null; }
     }
-    if (lm.type === "paint") L.canvas = await ctx.img(lm.canvasFile);
+    if (lm.type === "paint") L.canvas = (await ctx.img(lm.canvasFile)) || (ctx.blank ? ctx.blank() : null);
     L.scope = ProjNode.scopeOf(lm);
     if (lm.link) L.link = lm.link;
-    if (lm.chan) L.chan = lm.chan;
+    if (ProjNode.chanOf(lm.chan)) L.chan = lm.chan;  // else colour, the default it always had
     if (lm.surfKey) L.surfKey = lm.surfKey;
-    if (lm.proj && lm.projFile) L.proj = await ProjNode.sharedProj(lm, ctx);
+    if (lm.proj && lm.projFile) { const P = await ProjNode.sharedProj(lm, ctx); if (P) L.proj = P; }
     if (lm.maskFile) L.mask = await ctx.img(lm.maskFile);
     return LayerNode.of(L);       // the flat record any version stores, migrated forward (4.28(b))
   },
@@ -197,24 +339,35 @@ const ProjNode = {
         const im = await ctx.img(m.patFile);
         // a tile the file lost comes back as the flat fill `color` already describes, not as a
         // pattern with nothing to repeat
-        if (im) { c.pat = Procedural.patClone(m.pat); c.patImg = toCanvas(im); c.patName = m.patName || null; }
+        if (im) { c.pat = Procedural.patClone(m.pat); c.patImg = toCanvas(im); c.patName = m.patName || null; if (m.lattice) c.lattice = Procedural.latticeClone(m.lattice); }
       }
     }
     if (m.kind === "effect") {
       Object.assign(c, ProjNode.hsbcOf(m));
-      if (m.fx) c.fx = Effect.clone(m.fx);             // a kind this build does not know is kept as it came
+      // Effect.clone holds every kind it knows to its numbers, and keeps one it does not know as it
+      // came: that draws nothing, and its kind reaches the panel through escHtml. "hsbc" is the four
+      // numbers themselves, which no record stands for — kept, the panel showed live sliders over an
+      // effect that drew nothing.
+      const fx = Effect.clone(m.fx);
+      if (fx && fx.type !== "hsbc") c.fx = fx;
     }
     if (m.kind === "image") {
-      Object.assign(c, { x: m.x, y: m.y, scale: m.scale, rot: m.rot, flip: m.flip, sym: m.sym || null, surf: m.surf || null });
+      Object.assign(c, ProjNode.placeOf(m));
       c.bmp = await ctx.img(m.bmpFile);
       if (m.heightFile) { c.heightMap = await ctx.img(m.heightFile); c.heightName = m.heightName || null; }
-      if (m.text) c.text = { ...m.text };              // as it came: normalised only when it is edited
+      const text = ProjNode.textOf(m.text);           // as it came: normalised when it is edited
+      if (text) c.text = text;
     }
-    if (m.kind === "paint") c.canvas = await ctx.img(m.canvasFile);
+    if (m.kind === "paint") c.canvas = (await ctx.img(m.canvasFile)) || (ctx.blank ? ctx.blank() : null);
+    // A path layer's recipe (4.52 (3)). Its pixels came back above; a recipe that does not read is
+    // dropped, and the layer is the picture it was saved as.
+    if (m.kind === "paint" && m.shape && c.canvas) { const sh = PathLayer.load(m.shape); if (sh) c.shape = sh; }
+    const keys = Levels.readKeys(m.keys, c);        // version 7 (4.58 (c)), held to its shape like the rest
+    if (keys) c.keys = keys;
     if (m.derived) c.derived = m.derived;
     if (m.visible === false) c.visible = false;
-    if (m.opacity != null) c.opacity = m.opacity;
-    if (m.proj && m.projFile) c.proj = await ProjNode.sharedProj(m, ctx);
+    if (m.opacity != null) c.opacity = ProjNode.inOf(m.opacity, 0, 1, 1);
+    if (m.proj && m.projFile) { const P = await ProjNode.sharedProj(m, ctx); if (P) c.proj = P; }
     return c;
   },
   // Where a layer applies. Version 5 and later store a `scope` recipe (4.28(g)); everything before
@@ -227,12 +380,13 @@ const ProjNode = {
     return undefined;
   },
   // Every layer of one projected decal ends up pointing at ONE parameter object, or moving the
-  // decal after a reload would only move the half that happens to be selected.
+  // decal after a reload would only move the half that happens to be selected. Null when the
+  // parameters are not a projection (`projOf`): each sheet of it then keeps its pixels.
   async sharedProj(m, ctx){
-    const id = m.proj.id || ("legacy" + (ctx.seq++));
-    if (!ctx.shared.has(id)) ctx.shared.set(id, { ...m.proj, id, bmp: await ctx.img(m.projFile) });
+    const id = ProjNode.idOf(m.proj.id) || ("legacy" + (ctx.seq++));
+    if (!ctx.shared.has(id)) { const bmp = await ctx.img(m.projFile); ctx.shared.set(id, bmp ? ProjNode.projOf(m.proj, id, bmp) : null); }
     const P = ctx.shared.get(id);
-    if (m.projHeightFile && !P.heightMap) { P.heightMap = await ctx.img(m.projHeightFile); P.heightName = m.projHeightName || null; }
+    if (P && m.projHeightFile && !P.heightMap) { P.heightMap = await ctx.img(m.projHeightFile); P.heightName = m.projHeightName || null; }
     return P;
   },
   // ROADMAP 4.28(f): fold an old surface folder into the decal it was built around.
@@ -279,7 +433,7 @@ const ProjectFile = {
         selected: [...F.selParts], excluded: [...F.protectedParts],
       } : null;
     const ext = Cockpit.fields("exterior"), ck = Cockpit.fields("cockpit");
-    const meta = { app: "wt-skin-studio", version: PROJ_VERSION, vehicleId: $("vehicleId").value, skinName: $("skinName").value,
+    const meta = { app: "wt-skin-studio", version: ProjNode.PLAIN, vehicleId: $("vehicleId").value, skinName: $("skinName").value,
       flipV: $("optFlipV").checked, preset: $("expPreset").value, slots: [],
       parts: partsOf(ext),
       body: Cockpit.current(), cockpit: ck ? { parts: partsOf(ck) } : null,
@@ -311,6 +465,9 @@ const ProjectFile = {
     // The font files its text is drawn with (4.50 (3)), beside a note that their licence travels
     // with them — in the .wtproj and in a recovery copy alike, so the text stays editable in both.
     files.push(...await TextDecal.fontFiles(meta, TextDecal.fontIds([...App.slots.values()].flatMap(s => s.layers))));
+    // The reference images, only when the window's Save with project is ticked (4.50 (12)). Additive,
+    // the version stays 5: a reader that does not know `refs` loads everything else and ignores them.
+    RefWin.save(meta, files);
     return { meta, files, assets };
   },
   // Every slot with something in it, into `meta.slots`. The body of what saveProject always did;
@@ -339,6 +496,7 @@ const ProjectFile = {
         sm.smoothFile = await put(s.smooth);
         sm.metalFile = await put(s.metal);
         sm.normalFile = await put(s.normal);
+        ctx.version = Math.max(ctx.version || 0, 8);       // its slopes are in the order since 1.24 (see PROJ_VERSION)
       }
       // Per-texture export choices (resolution, format, whether it ships). Additive and optional: a
       // reader that does not know the field just exports everything at native size, which is what
@@ -351,11 +509,36 @@ const ProjectFile = {
       if (exp.c || exp.n) sm.exp = exp;
       meta.slots.push(sm);
     }
+    if (ctx.version) meta.version = ctx.version;           // a path layer (6), level content (7) or a surface sheet (8) was written (see PROJ_VERSION)
   },
   // …and the camouflage tile back from beside them, where `slots` put it (4.50 (6)) — the menu on
   // My own pattern first when the file was, so the pins, the warnings and the model it rebuilds are
   // the tile's. The one piece of the reader that lives here, because it is the one the writer
   // above keeps out of `meta.slots`.
+  // The project's images by name. One the zip does not hold is null, and its name is kept for the
+  // status line (`lostNote`): one lost file used to be a TypeError out of the whole load (ROADMAP
+  // 1.21 (4), t145). A mask, a pattern tile or a decal's picture that is missing draws nothing; a
+  // painted layer's sheet comes back blank at the slot's size (`ctx.blank`), still there to paint on.
+  images(zip){
+    const lost = [];
+    const img = async f => {
+      const zf = zip.file(f);
+      if (!zf) { lost.push(f); return null; }
+      return toCanvas(await createImageBitmap(await zf.async("blob")));
+    };
+    return { img, lost };
+  },
+  lostNote(lost){
+    return lost.length ? " · " + lost.length + " image(s) missing from the file, left blank: " + lost.slice(0, 3).join(", ") +
+      (lost.length > 3 ? " and " + (lost.length - 3) + " more" : "") : "";
+  },
+  // The version gate's sentence, or null when this build can read the file. `reads` is what a build
+  // reads — this one's, unless a test asks what an older build's gate says of a newer file (t57).
+  tooNew(meta, reads = PROJ_VERSION){
+    const v = meta.version | 0;
+    return v > reads ? "This project was saved by a newer build of the app (project version " + v +
+      ", this build reads " + reads + ") — update the app rather than risk a half-restored file" : null;
+  },
   async readTile(rec, ctx){
     if (rec.on) $("expCamoBase").value = "tile";
     await CamoTile.load(rec, ctx);
@@ -406,6 +589,7 @@ async function saveProject(){
   Autosave.saved(rev);
   setStatus("Project saved (" + (blob.size / 1048576).toFixed(1) + " MB, model + textures embedded" +
     TextDecal.fontNote((parts.meta.fonts || []).length) + ") — self-contained, reload via Add files", "ok");
+  return true;                                       // the Export window closes on it (ROADMAP 3.43)
 }
 $("btnSaveProj").onclick = saveProject;
 // `file` is the bytes of a .wtproj, or a JSZip already — which is how a recovery copy comes back
@@ -415,10 +599,18 @@ async function loadProject(file, recovered){
   const zip = file instanceof JSZip ? file : await JSZip.loadAsync(file);
   const jf = zip.file("project.json");
   if (!jf) throw new Error("Not a WT Skin Studio project");
-  App.pendingProject = { meta: JSON.parse(await jf.async("string")), zip, recovered: recovered || null };
+  const meta = JSON.parse(await jf.async("string"));
+  // The gate is the FIRST thing done with the file. It used to sit in tryApplyProject, which runs
+  // after the embedded model and textures below were already put into the app, the cockpit body
+  // reset and the scene rebuilt: a too-new file replaced the open vehicle and then said no
+  // (ROADMAP 1.21 (3), t145).
+  const tooNew = ProjectFile.tooNew(meta);
+  if (tooNew) { setStatus(tooNew, "err"); return; }
+  App.pendingProject = { meta, zip, recovered: recovered || null };
   // The fonts its text uses (4.50 (3)), registered before anything can open that text for editing —
   // a recovery copy's too, which comes back through here.
   await TextDecal.restoreFonts(App.pendingProject.meta, zip);
+  await RefWin.restore(App.pendingProject.meta, zip);   // the reference images it was saved with (4.50 (12))
   // part groups / selection restore independently of the slot-edit pipeline —
   // refreshPartList consumes this once the model's meshes exist
   if (App.pendingProject.meta.parts) App.pendingParts = App.pendingProject.meta.parts;
@@ -446,8 +638,8 @@ async function loadProject(file, recovered){
           const buf = await zf.async("arraybuffer");
           // parseDDSAsync transfers `buf` and returns it as .raw — see the decode pool
           let dec;
-          if (nm.endsWith(".dds")) dec = await parseDDSAsync(buf);
-          else { dec = parseTGA(buf); dec.raw = buf; }
+          if (nm.endsWith(".dds")) dec = await parseDDSAsync(buf, SLOT_SIZES[SLOT_SIZES.length - 1]);   // a skin's 12 800² sheet stays at 8192 on reopen (1.26)
+          else { dec = TGA.parseTGA(buf); dec.raw = buf; }
           dec.fileName = rel; dec.rawName = rel;
           App.decoded.set(texStemOf(rel), dec);
         }
@@ -468,16 +660,12 @@ async function tryApplyProject(){
   const P = App.pendingProject;
   if (!P) return;
   if (!Array.isArray(P.meta.slots)) { App.pendingProject = null; setStatus("Project file has no slot data — nothing to restore", "err"); return; }
-  if ((P.meta.version | 0) > PROJ_VERSION) {
-    App.pendingProject = null;
-    setStatus("This project was saved by a newer build of the app (project version " + (P.meta.version | 0) +
-      ", this build reads " + PROJ_VERSION + ") — update the app rather than risk a half-restored file", "err");
-    return;
-  }
+  const tooNew = ProjectFile.tooNew(P.meta);      // again, for a pending project not from loadProject (t57)
+  if (tooNew) { App.pendingProject = null; setStatus(tooNew, "err"); return; }
   const missing = P.meta.slots.filter(sm => { const s = App.slots.get(sm.id); return !s || !s.composite || s.missing; }).map(sm => sm.id);
   if (missing.length) { setStatus("Project waiting for textures: " + missing.join(", ") + " — add the vehicle .obj/.dds files", "err"); return; }
   App.pendingProject = null;
-  const img = async f => toCanvas(await createImageBitmap(await P.zip.file(f).async("blob")));
+  const { img, lost } = ProjectFile.images(P.zip);
   const prevFlip = $("optFlipV").checked;
   $("optFlipV").checked = !!P.meta.flipV;
   if (prevFlip !== $("optFlipV").checked) {
@@ -485,7 +673,7 @@ async function tryApplyProject(){
     if (App.geomData) buildScene();
   }
   const projShared = new Map();                      // proj id -> the one parameter object per decal
-  const ctx = { img, shared: projShared, seq: 0 };
+  const ctx = { img, shared: projShared, seq: 0, blank: null };
   const resized = [];                                // slots put back at a resolution the file lost
   for (const sm of P.meta.slots) {
     const s = App.slots.get(sm.id);
@@ -493,6 +681,7 @@ async function tryApplyProject(){
     if (sm.exp) for (const k of ["c", "n"]) if (sm.exp[k]) Object.assign(expOpt(s, k), {
       size: +sm.exp[k].size || 0, fmt: sm.exp[k].fmt || "", off: !!sm.exp[k].off });
     s.layers = [];
+    ctx.blank = () => mkCanvas(s.composite.width, s.composite.height);
     // Version 4 stores a tree; a version 3 file is the same records with no `group` among them, so
     // this reads both without a branch (ROADMAP 4.9).
     for (const lm of sm.layers) s.layers.push(await ProjNode.load(lm, ctx));
@@ -504,13 +693,16 @@ async function tryApplyProject(){
       // these three are written straight into the slot's own canvases, so it has to happen here.
       const paint = async (file, canvas) => {
         const c = await img(file);
+        if (!c) return false;                        // lost: the sheet keeps what the slot has
         const g = ctx2d(canvas);
         g.clearRect(0, 0, canvas.width, canvas.height);
         g.drawImage(c, 0, 0, canvas.width, canvas.height);
+        return true;
       };
       await paint(sm.smoothFile, s.smooth);
       await paint(sm.metalFile, s.metal);
-      await paint(sm.normalFile, s.normal);
+      // stored in the old order before 8 (see PROJ_VERSION); a lost one leaves the slot's own, already in the new
+      if (await paint(sm.normalFile, s.normal) && (P.meta.version | 0) < 8) NSheet.turn(s.normal);
       s.nEdited = true;
       refreshSurfaceTextures(s);
     }
@@ -542,7 +734,7 @@ async function tryApplyProject(){
   if (P.meta.body === "cockpit" && App.bodies.cockpit) await Cockpit.show("cockpit");   // the body it was saved on (4.14)
   setStatus("Project restored — " + P.meta.slots.length + " slot(s) with edits" + armed +
     (resized.length ? " · painting resolution restored from the layers: " + resized.join(", ") +
-      " (this project predates it being saved)" : ""), "ok");
+      " (this project predates it being saved)" : "") + ProjectFile.lostNote(lost), lost.length ? "err" : "ok");
 }
 
 // Put back the loadout a project was painted against, and hang it again if this machine can.

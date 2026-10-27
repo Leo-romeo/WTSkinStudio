@@ -471,7 +471,10 @@ const BODY = `async function(){
   var fs3 = rowOf(d3, "Font").querySelector("select"); fs3.value = "id:" + id; await fs3.onchange(); await settle(1);
   d3.querySelector(".foot input[type=text]").value = libName;
   btnIn(d3.querySelector(".foot"), /Save to library/).click();
-  for (var w = 0; w < 40 && !/Saved/.test(status()); w++) await frame();
+  // Until the status line says the save landed, up to 10 s — not 40 frames (~0.7 s), which a loaded
+  // machine outran: at 3 lanes on 2026-10-24 the IndexedDB write came later and this check failed,
+  // then passed 3 of 3 alone (ROADMAP 0.6 (b)).
+  for (var w0 = Date.now(); Date.now() - w0 < 10000 && !/Saved/.test(status());) await frame();
   var row = (await DecalLib.index()).filter(function(r){ return r.name === libName; })[0];
   var lrec = row ? await DecalLib.get(row.id) : null;
   out.lib = { saved: !!lrec, text: lrec && lrec.text ? lrec.text.string : null, font: lrec && lrec.text ? lrec.text.fontId === id : false,
@@ -564,7 +567,7 @@ async function keysPhase(cdp, evaluate){
 }
 
 const run = await evalInPage({ browser, timeoutMs: 240000, keep: argv.includes("--keep"), drive: async ({ cdp, evaluate }) => {
-  const main = await evaluate(pageExpr(BODY, 400), 150000);
+  const main = await evaluate(pageExpr(BODY), 150000);
   if (!main || main.__threw) return main;
   main.keys = await keysPhase(cdp, evaluate);
   return main;

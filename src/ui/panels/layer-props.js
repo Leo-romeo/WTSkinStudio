@@ -88,6 +88,172 @@ const LayerProps = {
       apply(to);
     };
   },
+  // Which mip levels it shows at (ROADMAP 4.58, docs/MIP_LEVELS.md §3.1) — shown once a range is set
+  // (the layer menu's Near only / Far only set one), so every other layer's panel is as it was. The
+  // numbers are levels, not pixels: each a half-size copy, and so about twice as far away.
+  levels(P){
+    const { L, s, mk, el } = P, r = L.levels;
+    const opt = (v, sel, txt) => `<option value="${v}"${v === sel ? " selected" : ""}>${txt}</option>`;
+    let from = "", to = "", soft = "";
+    for (let v = 0; v <= Levels.TOP; v++) { from += opt(v, r.from, v); to += opt(v, r.to, v === Levels.TOP ? "end" : v); }
+    for (let v = 0; v <= Math.max(3, r.soft); v++) soft += opt(v, r.soft, v ? "soft " + v : "hard");
+    const row = mk(`<label title="Which mip levels this shows at. Level 0 is the full-size sheet the game shows up close; each next level is half the size, and the game picks it about twice as far away — and, on a UserSkin, at a steeper angle.">Shows at</label>` +
+      `<select title="The first level it shows at">${from}</select><select title="The last level it shows at — end is every level past the first">${to}</select>` +
+      `<select title="How many levels it fades over at each end. The game's trilinear filtering already fades a hard edge over about one level.">${soft}</select>`);
+    const [a, b, c] = row.querySelectorAll("select");
+    for (const sel of [a, b, c]) { sel.style.cssText = "flex:1;min-width:0"; sel.onchange = () => Levels.set(s, L, Levels.make(+a.value, +b.value, +c.value), "mip levels"); }
+    const clr = document.createElement("button");
+    clr.textContent = "✕";
+    clr.title = "Show it at every level again";
+    clr.style.cssText = "padding:0 5px;font-size:11px";
+    clr.onclick = () => Levels.set(s, L, null);
+    row.appendChild(clr);
+    const far = Levels.reach(s, L);
+    const note = (far ? far[0].toUpperCase() + far.slice(1) + "." : "") +
+      (r.from > 0 ? (far ? " " : "") + "Not in level 0 — the 3-D view shows it from far enough away, the 2-D view at its Level " + r.from + "." : "");
+    if (!note) return;
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = note;
+    el.appendChild(hint);
+  },
+  // ---- By distance: a number that varies by mip level (ROADMAP 4.58 (c), docs/MIP_LEVELS.md §3.2) ----
+  // One bar per level of the sheet — a swatch for a colour, a column for a number — with the keyed
+  // ones marked; pick a bar and set its value, which keys that level (anchored at level 0 on the
+  // number it had, the first time). The panel's state, not the record's, like FxUI's channel. The
+  // row is there on a content with keys, or once the layer menu's Vary with distance… asked for it
+  // (`uid`), so every other layer's panel is as it was.
+  keySel: { uid: null, param: null, level: 0 },
+  keys(P){
+    const { C, s, L, ch, mk, el } = P;
+    const ps = Levels.params(C);
+    if (!ps.length || !s || !s.composite || (!Levels.keyed(C) && LayerProps.keySel.uid !== L.uid)) return;
+    let K = Levels.keysOf(C) || {};
+    const last = Levels.last(s.composite.width, s.composite.height);
+    const sel = LayerProps.keySel, has = q => Array.isArray(K[q.id]) && K[q.id].length > 0;
+    // the panel's choice is this layer's only when it was made on this layer (review of (c))
+    const mine = sel.uid === L.uid, p = (mine && ps.find(q => q.id === sel.param)) || ps.find(has) || (mine && sel.param ? ps[0] : null);
+    const grey = p && p.colour && ch !== "color";
+    const opt = (v, txt, on) => `<option value="${v}"${on ? " selected" : ""}>${txt}</option>`;
+    const r = mk(`<label title="Give a number its own value at each mip level: the game shows level 0 up close and each next level about twice as far away — and, on a UserSkin, at a steeper angle. The holo foil and colour flip presets are built on this.">By distance</label>` +
+      `<select style="flex:1">${ps.some(has) ? "" : opt("", "same at every level", !p)}${ps.map(q => opt(q.id, (grey ? CHAN_LABEL[ch] || "value" : q.word) + (has(q) ? " — varies" : ""), q === p)).join("")}</select>`);
+    r.querySelector("select").onchange = e => { sel.uid = L.uid; sel.param = e.target.value || null; sel.level = Math.min(sel.level, last); refreshLayerProps(); };
+    if (!p) return;
+    // the plain control of a keyed number is read-only: the keys say what it is at every level
+    // (Levels' own rows edit a channel of their own while the Channel select names one, and keys are all channels')
+    if (has(p) && !(Effect.typeOf(C) === "levels" && ch === "color" && FxUI.sub !== "rgb")) for (const row of el.querySelectorAll(".row")) {
+      const lb = row.querySelector("label");
+      if (lb && lb.textContent === (grey ? CHAN_LABEL[ch] : p.row) && row !== r)
+        for (const inp of row.querySelectorAll("input")) { inp.disabled = true; inp.title = "Varies with distance — set it level by level under By distance"; }
+    }
+    const k = mine ? Math.min(Math.max(0, sel.level | 0), last) : 0, at = j => Levels.value(K[p.id] || [[0, p.get(C)]], j);
+    const keyedAt = j => has(p) && K[p.id].some(e => e[0] === j);
+    const bars = document.createElement("div");
+    bars.className = "row";
+    bars.style.cssText = "gap:2px;align-items:flex-end;height:30px";
+    const draw = () => {
+      bars.innerHTML = "";
+      for (let j = 0; j <= last; j++) {
+        const v = at(j), b = document.createElement("div");
+        b.dataset.level = j;
+        b.className = "lvbar" + (j === k ? " on" : "") + (keyedAt(j) ? " key" : "");
+        const h = p.colour ? 100 : Math.max(6, Math.round(100 * (v - p.min) / (p.max - p.min)));
+        b.style.cssText = `flex:1;min-width:0;height:${h}%;cursor:pointer;border-radius:2px;background:${p.colour ? v : "var(--accent)"};` +
+          `opacity:${keyedAt(j) || !has(p) ? 1 : .55};outline:${j === k ? "2px solid var(--text)" : keyedAt(j) ? "1px solid var(--accent)" : "none"};outline-offset:-1px`;
+        b.title = "Level " + j + ": " + (p.colour ? (grey ? greyOfHex(v) : v) : +(+v).toFixed(2)) + (keyedAt(j) ? " (keyed)" : has(p) ? " (between keys)" : "");
+        b.onclick = () => { sel.uid = L.uid; sel.param = p.id; sel.level = j; refreshLayerProps(); };
+        bars.appendChild(b);
+      }
+    };
+    draw();
+    el.appendChild(bars);
+    // the value at the level in hand: live while it moves, one undo step when it settles
+    const v0 = at(k);
+    const ctl = p.colour && !grey ? `<input type="color" data-key value="${v0}">`
+      : `<input type="range" data-key min="${grey ? 0 : p.min}" max="${grey ? 255 : p.max}" step="${grey ? 1 : p.step}" value="${grey ? greyOfHex(v0) : v0}"><span class="val"></span>`;
+    const vr = mk(`<label title="The value at level ${k}">Level ${k}</label>${ctl}`);
+    const inp = vr.querySelector("input"), val = vr.querySelector(".val");
+    const show = () => { if (val) val.textContent = grey ? greyOfHex(at(k)) : +(+at(k)).toFixed(2); };
+    show();
+    let before = null;
+    inp.addEventListener("input", () => {
+      if (!before) before = Levels.snap(C);
+      const v = grey ? hexOfGrey(+inp.value) : p.colour ? inp.value : +inp.value;
+      const cur = Levels.keysOf(C) || {}, list = (has(p) ? cur[p.id] : k ? [[0, p.get(C)]] : []).filter(e => e[0] !== k);
+      list.push([k, v]); list.sort((a, b) => a[0] - b[0]);
+      Levels.applyKeys(L, ch, { keys: Object.assign({}, cur, { [p.id]: list }) }, false, true);
+      K = Levels.keysOf(C) || {};
+      draw(); show();
+    });
+    inp.addEventListener("change", () => {
+      const was = before; before = null;
+      if (!was) return;
+      const now = Levels.snap(C);
+      pushAction("vary " + p.word + " with distance", () => Levels.applyKeys(L, ch, was, true), () => Levels.applyKeys(L, ch, now, true));
+      refreshLayerProps();
+    });
+    if (!has(p)) return;
+    const btn = (label, title, fn) => { const b = document.createElement("button"); b.textContent = label; b.title = title; b.style.cssText = "padding:0 5px;font-size:11px"; b.onclick = fn; vr.appendChild(b); };
+    if (keyedAt(k) && K[p.id].length > 1) btn("✕", "Take level " + k + "'s key off — it is interpolated from its neighbours again",
+      () => { Levels.setKeys(s, L, ch, Object.assign({}, K, { [p.id]: K[p.id].filter(e => e[0] !== k) }), "unkey level " + k); refreshLayerProps(); });
+    btn("✕ all", "The same at every level again — level 0's value", () => {
+      const n = Object.assign({}, K); delete n[p.id];
+      Levels.setKeys(s, L, ch, n, "same at every level"); refreshLayerProps();
+    });
+  },
+  // The level effect presets (4.58 (c), `Levels.PRESETS`): pick one, set its few numbers, Add. What
+  // it builds is ordinary layers, which the status line and the dialog both say.
+  presetId: null,
+  presetDialog(slot){
+    if (!slot || !slot.composite) { setStatus("Select a texture slot first", "err"); return null; }
+    const last = Levels.last(slot.composite.width, slot.composite.height), groups = layerNodes(slot.layers).filter(isGroup);
+    const D = modalDialog("Level effects", { width: "400px" });
+    const row = (label, ctl, tip) => {
+      const r = document.createElement("div"); r.className = "row";
+      const l = document.createElement("label"); l.textContent = label; if (tip) l.title = tip;
+      ctl.style.flex = "1"; r.append(l, ctl); return r;
+    };
+    const select = (opts, sel) => { const s = document.createElement("select"); for (const [v, t] of opts) s.appendChild(new Option(t, v, false, v === sel)); return s; };
+    const hint = text => { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; };
+    const pick = select(Levels.PRESETS.map(p => [p.id, p.word]), LayerProps.presetId || "holo");
+    pick.dataset.preset = "";
+    const what = hint(""), form = document.createElement("div"), note = hint("");
+    D.body.append(row("Effect", pick), what, form, note, hint(Levels.CAVEAT));
+    const add = document.createElement("button"), cancel = document.createElement("button");
+    add.textContent = "Add"; add.className = "primary"; cancel.textContent = "Cancel";
+    D.foot.append(cancel, add);
+    const draw = () => {
+      const P = Levels.PRESETS.find(p => p.id === pick.value);
+      LayerProps.presetId = P.id;
+      what.textContent = P.what;
+      form.innerHTML = ""; note.textContent = ""; add.disabled = false;
+      for (const f of P.fields) {
+        let ctl;
+        if (f.kind === "palette") ctl = select(Gradient.HOLO.map(h => [h.id, h.name]), f.def);
+        else if (f.kind === "level") { const o = []; for (let k = f.min || 0; k <= last; k++) o.push([String(k), "level " + k]); ctl = select(o, String(Math.min(last, f.def))); }
+        else if (f.kind === "blend") ctl = select(COLOR_BLENDS.map(b => [b, b]), f.def);
+        else if (f.kind === "group") {
+          // the far look defaults to the first group beside the near one, never one inside it
+          const g = f.def ? groups.find(x => x !== groups[0] && !nodeContains(groups[0], x) && !nodeContains(x, groups[0])) : groups[0];
+          ctl = select(groups.map(x => [x.uid, x.name]), g ? g.uid : "");
+        }
+        else if (f.kind === "colour") { ctl = document.createElement("input"); ctl.type = "color"; ctl.value = f.def; }
+        else { ctl = document.createElement("input"); ctl.type = "number"; ctl.min = f.min; ctl.max = f.max; ctl.value = f.def; }
+        ctl.dataset.field = f.id;
+        form.appendChild(row(f.word, ctl));
+      }
+      if (P.fields.some(f => f.kind === "group") && groups.length < 2) { note.textContent = "Put the near look and the far look in two groups on this texture first."; add.disabled = true; }
+    };
+    pick.onchange = draw;
+    draw();
+    cancel.onclick = D.close;
+    add.onclick = () => {
+      const v = {};
+      for (const c of form.querySelectorAll("[data-field]")) v[c.dataset.field] = c.type === "number" ? +c.value : c.value;
+      if (Levels.preset(slot, pick.value, v)) D.close();
+    };
+    return D;
+  },
   // Where this layer applies — Substance's "polygon fill" idea, widened to a recipe by 4.28(g).
   limit(P){
     const L = P.L, sc = Scope.of(L), n = Scope.empty(sc) ? 0 : 1;
@@ -291,9 +457,11 @@ function refreshLayerProps(){
   ChanStrip.build(el, s, L);
   LayerProps.opacity(P);
   LayerProps.blend(P);
+  if (L.levels) LayerProps.levels(P);
   if (["paint", "decal", "fill", "adjust"].includes(L.type)) LayerProps.limit(P);
   if (P.C && P.C.kind === "fill") LayerProps.fill(P);
   LayerProps.effect(P);
+  LayerProps.keys(P);
   if (["paint", "decal", "fill"].includes(L.type)) maskRows(el, P.mk, s, L);
   if (["paint", "decal", "fill"].includes(L.type) || isGroup(L)) LayerProps.tone(P);
   LayerProps.verbs(P);

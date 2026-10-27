@@ -6,13 +6,15 @@
 // held against an answer that is exact, in two halves:
 //
 //   Node, on the pure `/*==PEN==*/` section:
-//   * pressure is a pen's only — a mouse's 0.5 and touch's guess are full pressure — and a pen's
-//     coalesced samples come through in order, each with its own pressure (a mouse's do not);
+//   * pressure is a pen's only — a mouse's 0.5 and touch's guess are full pressure — and a move's
+//     coalesced samples come through in order: a pen's each at its own pressure, a mouse's (since
+//     2026-10-22) at full;
 //   * the string: off hands every sample through, a wobble inside it never moves the brush, and a
 //     taut string keeps the brush exactly its length behind;
 //   * the curve maps 0 → 0 and 1 → 1 for every setting and is monotone, so a mouse IS the brush as set;
 //   * the dab walk at constant pressure is the loop it replaced, number for number, and at rising
-//     pressure spaces each dab by its own size;
+//     pressure spaces each dab by its own size; the Spacing slider's markup default is the walk's own
+//     fallback, `Pen.SPACING`;
 //   * the 3-D walk's one-segment case is the old `prev + (cur − prev) · t`, and a polyline is walked
 //     along its arc, through its corners;
 //   * Flow and wash / build-up: a lone dab lands at Flow × Opacity in both modes, a fill at Opacity
@@ -26,8 +28,8 @@
 //   * a stroke at Flow 20 % builds where it passes over itself and never past Opacity; Build up goes
 //     past it; a mirrored copy (stroke channel 1) deposits at Flow like the stroke; the shape tool's
 //     Fill lands at Opacity in both modes, with and without a mask;
-//   * a pen's coalesced samples are followed through the real handler, and Smoothing holds the
-//     brush back by its string and ignores a wobble inside it;
+//   * a pen's coalesced samples are followed through the real handler, and so are a mouse's, and
+//     Smoothing holds the brush back by its string and ignores a wobble inside it;
 //   * the 3-D walk carries interpolated pressure into every sub-step and follows the pen's path at
 //     the chord's ray budget; the recorder says a pen was used; undo is exact; Flow and what pressure
 //     drives are remembered per tool;
@@ -52,7 +54,7 @@ const argv = process.argv.slice(2);
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -72,9 +74,14 @@ console.log("=== pressure is a pen's, and nothing else's ===");
   const got = Pen.samples(pen);
   R.is(got.length === 3 && got.map(s => s.x).join() === "10,20,30" && got.map(s => s.p).join() === "0.2,0.5,0.9",
     `a pen's coalesced samples come through in order, each at its own pressure (${JSON.stringify(got)})`);
-  const mouse = { pointerType: "mouse", clientX: 30, clientY: 5, pressure: .5, getCoalescedEvents: () => [ev(10, .2), ev(20, .5)] };
-  R.is(Pen.samples(mouse).length === 1 && Pen.samples(mouse)[0].p === 1,
-    "a mouse's move is its one sample, at full pressure — its coalesced events would only add 3-D raycasts");
+  // A mouse's were dropped until 2026-10-22, on the grounds that they would only add 3-D raycasts,
+  // and a fast mouse curve was drawn as one chord per frame. The 3-D walk spreads its rays by arc
+  // length, so they add only what a curve is longer than its chord.
+  const mev = x => ({ pointerType: "mouse", clientX: x, clientY: 5, pressure: .5 });
+  const mouse = Object.assign(mev(30), { getCoalescedEvents: () => [mev(10), mev(20), mev(30)] });
+  const mgot = Pen.samples(mouse);
+  R.is(mgot.length === 3 && mgot.map(s => s.x).join() === "10,20,30" && mgot.every(s => s.p === 1),
+    `a mouse's coalesced samples come through too, in order and at full pressure (${JSON.stringify(mgot)})`);
   R.is(Pen.samples(Object.assign(ev(7, .4), { getCoalescedEvents: () => [] }))[0].x === 7 && Pen.samples(ev(8, .4))[0].x === 8,
     "and a pen move with no coalesced list (or no API for one) is the move itself");
 }
@@ -121,6 +128,12 @@ console.log("\n=== the curve, and what a dab is at a pressure ===");
 
 console.log("\n=== the dabs along a segment ===");
 {
+  // One default, two copies: the slider's markup (what the UI shows and Reset reads) and the walk's
+  // fallback for a brush that carries none. If the two drift apart, a stroke paints at a spacing the
+  // slider does not show — 1.7's bug.
+  const def = /id="brushSpacing"[^>]*\bvalue="(\d+)"/.exec(src);
+  R.is(!!def && +def[1] === Math.round(Pen.SPACING * 100),
+    `the Spacing slider's markup default is the walk's own fallback, Pen.SPACING (${def && def[1]} % against ${Pen.SPACING})`);
   // The loop stampAt had until 2026-09-25, verbatim, as the oracle for constant pressure.
   const old = (last, px, py, b) => {
     const step = Math.max(1, b.size * (b.spacing || .35)), pts = [];
@@ -208,6 +221,8 @@ const browser = findBrowser(argv.includes("--chrome") ? argv[argv.indexOf("--chr
 if (!browser) { console.log("\nSKIP (page half): no Chrome or Edge found. Pass --chrome <path> or set CHROME."); R.finish(); }
 
 const BODY = `async function(){
+  // The one-shot Fill and Stamp along, which these checks are about; a path LAYER is t147's (4.52 (3)).
+  document.getElementById("pathAsLayer").checked = false;
   var out = {}, N = 512, seq = 0;
   function fnv(u8){ var h = 0x811c9dc5; for (var i = 0; i < u8.length; i++) { h ^= u8[i]; h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
   function hash(c){ return fnv(ctx2d(c).getImageData(0, 0, c.width, c.height).data); }
@@ -300,6 +315,17 @@ const BODY = `async function(){
     cn.dispatchEvent(pe("pointermove", 220, 470, "pen", 1, co));
     cn.dispatchEvent(pe("pointerup", 220, 470, "pen", 0));
     out.corner = { apex: alpha(layer(), 160, 422), chord: alpha(layer(), 160, 470) };
+  }
+  // ---- C2. …and so are a mouse's (2026-10-22): the same corner, from a mouse ----
+  if (out.coalescedInit === 1) {
+    set({ size: 12, spacing: .1 });
+    cn.dispatchEvent(pe("pointerdown", 300, 470, "mouse", .5));
+    var mmid = client(360, 420), mend = client(420, 470);
+    var mco = [new PointerEvent("pointermove", { clientX: mmid.x, clientY: mmid.y, pointerType: "mouse", pressure: .5 }),
+               new PointerEvent("pointermove", { clientX: mend.x, clientY: mend.y, pointerType: "mouse", pressure: .5 })];
+    cn.dispatchEvent(pe("pointermove", 420, 470, "mouse", .5, mco));
+    cn.dispatchEvent(pe("pointerup", 420, 470, "mouse", 0));
+    out.mouseCorner = { apex: alpha(layer(), 360, 422), chord: alpha(layer(), 360, 470) };
   }
 
   // ---- D. Flow builds within a stroke, and a wash never passes Opacity ----
@@ -553,7 +579,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 800), timeoutMs: 180000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 180000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -577,6 +603,9 @@ if (r.coalescedInit === 1)
   R.is(r.corner.apex >= 128 && r.corner.chord < 128,
     `a pen's coalesced samples are followed: one move with a corner in it paints the corner (alpha ${r.corner.apex}) and not the chord that skips it (${r.corner.chord})`);
 else console.log(`  skip this Chrome cannot build a PointerEvent with coalesced events (${r.coalescedInit}), so the coalesced path is held by the Node half only`);
+if (r.coalescedInit === 1)
+  R.is(r.mouseCorner.apex >= 128 && r.mouseCorner.chord < 128,
+    `and so are a mouse's (since 2026-10-22): the same corner from a mouse is painted (alpha ${r.mouseCorner.apex}), not the chord across it (${r.mouseCorner.chord})`);
 
 console.log("\n=== Flow and wash / build-up on the real stroke buffer (6.4) ===");
 console.log(`   Opacity 50 %, Flow 20 %: one pass ${r.flow.once}, over itself six times ${r.flow.over}, highest anywhere ${r.flow.cap} (Opacity is 128)`);

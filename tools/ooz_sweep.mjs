@@ -17,7 +17,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { build } from "./build.mjs";
-import { installDir, installOrExit } from "./wtdir.mjs";
+import { installDir, installOrExit, isDirEntry } from "./wtdir.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // No install is resolved at import: t46 imports this module under --install only, and a module that
@@ -25,7 +25,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // path and what is missing, when a sweep is actually asked for and there is no install.
 
 function section(src, name) {
-  const a = src.indexOf("\n/*==" + name + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + name + "==\\*/"));
   const b = src.indexOf("\n/*==END" + name + "==*/");
   if (a < 0 || b < 0) throw new Error("section " + name + " not found");
   return src.slice(a + 1, b);
@@ -53,7 +53,7 @@ function walk(dir, re, out = []) {
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, re, out);
+    if (isDirEntry(e, p)) walk(p, re, out);
     else if (re.test(e.name)) out.push(p);
   }
   return out;
@@ -68,7 +68,7 @@ export async function indexInstall(wt = installDir()) {
     const GameDB = { entries: [], stems: new Map(), packs: 0, unknown: new Map(),
       desc: null, descDbs: [], models: [], packList: [], descBindCache: new Map() };
     const KNOWN_FMTS = ["DXT1", "DXT3", "DXT5", "ATI1", "ATI2", "BC5U", "BC7"];
-    const oodleAvailable = () => true;   // index everything; the byte comparison is the verdict
+    const Oodle = { oodleAvailable: () => true };   // index everything; the byte comparison is the verdict
   `;
   const P = new Function(prelude + section(html, "PACKS") + "\n" + section(html, "DXP") + "\n" +
     "return { GameDB, indexDxp };")();
@@ -147,17 +147,19 @@ export async function sweepGeometry(ooz, rad, opts = {}) {
   // 2 % failure rate and hide a real regression inside it.
   const make = oodle => {
     const seen = [], refused = [];
-    const M = new Function("ensureOodle", "oodleDecompress", "zstdDec",
+    // MODEL reaches the decoders through the codecs' namespaces (ROADMAP 2.3), so those are what
+    // stand in here: `Oodle` with the two calls the app makes, `Zstd` refusing.
+    const M = new Function("Oodle", "Zstd",
       section(html, "MODEL") + "\nreturn { grpParseFront, GRP_CLS, loadDynModelBytes };")(
-      async () => (oodle ? oodle.ensureOodle() : null),
-      (ex, data, raw) => {
-        let out;
-        try { out = oodle.oodleDecompress(ex, data, raw); }
-        catch (e) { refused.push(e.message); throw e; }
-        seen.push(out);
-        return out;
-      },
-      () => { throw new Error("a zstd model turned up where the Oodle comparison runs"); });
+      { ensureOodle: async () => (oodle ? oodle.ensureOodle() : null),
+        oodleDecompress: (ex, data, raw) => {
+          let out;
+          try { out = oodle.oodleDecompress(ex, data, raw); }
+          catch (e) { refused.push(e.message); throw e; }
+          seen.push(out);
+          return out;
+        } },
+      { zstdDec: () => { throw new Error("a zstd model turned up where the Oodle comparison runs"); } });
     return { M, seen, refused };
   };
   const A = make(ooz), B = rad ? make(rad) : null;
@@ -206,11 +208,11 @@ if (isMain) {
     const blob = /const OODLE_WASM_B64 = "([^"]*)";/.exec(html);
     const impl = /const OODLE_IMPL = "([^"]*)";/.exec(html);
     if (!impl || !impl[1]) throw new Error("no Oodle decoder in this build");
-    const a = html.indexOf("\n/*==WTLZ==*/"), b = html.indexOf("\n/*==ENDWTLZ==*/");
+    const a = html.search(/[\n>]\/\*==WTLZ==\*\//), b = html.indexOf("\n/*==ENDWTLZ==*/");
     const wtlz = a >= 0 && b >= 0 ? html.slice(a + 1, b) : "";
     return new Function("var OODLE_IMPL = " + JSON.stringify(impl[1]) + ";\n" +
       "var OODLE_WASM_B64 = " + JSON.stringify(blob ? blob[1] : "") + ";\n" +
-      wtlz + "\n" + section(html, "OODLE") + "\nreturn { ensureOodle, oodleDecompress };")();
+      wtlz + "\n" + section(html, "OODLE") + "\nreturn { ensureOodle: Oodle.ensureOodle, oodleDecompress: Oodle.oodleDecompress };")();
   }
   const pub = build().html;
   let rad = null;

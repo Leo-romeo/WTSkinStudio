@@ -43,6 +43,10 @@ const R = makeReport();
 // plus the composited sheet and the three surface sheets.
 const HELPERS = `
   var sleep = function(ms){ return new Promise(function(r){ setTimeout(r, ms); }); };
+  // Two frames: what was a 300–400 ms sleep after a recovery or a load has finished (ROADMAP 0.6 (b)).
+  // Measured 2026-10-24, every check passed with no wait there at all (60 of 60, twice): "until" has
+  // already seen the slots and no pending project, and "describe" composites each slot itself.
+  var frames = function(){ return new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ r(); }); }); }); };
   var until = async function(fn, ms, what){
     var t = Date.now();
     for (;;) { var v = await fn(); if (v) return v; if (Date.now() - t > ms) throw new Error("timed out waiting for " + what); await sleep(50); }
@@ -272,7 +276,7 @@ const PHASE_C = (A) => `async function(){
   // ---- Recover: the same nodes, through ProjNode ----
   btn.click();
   await until(function(){ return Autosave.session === NEWEST.session && App.slots.size >= 2 && !App.pendingProject; }, 30000, "the recovery");
-  await sleep(400);
+  await frames();
   var got = await describe();
   out.recovered = { same: got === EXPECT, got: got === EXPECT ? "" : got, dirty: Autosave.dirty(), asks: asks(),
     noCopyDue: Autosave.rev === Autosave.copiedRev, card: getComputedStyle(document.getElementById("welcome")).display,
@@ -306,7 +310,7 @@ const PHASE_C = (A) => `async function(){
   clearProject();
   await loadProject(blob);
   await until(function(){ return App.slots.size >= 2 && !App.pendingProject && App.slots.get("t93_hull").layers.length; }, 30000, "the saved copy loading");
-  await sleep(300);
+  await frames();
   out.fileSame = (await describe()) === EXPECT;
 
   // ---- Discard deletes a session's records ----
@@ -347,7 +351,7 @@ const PHASE_C = (A) => `async function(){
 
   // ---- an index from a newer build is neither read nor overwritten ----
   var raw = await idbRaw("autosave.index");
-  var putRaw = function(v){ return idb().then(function(db){ return new Promise(function(res){ var t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, "autosave.index"); t.oncomplete = function(){ db.close(); res(); }; }); }); };
+  var putRaw = function(v){ return idb().then(function(db){ return new Promise(function(res){ var t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, "autosave.index"); t.oncomplete = function(){ res(); }; }); }); };
   await putRaw(Object.assign({}, raw, { v: 2 }));
   var off = await Autosave.offers();
   if (!App.slots.size) { await loadProject(blob); await until(function(){ return App.slots.size && !App.pendingProject; }, 30000, "a project to copy"); }
@@ -364,7 +368,8 @@ const PHASE_C = (A) => `async function(){
 
 const PHASE_D = `async function(){
   ${HELPERS}
-  await sleep(500);
+  // (A fixed 500 ms stood here for the boot's Recovery.check; pageExpr now waits on App.bootSettled,
+  // which includes it — ROADMAP 0.6 (b).)
   var off = await Autosave.offers();
   var out = { offers: off.list.length, shown: Recovery.offered.length, box: document.getElementById("welcomeRecover").style.display };
 
@@ -585,15 +590,15 @@ const r = await evalInPage({ browser, timeoutMs: 300000, keep: argv.includes("--
       await new Promise(res => setTimeout(res, 100));
     }
   };
-  const A = await evaluate(pageExpr(PHASE_A, 400), 240000);
+  const A = await evaluate(pageExpr(PHASE_A), 240000);
   if (!A || A.__threw) { A.partial = await evaluate("JSON.stringify(window.__t93out)"); return { A }; }
   const askedA = dialogs.length;
   const c2 = await reload(contextId);
-  const C = await inCtx(c2, pageExpr(PHASE_C(A), 600));
+  const C = await inCtx(c2, pageExpr(PHASE_C(A)));
   const askedC = dialogs.slice();
   if (!C || C.__threw) { C.partial = await inCtx(c2, "JSON.stringify(window.__t93out)"); return { A, C, askedA, askedC }; }
   const c3 = await reload(c2);
-  const D = await inCtx(c3, pageExpr(PHASE_D, 400));
+  const D = await inCtx(c3, pageExpr(PHASE_D));
   return { A, C, D, askedA, askedC, askedD: dialogs.slice() };
 }});
 if (!r.ok) { console.log("FAILED to drive the page: " + String(r.reason).slice(0, 600)); process.exit(1); }
@@ -632,7 +637,8 @@ R.is(A.idle.reason === "idle" && A.idle.copies === 1 && A.idle.mine && A.idle.co
 R.is(A.idle.stillDirty, "a copy is not a save: the page still asks before it closes");
 R.is(A.idle.persistAsked, "the browser is asked once to keep the copy from eviction (navigator.storage.persist)");
 // A pre-release tag is part of a version since the line restarted at 1.0.0-beta.1 (ROADMAP 5.5(5)).
-R.is(A.idle.entry === "t93|t93_skin|2|" + A.edited.layers + "|5|" + A.idle.entry.split("|")[5] &&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(A.idle.entry.split("|")[5]),
+// 8, not 5: the wing's _n was replaced from a file, so the copy stores its surface sheet (ROADMAP 1.24 (b)).
+R.is(A.idle.entry === "t93|t93_skin|2|" + A.edited.layers + "|8|" + A.idle.entry.split("|")[5] &&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(A.idle.entry.split("|")[5]),
   `the index says what the welcome card needs: vehicle, skin, slots, layers, project version, build — ${A.idle.entry}`);
 R.is(/recovery copy was kept at/.test(A.idle.dotTitle), `Save proj's tooltip says when: "${A.idle.dotTitle}"`);
 R.is(A.hidden.copies === 2 && A.hidden.shared && A.hidden.srcRecords === 1,
@@ -654,7 +660,7 @@ R.is(O.head === "Recover the session from " + O.clock, `it says when: "${O.head}
 R.is(O.detail.includes("t93") && O.detail.includes("t93_skin") && O.detail.includes(O.mb) && O.detail.includes(A.newest.layers + " layers") && O.detail.includes("2 textures"),
   `and which vehicle and how big: "${O.detail}"`);
 R.is(O.copies === 2, "with both copies behind it, so an unreadable newest one has an older one to fall back on");
-R.is(C.file.version === 5 && C.file.skin === "t93_skin" && C.file.objs === "assets/t93_0.obj" && C.file.tgas === 3 && C.file.slots === 2,
+R.is(C.file.version === 8 && C.file.skin === "t93_skin" && C.file.objs === "assets/t93_0.obj" && C.file.tgas === 3 && C.file.slots === 2,
   `"Save it as a file…" writes the .wtproj Save proj would: version ${C.file.version}, ${C.file.objs}, ${C.file.tgas} textures, ${C.file.slots} slots`);
 
 console.log("\n=== recovered: the same nodes through ProjNode ===");
@@ -690,7 +696,7 @@ R.is(!H.upAfter && H.picks === 0 && H.scans === 1,
 R.is(!/open the game folder any time/.test(H.empty), `and "Start empty" does not say the folder is still to be opened: "${H.empty}"`);
 
 // ---- B: edits with no step of their own ----
-const Bp = await evalInPage({ browser, expr: pageExpr(PHASE_B, 400), timeoutMs: 120000 });
+const Bp = await evalInPage({ browser, expr: pageExpr(PHASE_B), timeoutMs: 120000 });
 if (!Bp.ok) { console.log("FAILED to evaluate the no-step page: " + String(Bp.reason).slice(0, 400)); process.exit(1); }
 if (Bp.result.__threw) { console.log("the no-step page threw:\n" + Bp.result.__threw); process.exit(1); }
 const B = Bp.result;
@@ -715,7 +721,7 @@ R.is(B.refused.refused && /nothing paintable/.test(B.refused.said) && B.refused.
   `a stroke refused before it drew takes back the layer made for it ("${B.refused.said.slice(0, 60)}…"), so undoing the edit before it is the saved state, clean`);
 
 // ---- P: the UI thread ----
-const P = await evalInPage({ browser, expr: pageExpr(PHASE_P, 400), timeoutMs: 240000, chromeArgs: ["--js-flags=--expose-gc"] });
+const P = await evalInPage({ browser, expr: pageExpr(PHASE_P), timeoutMs: 240000, chromeArgs: ["--js-flags=--expose-gc"] });
 if (!P.ok) { console.log("FAILED to evaluate the timing page: " + String(P.reason).slice(0, 400)); process.exit(1); }
 if (P.result.__threw) { console.log("the timing page threw:\n" + P.result.__threw); process.exit(1); }
 const T = P.result, last = T.runs[T.runs.length - 1];

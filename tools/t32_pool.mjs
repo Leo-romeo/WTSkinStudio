@@ -29,9 +29,9 @@ const BODY = `async function(){
     ops: [
       "var WHO = Math.random().toString(36).slice(2);",
       "var WT_OPS = {",
-      "  encode: function(a){ var r = encodeBC3(new Uint8ClampedArray(a.rgba), a.w, a.h); return { __t: 1, result: r.buffer, transfer: [r.buffer] }; },",
+      "  encode: function(a){ var r = BCnEnc.encodeBC3(new Uint8ClampedArray(a.rgba), a.w, a.h); return { __t: 1, result: r.buffer, transfer: [r.buffer] }; },",
       "  echo: function(a){ return a.n * 2; },",
-      "  work: function(a){ var img = new Uint8ClampedArray(256*256*4); for (var i=0;i<img.length;i++) img[i] = (i*a.i) & 255; var r = encodeBC3(img, 256, 256); return { i: a.i, who: WHO, sum: r[0] + r[15] }; },",
+      "  work: function(a){ var img = new Uint8ClampedArray(256*256*4); for (var i=0;i<img.length;i++) img[i] = (i*a.i) & 255; var r = BCnEnc.encodeBC3(img, 256, 256); return { i: a.i, who: WHO, sum: r[0] + r[15] }; },",
       "  boom: function(){ throw new Error('deliberate'); }",
       "};"
     ].join("\\n")
@@ -43,7 +43,7 @@ const BODY = `async function(){
   // ---- 1. round trip ----
   out.echo = await pool.call("echo", { n: 21 });
 
-  // ---- 2. the worker's encodeBC3 must match the main thread's, byte for byte ----
+  // ---- 2. the worker's BCnEnc.encodeBC3 must match the main thread's, byte for byte ----
   var w = 64, h = 64;
   var img = new Uint8ClampedArray(w * h * 4);
   var seed = 12345;
@@ -55,7 +55,7 @@ const BODY = `async function(){
     else if (y < 32) { var on = x > 40; img[i*4] = on ? 200 : 110; img[i*4+1] = on ? 40 : 120; img[i*4+2] = on ? 35 : 82; img[i*4+3] = on ? 255 : 0; }
     else { img[i*4] = (rnd()*256)|0; img[i*4+1] = (rnd()*256)|0; img[i*4+2] = (rnd()*256)|0; img[i*4+3] = (rnd()*256)|0; }
   }
-  var here = encodeBC3(img, w, h);                        // main thread, the page's own function
+  var here = BCnEnc.encodeBC3(img, w, h);                        // main thread, the page's own function
   var sendBuf = img.slice().buffer;                       // a copy, so the source stays readable
   var got = await pool.call("encode", { rgba: sendBuf, w: w, h: h }, [sendBuf]);
   out.transferred = sendBuf.byteLength;                   // 0 iff it really was transferred
@@ -88,7 +88,7 @@ const BODY = `async function(){
   // ---- 6. the inline fallback must produce the SAME bytes ----
   var inlinePool = makeWorkerPool({
     name: "inline-test", sections: ["BCNDEC", "BCNENC"],
-    ops: "var WT_OPS = { encode: function(a){ var r = encodeBC3(new Uint8ClampedArray(a.rgba), a.w, a.h); return { __t: 1, result: r.buffer, transfer: [r.buffer] }; } };"
+    ops: "var WT_OPS = { encode: function(a){ var r = BCnEnc.encodeBC3(new Uint8ClampedArray(a.rgba), a.w, a.h); return { __t: 1, result: r.buffer, transfer: [r.buffer] }; } };"
   });
   var realWorker = window.Worker;
   window.Worker = function(){ throw new Error("simulated: no workers here"); };
@@ -114,7 +114,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -125,8 +125,8 @@ R.is(r.size === Math.max(1, Math.min(8, (r.hw || 4) - 1)), `pool size ${r.size} 
 R.is(r.echo === 42, `round trip through a worker returned ${r.echo} (expect 42)`);
 
 R.is(r.encDiff === -1 && r.encLen[0] === r.encLen[1],
-  r.encDiff === -1 ? `worker encodeBC3 is byte-identical to the main thread's (${r.encLen[0]} bytes) — the section lift is faithful`
-    : `worker encodeBC3 differs from the main thread at byte ${r.encDiff} (lengths ${r.encLen.join(" vs ")})`);
+  r.encDiff === -1 ? `worker BCnEnc.encodeBC3 is byte-identical to the main thread's (${r.encLen[0]} bytes) — the section lift is faithful`
+    : `worker BCnEnc.encodeBC3 differs from the main thread at byte ${r.encDiff} (lengths ${r.encLen.join(" vs ")})`);
 R.is(r.transferred === 0, `the source buffer was transferred, not cloned (byteLength after post = ${r.transferred})`);
 
 const inOrder = Array.from({ length: 16 }, (_, i) => i + 1);
@@ -148,7 +148,7 @@ R.is(r.inlineDiff === -1 && r.inlineLen === r.encLen[0],
 
 // Each module is one section, so a section names exactly what it holds: the encoders are in
 // BCNENC and are NOT in DDS. That is what lets the decode pool stop carrying them (ROADMAP 2.2).
-R.is(r.encInEnc, "the BCNENC section lifted out of the page contains encodeBC3");
+R.is(r.encInEnc, "the BCNENC section lifted out of the page contains BCnEnc.encodeBC3");
 R.is(r.encNotInDds, "and the DDS section does not — one module, one section, no overlap");
 R.is(r.zstdLen > 1000, `ZSTD resolved to the real section body (${r.zstdLen} chars), not the prose mention of it`);
 R.is(/is not in the page/.test(r.missing), `a missing section throws a clear error ("${r.missing}")`);

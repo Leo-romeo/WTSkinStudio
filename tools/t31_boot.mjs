@@ -46,7 +46,7 @@
 import fs from "fs";
 import path from "path";
 import { findBrowser, evalInPage, pageExpr, makeReport, ROOT } from "./headless.mjs";
-import { build } from "./build.mjs";
+import { build, inlineScript } from "./build.mjs";
 
 const argv = process.argv.slice(2);
 const browser = findBrowser(argv.includes("--chrome") ? argv[argv.indexOf("--chrome") + 1] : null);
@@ -67,7 +67,7 @@ const workersOf = run => `${run.watched.length} worker(s) watched` + (run.notes.
 
 // every one of these is load-bearing for export
 const WANT_FN = ["validateExport", "buildExportPlan", "updateExportValidation", "slotRole", "escHtml",
-  "encodeBC3", "writeDDS", "writeTGA", "padSeams", "buildMips", "collectExports", "buildBlk",
+  "BCnEnc.encodeBC3", "BCnEnc.writeDDS", "writeTGA", "padSeams", "BCnEnc.buildMips", "collectExports", "buildBlk",
   "estimateBytes", "makeWorkerPool", "pageSections", "sectionSource", "exportPool", "encodeJob"];
 const WANT_EL = ["expValidate", "expValidateSum", "expValidateList", "expWarn", "expList", "btnExport", "status"];
 
@@ -205,8 +205,8 @@ console.log("\n=== a damaged copy: three.js's script corrupted, booted with the 
 // arrive without three.js. (A copy cut short cannot: the boot guard's own script is third from the
 // end of the page, so truncation takes it before it could take three.js.)
 const page = fs.readFileSync(path.join(ROOT, "wt_skin_studio.html"), "utf8");
-const threeTag = "<script>\n" + fs.readFileSync(path.join(ROOT, "src", "vendor", `three-r${threePin}.min.js`), "utf8")
-  .replace(/\r?\n$/, "") + "\n</script>";
+const threeRel = `vendor/three-r${threePin}.min.js`;
+const threeTag = inlineScript(threeRel, fs.readFileSync(path.join(ROOT, "src", threeRel), "utf8").replace(/\r?\n$/, ""));
 const threeAt = page.indexOf(threeTag);
 R.is(threeAt > 0, `three.js's inline script is found in the page, to be damaged (at byte ${threeAt})`);
 const DAMAGED = `async function(){

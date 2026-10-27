@@ -142,6 +142,20 @@ input[type=checkbox]{accent-color:var(--accent)}
 #status{flex:1 1 0; min-width:0; text-align:left; color:var(--muted); font-size:11.5px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; border-radius:4px; padding:1px 4px}
 #status.err{color:var(--danger)} #status.ok{color:var(--ok)}
 #status:hover, #status:focus-visible{background:var(--panel2); outline:none}
+/* The version, in the status bar and on the welcome card, opens What's new and Check for updates
+   (ui/updates.js, ROADMAP 5.7). */
+.statusver{flex:0 0 auto; margin-left:6px; background:none; border:none; color:var(--muted); font-size:11px; padding:1px 4px; cursor:pointer; border-radius:4px}
+.statusver:hover, .statusver:focus-visible{color:var(--text); background:var(--panel2); outline:none}
+.updver{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px} .updver:hover{color:var(--text)}
+.updov{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:99999; display:flex; align-items:center; justify-content:center}
+.updpanel{background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:16px 20px; width:min(560px, calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow:auto; box-shadow:0 12px 48px rgba(0,0,0,.55)}
+.updpanel h3{margin:0 0 2px} .updhead{margin:14px 0 4px}
+.updnotes{font-size:12.5px; line-height:1.45} .updnotes h4{margin:10px 0 2px; font-size:12.5px} .updnotes p{margin:4px 0} .updnotes ul{margin:4px 0; padding-left:18px}
+.updnotes code{background:var(--panel2); padding:0 3px; border-radius:3px}
+.updrel{border-top:1px solid var(--border); margin-top:10px; padding-top:8px} .updrelhead{display:flex; gap:10px; align-items:baseline}
+.updok{color:var(--ok)} .updrow{display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:14px}
+.btnlike{display:inline-block; padding:5px 12px; border:1px solid var(--border); border-radius:6px; color:var(--text); text-decoration:none; background:var(--panel2)}
+.btnlike.primary{background:var(--accent2); border-color:var(--accent)}
 #status[data-clip]{text-decoration:underline dotted; text-underline-offset:3px}
 #statusLog{position:fixed; z-index:160; width:min(560px, calc(100vw - 16px)); max-height:min(60vh, 520px); display:flex; flex-direction:column;
   background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:12px; user-select:text}
@@ -203,6 +217,10 @@ input[type=checkbox]{accent-color:var(--accent)}
 .viewbtns{position:absolute; top:6px; right:8px; left:8px; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:3px; z-index:2; pointer-events:none}
 .viewbtns > *{pointer-events:auto}
 .viewbtns button{padding:2px 6px; font-size:11px}
+/* The In game switch and its settings sit bottom right, clear of the top bar, which is full at 1280 (t133). */
+.viewbtns.gamebtns{top:auto; bottom:6px; left:auto; max-width:72%; align-items:center}
+#gameBar{display:inline-flex; gap:3px; align-items:center}
+#gameReadout{font-size:11px; padding:0 4px; background:rgba(20,22,28,.7); border-radius:8px}
 /* ROADMAP 4.50 (15): with the rulers up, the 2-D view's own buttons and label move off them.
    `--ruler` is written by GuidesUI.sync, the one place the thickness is stated. */
 #view2dwrap.rulers .viewbtns{top:calc(var(--ruler) + 6px); left:calc(var(--ruler) + 8px)}
@@ -555,6 +573,16 @@ kbd{background:var(--panel2); border:1px solid var(--border); border-radius:4px;
 .stepnum{display:inline-flex; width:16px; height:16px; border-radius:50%; background:var(--accent2); color:#fff;
   font-size:11px; align-items:center; justify-content:center; margin-right:6px; flex:0 0 auto}
 /* ---- advanced-options disclosure ---- */
+/* ROADMAP 3.41: the tip preview opens a grid of every tip; the sample stroke sits on a mid-grey
+   checker, so black and white paint and a low Opacity all show. */
+.tip-pick{padding:0; flex:none; line-height:0; border:1px solid var(--border); border-radius:3px; background:none}
+.tip-pick canvas{display:block}
+.tip-grid{display:flex; flex-wrap:wrap; gap:4px; margin:-2px 0 6px; padding:4px; border:1px solid var(--border); border-radius:4px}
+.tip-grid[hidden]{display:none}
+.tip-grid button{padding:2px; line-height:0; border:1px solid transparent; border-radius:3px; background:none}
+.tip-grid button[aria-selected="true"]{border-color:var(--accent)}
+#brushSample{width:100%; height:auto; border-radius:3px;
+  background:repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0/12px 12px}
 details.adv{margin-top:6px}
 details.adv > summary{cursor:pointer; font-size:11px; color:var(--muted); user-select:none; list-style:none; padding:3px 0}
 details.adv > summary::-webkit-details-marker{display:none}
@@ -718,6 +746,11 @@ details.adv > summary:hover{color:var(--text)}
 .topwin .twfoot{display:flex; gap:6px; padding:8px 10px; border-top:1px solid var(--border); flex:0 0 auto}
 .topwin .twfoot button{flex:1 1 0; min-width:0; font-size:11px; padding:5px 6px}
 .topwin .twfoot button.primary{flex:1.4 1 0}
+/* Export and its gear read as one button (ROADMAP 3.42): squared where they meet, a hairline between. */
+.splitbtn{display:inline-flex; align-items:stretch}
+.splitbtn #btnExport{border-top-right-radius:0; border-bottom-right-radius:0; border-right-width:0}
+.splitbtn #btnExportGear{border-top-left-radius:0; border-bottom-left-radius:0; padding-left:5px; padding-right:5px;
+  box-shadow:inset 1px 0 0 rgba(255,255,255,.22); display:inline-flex; align-items:center}
 #winView, #winSettings{width:300px}
 #winView .twbody, #winSettings .twbody{flex-direction:column}
 /* The History window (ROADMAP 4.50 (15)). The list scrolls inside the window rather than growing it
@@ -758,6 +791,9 @@ details.adv > summary:hover{color:var(--text)}
 .pv .pvpair figure.chosen canvas{border-color:var(--accent)}
 .pv .pvnote, .pvnote{font-size:11px; color:var(--muted); line-height:1.4; margin:2px 0 6px}
 .pvnote:empty{display:none}
+/* One line with more in its tooltip (ui/dom.js, Tip — ROADMAP 3.44): a dotted underline says the
+   tooltip is there, the help cursor says it again under the pointer. */
+.tipmore{cursor:help; text-decoration:underline dotted; text-decoration-color:color-mix(in srgb, currentColor 45%, transparent); text-underline-offset:2px}
 /* ---- modal dialogs (decal editor, decal library) ---- */
 .modal{position:fixed; inset:0; z-index:150; background:rgba(10,12,16,.78); display:flex; align-items:center; justify-content:center}
 .modal .box{background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 18px 60px rgba(0,0,0,.6);
@@ -846,7 +882,10 @@ body.carrying canvas{cursor:copy !important}
   <input type="text" id="vehicleId" value="" placeholder="—" style="width:160px">
   <button id="btnVehicleIdEdit" style="padding:2px 5px" title="Let me type the vehicle name myself">✎</button>
   <div class="sep"></div>
-  <button id="btnExport" class="primary">Export as…</button>
+  <!-- ROADMAP 3.42: Export is one click; the gear beside its text, part of the same button to the
+       eye, opens the settings. Two buttons, not one with a gear inside it — a button cannot hold
+       another, and the gear has to be reachable by keyboard on its own. -->
+  <span id="btnExportGroup" class="splitbtn"><button id="btnExport" class="primary">Export</button><button id="btnExportGear" class="primary" title="Export settings — format, mipmaps, which textures, Download .zip and Save project"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.2v2.1M8 12.7v2.1M1.2 8h2.1M12.7 8h2.1M3.2 3.2l1.5 1.5M11.3 11.3l1.5 1.5M3.2 12.8l1.5-1.5M11.3 4.7l1.5-1.5"/><circle cx="8" cy="8" r="4.6"/></svg></button></span>
   <button id="btnSaveProj" title="Save project (.wtproj) — reload it later via Add files">Save proj</button>
   <div class="sep"></div>
   <button id="btnUndo" title="Undo (Ctrl+Z)">↶</button>
@@ -916,6 +955,7 @@ body.carrying canvas{cursor:copy !important}
               <select id="gameQuality" style="flex:1"><option value="auto">Auto (best)</option><option value="hq">HQ</option><option value="base">Base (smaller)</option></select></div>
             <div class="row"><button id="btnFillFromGame" style="flex:1" title="Load the best game texture for every slot that is still missing one" disabled>Fill missing slots</button></div>
             <div class="row"><button id="btnRescan" style="flex:1" title="Read every pack again from scratch. The index is stored between visits and refreshes itself when the game is patched or a content pack is installed or removed, so you only need this if you have changed files by hand.">Rescan install</button></div>
+            <div class="row"><button id="btnLinkedFolder" style="flex:1" title="For an install with folders moved to another drive and left as links (junctions): the browser will not follow a link, so pick the folder the links point at and it is read as part of the install. Remembered with the game folder.">Add linked folder…</button></div>
             <div class="row"><button id="btnForgetFolder" style="flex:1" title="Forget the remembered game folder and cached index">Forget folder &amp; cache</button></div>
             <!-- ROADMAP 3.28(2). This used to print under the search box, in the reading path of
                  every search: "N of M entries not decodable — unknown formats: …". It is a fact
@@ -1024,6 +1064,7 @@ body.carrying canvas{cursor:copy !important}
             <option value="metal">Metalness</option>
             <option value="normal">Normal</option>
             <option value="wear">Wear / coverage</option>
+            <option value="levels" title="Each mip level of the sheet as one flat colour with its number — the colour you see is the level the GPU samples there, under the In game settings when they are on. Walk the camera away, or tilt a surface, to see each level take over.">Mip levels</option>
           </optgroup>
           <optgroup label="Albedo _c bytes">
             <option value="c:r">_c red</option>
@@ -1033,13 +1074,22 @@ body.carrying canvas{cursor:copy !important}
           </optgroup>
           <optgroup label="Surface _n bytes">
             <option value="n:r">_n red (inv. roughness)</option>
-            <option value="n:g">_n green (normal X)</option>
+            <option value="n:g">_n green (normal Y)</option>
             <option value="n:b">_n blue (metalness)</option>
-            <option value="n:a">_n alpha (normal Y)</option>
+            <option value="n:a">_n alpha (normal X)</option>
           </optgroup>
         </select>
         <button id="btnCompare" title="Hold to see the original (or hold ` key)">Compare</button>
         <button id="btnPaint3d" title="Painting on / off (B) — the same switch as the one under the brush, and it covers both views">Paint: off</button>
+      </div>
+      <div class="viewbtns gamebtns" id="gameBtns">
+        <span id="gameBar" style="display:none">
+          <select id="gameQual" title="Texture quality. Medium and Low drop the top one or two mip levels of the game\'s own textures: the sharpest go, the further ones stay where they were. Whether a UserSkin is treated so is not measured yet, so High is the default."><option value="0" selected>High</option><option value="1">Medium</option><option value="2">Low</option></select>
+          <select id="gameScreen" title="The screen the game runs on. A taller screen keeps each mip level until further away."><option value="1080">1080p</option><option value="1440" selected>1440p</option><option value="2160">4K</option></select>
+          <select id="gameDist" title="Put the camera this far from the point it turns around"><option value="" selected disabled>Distance…</option><option value="8">3rd person · 8 m</option><option value="50">50 m</option><option value="200">200 m</option><option value="1000">1 km</option></select>
+          <span id="gameReadout" class="hint" title="The camera's distance from the point it turns around, in metres"></span>
+        </span>
+        <button id="btnInGame" title="Show the skin as the game samples it: x1 filtering (the anisotropy setting does not reach UserSkins), only the mip levels the export writes (none with Mipmaps off), the texture quality and screen you pick, and the distance in metres.">In game</button>
       </div>
       <canvas id="view3d"></canvas>
     </div>
@@ -1050,6 +1100,7 @@ body.carrying canvas{cursor:copy !important}
         <button id="btnPaint2d" title="Painting on / off (B) — the same switch as the one in the 3D view">Paint: off</button>
         <button id="btnSel2d" title="Rectangular selection (M). While it is on, a drag here makes or adjusts a rectangle instead of painting. The selection stays when you switch it off, and confines the brush in both views until you clear it.">Select: off</button>
         <button id="btnUv">UV islands</button>
+        <select id="lvl2dSel" title="Show one mip level of the sheet, scaled up texel for texel — what the game draws at a distance. Strokes still land on the layer at full size."><option value="0" selected>Level 0</option></select>
         <button id="btnGrid2d" title="Pixel grid (Ctrl+') — the edge of every texel, drawn once you zoom in past 600 %">Grid</button>
         <button id="btnGuides2d" title="Rulers and guides (Ctrl+;) — drag out of a ruler to add a guide. The marquee, the shape tool and flat decals snap to guides; hold Ctrl to place freely.">Guides</button>
         <button id="btnGuidesClear" hidden title="Remove every guide on this texture — one undo step">Clear guides</button>
@@ -1061,7 +1112,7 @@ body.carrying canvas{cursor:copy !important}
       <div class="card" style="max-width:560px">
         <h1>WT <span>Skin Studio</span></h1>
         <p>Browser editor for War Thunder user skins. Everything stays on your machine.</p>
-        <p class="hint" id="buildStamp" style="margin-top:-6px"></p>
+        <p class="hint updver" id="buildStamp" style="margin-top:-6px" role="button" tabindex="0" title="What's new in this build, and Check for updates"></p>
         <div id="welcomeRecover" style="display:none"></div>
         <div id="welcomeHome">
           <button class="big primary wopt" id="btnWelcomeGame">Open War Thunder folder
@@ -1096,6 +1147,7 @@ body.carrying canvas{cursor:copy !important}
         <button data-bm="flatten" data-need="n" title="Flatten bumps back to a smooth surface — useful to remove the baked-in mud on old tank models">Flatten normal</button>
         <button data-bm="height" data-need="n" title="Carve a groove or raise a ridge in the surface — for panel lines and rivets">Panel line</button>
         <button data-bm="cloneN" data-need="n" title="Copy the normal map from elsewhere on the sheet — a row of rivets or a panel line the model already has, onto where one is missing. Alt-click sets the source, then paint where the copy should go.">Clone normal</button>
+        <button data-bm="retouch" data-need="paintable" title="Blur, sharpen, smudge, dodge (lighten) or burn (darken) the colour under the brush — pick which below. It reads the sheet as it was when the stroke began and paints the result onto a paint layer, so a stroke is one pass however often it goes over a spot.">Retouch</button>
         <button data-bm="mask" data-need="layer" title="Hide or reveal parts of the active layer without deleting them">Mask</button>
       </div>
       <!-- Under the tools it explains (2026-10-10): it sat after Tip dynamics, 337 px below them. -->
@@ -1105,6 +1157,12 @@ body.carrying canvas{cursor:copy !important}
         <span class="hint" style="margin:0 0 0 4px" id="pickHint">Alt-click picks</span></div>
       <div class="row" id="rowClone" style="display:none"><label title="Shift each copy to the tone under the brush — the mean of the destination replaces the mean of the source, so a rivet taken from a sunlit panel lands the right grey on a shaded one. Off, the copy is exact."><input type="checkbox" id="brushHeal"> Match tone</label>
         <span class="hint" style="margin:0 0 0 4px" id="cloneHint">Alt-click sets the source</span></div>
+      <!-- ROADMAP 4.50 (11): the Retouch brush's kind, how strongly, and for dodge and burn the tones. -->
+      <div class="row" id="rowRetouch" style="display:none"><label title="What the Retouch brush does to the colour under it">Retouch</label>
+        <select id="brushRetouch" style="flex:1;min-width:0" title="Blur softens, Sharpen brings out edges, Smudge drags colour along the stroke, Dodge lightens and Burn darkens"><option value="blur" selected>Blur</option><option value="sharpen">Sharpen</option><option value="smudge">Smudge</option><option value="dodge">Dodge (lighten)</option><option value="burn">Burn (darken)</option></select></div>
+      <div class="row" id="rowStrength" style="display:none"><label title="How strongly: Blur's reach (an eighth of the brush size at 100), Sharpen's amount (200 % at 100), how much of its colour Smudge carries on, how far Dodge and Burn move a tone">Strength</label><input type="range" id="brushStrength" min="1" max="100" value="50"><span class="val" id="brushStrengthVal">50</span></div>
+      <div class="row" id="rowRange" style="display:none"><label title="Which tones Dodge and Burn move most: the dark ones, the middle ones or the light ones">Tones</label>
+        <select id="brushRange" style="flex:1;min-width:0"><option value="shadows">Shadows</option><option value="mids" selected>Midtones</option><option value="highs">Highlights</option></select></div>
       <div class="row" id="rowValue" style="display:none"><label>Value</label><input type="range" id="brushValue" min="0" max="255" value="128"><span class="val" id="brushValueVal">128</span></div>
       <div class="row"><label>Size</label><input type="range" id="brushSize" min="2" max="400" value="48" title="Brush diameter in texture pixels — [ and ] or Ctrl+wheel"><span class="val" id="brushSizeVal">48</span></div>
       <div class="row"><label>Opacity</label><input type="range" id="brushOpacity" min="1" max="100" value="100" title="The most one stroke lays down, however often it crosses itself — unless Build up is on"><span class="val" id="brushOpacityVal">100</span></div>
@@ -1116,13 +1174,17 @@ body.carrying canvas{cursor:copy !important}
       <!-- ROADMAP 4.50 (10): the shape each dab is laid in (editor/tips.js), remembered per tool. The
            loaded tips are listed after the four built in, by BrushPanel.tipOptions. -->
       <div class="row" id="rowTip"><label title="The shape each dab is laid in. A tip is coverage: where its picture is darker, more paint lands — so a rivet's highlight lays less. Each tool keeps its own tip">Tip</label>
-        <canvas id="tipPreview" width="22" height="22" title="The tip as it lays paint: solid is full paint, clear is none" style="border:1px solid var(--border);border-radius:3px;flex:none"></canvas>
+        <button id="btnTipPick" class="tip-pick" aria-haspopup="listbox" aria-expanded="false" aria-controls="tipGrid" title="The tip as it lays paint: solid is full paint, clear is none. Click to pick a tip by its look"><canvas id="tipPreview" width="22" height="22" aria-hidden="true"></canvas></button>
         <select id="brushTip" style="flex:1;min-width:0" title="Round is the brush as it always was. Square, Rivet and Chip are made at the brush's size; tips you load are listed after them">
           <option value="round" selected>Round</option><option value="square">Square</option><option value="rivet">Rivet</option><option value="chip">Chip</option></select>
         <button id="btnTipLoad" style="padding:1px 6px" title="Load an image as a tip: a shape on a transparent background, dark on light, or light on dark. It is kept in this browser beside the decal library, and travels with a settings export">Load…</button>
         <button id="btnTipDel" style="padding:1px 5px" aria-label="Remove this tip" title="Remove this tip from the library — the tools that used it go back to Round" disabled><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
         <input type="file" id="tipPick" accept="image/*" style="display:none"></div>
-      <div class="row"><label>Spacing</label><input type="range" id="brushSpacing" min="5" max="100" value="35" title="How far apart stamps sit along a stroke, as a percentage of the brush size. Below about 40% a stroke looks solid; above it the edge starts to scallop, and at 100% the stamps barely touch."><span class="val" id="brushSpacingVal">35</span></div>
+      <!-- ROADMAP 3.41 (1): every tip by its look, built-in and loaded, opened from the preview. -->
+      <div id="tipGrid" class="tip-grid" role="listbox" aria-label="Brush tips" hidden></div>
+      <!-- ROADMAP 3.41 (3): a short stroke laid by the real dab code with every setting below. -->
+      <div class="row" id="rowSample"><canvas id="brushSample" width="240" height="44" title="A sample stroke with this brush — its tip, spacing, flow, dynamics and colour, laid by the same code a stroke uses. Size is scaled down to fit"></canvas></div>
+      <div class="row"><label>Spacing</label><input type="range" id="brushSpacing" min="5" max="100" value="15" title="How far apart stamps sit along a stroke, as a percentage of the brush size. Lower follows the pointer more closely and firms a soft edge a little; above about 40% the edge scallops, and at 100% the stamps barely touch. Panel line starts at 35: its stamps add up, so lower carves deeper."><span class="val" id="brushSpacingVal">15</span></div>
       <div class="row"><label>Smoothing</label><input type="range" id="brushLazy" min="0" max="100" value="0" title="A lazy mouse: the brush trails the pointer on a string this many screen pixels long, so a shaky hand draws a steady line and a corner comes out rounded. Off at 0"><span class="val" id="brushLazyVal">off</span></div>
       <div class="row wrap" id="rowPen"><label title="What a pen's pressure changes, for this tool. Only a pen or stylus reports pressure — a mouse always paints at the full size and flow. The curve is under More brush options">Pressure</label>
         <label title="Pressing harder makes each dab bigger, up to Size"><input type="checkbox" id="penSize" checked> size</label>
@@ -1137,6 +1199,25 @@ body.carrying canvas{cursor:copy !important}
         <div class="row" id="rowAngle"><label title="Turns the tip, in degrees, clockwise on the sheet">Angle</label><input type="range" id="brushAngle" min="0" max="359" value="0"><span class="val" id="brushAngleVal">0</span></div>
         <div class="row" id="rowAngleJit"><label title="Each dab is turned at random by up to this share of half a turn — at 100 any angle at all">Angle jitter</label><input type="range" id="brushAngleJit" min="0" max="100" value="0"><span class="val" id="brushAngleJitVal">0</span></div>
         <div class="row" id="rowFollow"><label title="Turn each dab to face the way the stroke is going, plus Angle — rivets and stitching that follow a curve, with the shape tool's Stamp along as well"><input type="checkbox" id="brushFollow"> Angle follows the stroke</label></div>
+        <!-- ROADMAP 4.56: the colour changes as the stroke goes — a holographic rainbow in one stroke. -->
+        <div class="row" id="rowCycle"><label title="The colour changes as the stroke goes, by distance painted: Hue turns the brush colour round the colour wheel, a preset runs through its colours and back. Colour brush only">Colour along</label>
+          <select id="brushCycle" style="flex:1;min-width:0" title="What the colour runs through along a stroke"><option value="off" selected>Off</option><option value="hue">Hue</option></select></div>
+        <div class="row" id="rowCycleLen"><label title="How long one cycle is, in brush sizes, so it reads the same at any brush size: Hue comes round to the brush colour again after it, a preset reaches its last colour after it and is back at its first after two">Cycle every</label><input type="range" id="brushCycleLen" min="1" max="100" value="10"><span class="val" id="brushCycleLenVal">10</span></div>
+        <div class="hint" id="cycleHint" style="display:none"></div>
+      </details>
+      <!-- ROADMAP 4.55: the pattern brush — a stroke on the model reveals whole cells of a lattice. -->
+      <details class="adv" id="brushPat">
+        <summary title="A honeycomb or its kin, revealed cell by cell where a stroke on the model passes: whole cells, lined up across strokes, part seams and UV islands">Pattern</summary>
+        <div class="row"><label title="The lattice a stroke reveals, whole cells at a time — Off paints the brush colour. Colour brush, in the 3-D view, with the Projected 3-D brush on">Cells</label>
+          <select id="brushPatKind" style="flex:1;min-width:0"><option value="off" selected>Off</option><option value="hex">Hexagons</option><option value="square">Squares</option><option value="diamond">Diamonds</option><option value="triangle">Triangles</option><option value="scale">Scales</option></select></div>
+        <div id="patRows" style="display:none">
+          <div class="row"><label title="Each cell's inside: its colour, and whether it is drawn at all — off leaves only the border"><input type="checkbox" id="brushPatFillOn" checked> Cell fill</label><input type="color" id="brushPatFill" value="#262a30"></div>
+          <div class="row"><label title="The line round each cell: its colour, and whether it is drawn at all"><input type="checkbox" id="brushPatBorderOn" checked> Border</label><input type="color" id="brushPatBorder" value="#d8dde4"></div>
+          <div class="row"><label title="The border's width, as a share of a cell's side">Border width</label><input type="range" id="brushPatWidth" min="0" max="50" value="8"><span class="val" id="brushPatWidthVal">8%</span></div>
+          <div class="row"><label title="How wide one tile of the lattice is on the vehicle, in metres — a fill's lattice along the model with the same Size and Angle has the same cells">Size</label><input type="number" id="brushPatSize" min="0.01" max="100" step="0.01" value="0.3" style="flex:1;min-width:0"><span class="val">m</span></div>
+          <div class="row"><label title="Turns the lattice on the model, in degrees">Angle</label><input type="range" id="brushPatAngle" min="-180" max="180" value="0"><span class="val" id="brushPatAngleVal">0°</span></div>
+        </div>
+        <div class="hint" id="patHint" style="display:none"></div>
       </details>
       <div class="row"><label title="Mirror every stroke across the vehicle's centreline so both sides match — in the 3-D view, and on the sheet as well (the first sheet stroke needs a moment to read where each texel sits on the vehicle)"><input type="checkbox" id="symOn"> Symmetry</label>
         <select id="symAxis" title="Which plane to mirror across — Auto detects it from the model"><option value="auto">Auto axis</option><option value="x">X plane</option><option value="y">Y plane</option><option value="z">Z plane</option></select></div>
@@ -1147,12 +1228,20 @@ body.carrying canvas{cursor:copy !important}
         <button id="btnRadialCentre" title="Then click the model: that point is the centre the copies turn about" style="padding:1px 6px;font-size:11px">Set centre…</button></div>
       <div class="row"><label title="When to show the translucent quad that marks the mirror plane. It tints whatever is behind it, so keep it hidden while you paint.">Mirror plane</label>
         <select id="symPlaneVis" title="Show the mirror plane: while you are adjusting symmetry (it fades after a moment), always, or never"><option value="adjust" selected>While adjusting</option><option value="always">Always</option><option value="off">Never</option></select></div>
+      <div class="row" style="margin-top:4px"><label title="Colours to paint with: the ones you used last, a palette of your own, or a published paint standard — RLM, FS 595, ANA, RAL and the Soviet enamels">Swatches</label>
+        <select id="swLib" style="flex:1;min-width:0" title="Which colours the chips below show. A paint standard's chips are sRGB approximations of its paint samples."></select>
+        <button id="btnRefWin" title="Reference images: a window of photos or colour charts to paint from — zoom, pan, and click a colour to take it for the brush. Local files only.">Reference…</button></div>
       <div id="palette" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px"></div>
+      <div class="hint" id="swNote" style="display:none"></div>
       <details class="adv">
         <summary>More brush options</summary>
         <div class="row"><label>Axis offset</label><input type="range" id="symOff" min="-100" max="100" value="0" step="1" title="Nudge the mirror plane if the model isn't centred"><span class="val" id="symOffVal">0</span></div>
         <div class="row"><label title="How hard a pen has to press. Soft: a light touch already paints most of the size and flow. Firm: the full amount takes a firm press. One curve for every tool">Pressure curve</label>
           <select id="penCurve" style="flex:1"><option value="0.5">Soft</option><option value="1" selected>Linear</option><option value="2">Firm</option></select></div>
+        <!-- ROADMAP 1.19 + 1.20 + 4.51: the projected brush, on by default since slice (e) (2026-10-24). -->
+        <div class="row"><label title="3-D view: each dab covers what is under the ring as the camera sees it — across part seams and UV islands, never round an edge you cannot see. Every tool but the Clone and Retouch. Off: each dab is a disc on the texture round the point you click"><input type="checkbox" id="brushProj" checked> Projected 3-D brush</label></div>
+        <div class="row"><label title="How steep a surface the projected brush still paints: one turned further than this from the camera takes nothing, and paint fades in over the 15° before it, so a curve's silhouette has a soft edge. Lower keeps paint off surfaces you see at a glancing angle; 90° paints right up to the edge">Facing limit</label>
+          <input type="range" id="brushFace" min="45" max="90" value="85" step="1" title="The steepest angle between a surface and the view that still takes paint (default 85°)"><span class="val" id="brushFaceVal">85°</span></div>
       </details>
       <div class="hint">Panel line: a value below 128 carves a groove, above 128 raises a ridge. Mask: paint hides, Alt-paint reveals.</div>
     </div>
@@ -1161,14 +1250,24 @@ body.carrying canvas{cursor:copy !important}
       <!-- ROADMAP 6.1. A camouflage blotch is a closed path; a run of rivets is the same path with
            the brush walked along it. Both verbs are here for that reason. -->
       <div class="row wrap"><label title="Draw a path on the 2-D sheet or on the model in 3-D: click to place points, drag as you click to curve, click the first point to close it. Then fill it, or walk the brush along it. On the model, clicks off it still orbit, and the path is aimed the way the view faced at its first point.">Shape tool</label>
-        <button id="btnPathTool" title="Click points on the 2-D view or on the model. Drag a point to move it, drag its handle to curve, Ctrl+drag a point to pull a handle out, Alt+click to remove one, Backspace drops the last, Esc starts over. A path stays in the view it was started in.">Shape: off</button>
+        <button id="btnPathTool" title="Click points on the 2-D view or on the model; click the line to put one in it. Drag a point to move it, its handle to curve; Ctrl+drag pulls a handle out. Delete (or Alt+click) removes the selected point, Backspace the last, Esc starts over. A path stays in the view it was started in.">Shape: off</button>
         <span class="val" id="pathInfo">no points yet</span></div>
-      <div class="row" id="pathRow2" style="display:none">
+      <div class="row wrap" id="pathRow2" style="display:none">
         <button id="btnPathFill" title="Fill the closed path on the layer you are painting, in the brush's colour and opacity — one fill, so the edge is clean. A path on the model is projected along the view direction at its first point, so it crosses UV seams, and stops at the first surface and near the depth its points were placed at.">Fill</button>
         <button id="btnPathStamp" title="Walk the current brush along the path at its own Spacing — rivets, a panel line that follows a curve, on any channel. On the model each stamp lands on the surface under the path, with Symmetry and radial copies as for a stroke.">Stamp along</button>
         <button id="btnPathSel" title="Turn the closed path into a selection: the brush, Fill, Clear, Crop and Copy then follow its shape. Shift+click adds it to what is selected, Alt+click takes it away. A path on the model is projected onto the sheet the way Fill projects it.">→ selection</button>
+        <button id="btnPathXf" title="Move, scale or turn the whole path: drag inside its box, a corner, or the knob above it (Shift turns in 15° steps). A path layer redraws as it goes. On the sheet only" disabled>Move · scale · turn</button>
+        <button id="btnPathDel" title="Remove the selected point — the one last clicked, drawn larger. The Delete key and Alt+click do the same" disabled>Delete point</button>
         <button id="btnPathClear" title="Throw the path away (Esc)">Clear</button></div>
-      <div class="hint">Click the sheet or the model to add points, drag to curve · click the first to close · <b>Ctrl+drag</b> reshapes · Alt+click removes · Backspace drops the last · Esc clears</div>
+      <!-- ROADMAP 4.52 (1): a curve's look, which rides on the path. -->
+      <div class="row" id="pathRow5" style="display:none"><label title="Fill and Stamp along with the Brush make a path layer of their own: it keeps the path, and moving a point redraws it. Off, they paint into the selected layer once, as before. A path on the model is always painted once"><input type="checkbox" id="pathAsLayer" checked> as a layer you can reshape</label></div>
+      <div class="row wrap" id="pathRow6" style="display:none"><label>Preset</label><select id="pathPreset" style="flex:1;min-width:0" title="Your saved paths, kept in this browser beside the decal library. A path layer's preset keeps its fill or stamp and the brush; a path saved before it was filled keeps the path alone"><option value="">no presets yet</option></select>
+        <button id="btnPathSave" title="Save the path as a preset — a path layer with its fill or stamp and its brush, so Use lays it again exactly" disabled>Save</button>
+        <button id="btnPathUse" title="Lay the preset on the selected texture: a path layer of its own, or the path alone to fill or stamp. Scaled to this texture's size" disabled>Use</button>
+        <button id="btnPathForget" aria-label="Forget this preset" title="Forget this preset — it is removed from this browser's library" disabled><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button></div>
+      <div class="row" id="pathRow3" style="display:none"><label>Angle</label><input type="range" id="pathAngle" min="0" max="90" value="0" title="How far a curve may turn inside one straight piece. 0 is smooth. Raise it for a deliberately low-poly curve: at 30° a quarter circle is three pieces, at any size. Applies to the path being drawn"><span class="val" id="pathAngleVal">smooth</span></div>
+      <div class="row" id="pathRow4" style="display:none"><label>Bias</label><input type="range" id="pathBias" min="-100" max="100" value="0" title="Where an angled curve's pieces bunch: right of centre towards each segment's start, left towards its end, 0 evenly. Needs Angle above 0"><span class="val" id="pathBiasVal">even</span></div>
+      <div class="hint">Click to add points, drag to curve · click the line to insert one · click the first to close · <b>Ctrl+drag</b> reshapes · <b>Delete</b> removes the selected point · Esc clears</div>
     </div>
     <div class="section" id="selSection">
       <h3>Selection</h3>
@@ -1185,9 +1284,11 @@ body.carrying canvas{cursor:copy !important}
         <button id="btnSelIsland" title="Select whole UV islands (K). A click takes the island under the pointer (2D view, or Ctrl+click on the model); Shift+click adds, Alt+click removes — to and from any selection, not only islands. A mirrored island covers both sides of the vehicle.">Islands: off</button>
         <button id="btnSelLasso" title="Lasso (L). Drag round an area for a freehand outline, closed when you let go — or click corner by corner and close on the first corner, a double-click or Enter. Shift at the first press adds, Alt takes away; Backspace takes a corner back, Esc drops the outline.">Lasso: off</button>
         <button id="btnSelWand" title="Magic wand (W). Click a colour on the sheet, or Ctrl+click it on the model, to select everything within Tolerance of it — only the patch you clicked with Contiguous on, that colour anywhere on the sheet with it off. It reads the sheet the 2-D view shows. Shift+click adds, Alt+click takes away.">Wand: off</button>
-        <button id="btnSelToParts" title="The other direction: select every model part the chosen UV islands touch, replacing the current part selection. Use it to widen an island pick back out to whole parts, or to see on the model which parts a shell belongs to.">→ parts</button></div>
+        <button id="btnSelToParts" title="The other direction: select every model part the chosen UV islands touch, replacing the current part selection. Use it to widen an island pick back out to whole parts, or to see on the model which parts a shell belongs to.">→ parts</button>
+        <button id="btnSelShow" title="Hide the selection's outline and tint in both views, and the selected decal's outline on the model, so you can judge the texture under it (H). The selection stays and still limits the brush; a new selection shows itself again.">Hide</button></div>
       <div class="row" id="selWandRow" style="display:none"><label title="How far a texel's colour may be from the one you click and still be selected: the largest difference in any one channel, 0–255. 0 takes exactly that colour.">Tolerance</label><input type="range" id="selTol" min="0" max="255" value="32" title="How far a colour may be from the one you click and still be selected — 0 is that exact colour, 255 is everything"><span class="val" id="selTolVal">32</span>
-        <label title="On: only the patch you click, connected edge to edge (two patches touching at a corner stay two). Off: every texel of that colour anywhere on the sheet — Photoshop's Colour Range."><input type="checkbox" id="selContig" checked> Contiguous</label></div>
+        <label title="On: only the patch you click, connected edge to edge (two patches touching at a corner stay two). Off: every texel of that colour anywhere on the sheet — Photoshop's Colour Range."><input type="checkbox" id="selContig" checked> Contiguous</label>
+        <label title="Also take the soft edge round what you click: the ring of texels that are part this colour and part the one beside it. Without it a fill leaves a ragged ring of the old colour round the new one. It adds only texels that mix the two, never plain background."><input type="checkbox" id="selEdge" checked> Edge</label></div>
       <div class="hint" id="selInfo"></div>
       <div class="row"><span class="hint" id="selGrainLabel" style="flex:1;margin:0" title="Which grain these three act on: the area while Select is on, the parts otherwise"></span>
         <button id="btnSelAll" title="Select everything of the live grain — the whole sheet while Select is on (Ctrl+A), every part otherwise">All</button>
@@ -1260,6 +1361,7 @@ body.carrying canvas{cursor:copy !important}
           <option value="edge" selected>From the edge (sticker rim)</option>
           <option value="bevel">Bevelled body (no file needed)</option>
           <option value="map">Depth or normal map…</option>
+          <option value="gen">Generated from the image (no file needed)</option>
         </select></div>
       <div class="row"><label title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse.">Gloss</label>
         <select id="reliefGloss" style="flex:1" title="How the Look's Gloss spreads over the marking.&#10;Evenly — the same everywhere.&#10;Light parts — white ink glossy, black ink matte.&#10;Dark parts — the reverse."><option value="cover" selected>Evenly over the marking</option><option value="light">Follows the light parts</option><option value="dark">Follows the dark parts</option></select></div>
@@ -1268,6 +1370,11 @@ body.carrying canvas{cursor:copy !important}
       <div id="rowDepth" style="display:none">
         <div class="row"><button id="btnDepthLoad" style="flex:1" title="Load a greyscale height map (from a depth-estimation tool, say) or a normal map, which is turned into height. It is stretched onto the decal, so match its shape. PNG, JPG or WEBP.">Load depth or normal map…</button>
           <button id="btnDepthClear" title="Forget the map and go back to the outline">✕</button></div>
+        <!-- ROADMAP 4.19 (6): a height made from the decal's own image, softened, previewed. -->
+        <div class="row"><button id="btnDepthGen" style="flex:1" title="Make a depth map from the decal's own image: light parts high, transparent parts the surface, softened so edges slope. A starting point — right for lettering, stencils and printed markings, wrong wherever a dark colour is not a hollow. Invert turns it over.">Generate from the image</button>
+          <canvas id="depthPreview" width="40" height="40" title="The height map the relief is read from: light is high" style="flex:none;border:1px solid var(--border);border-radius:3px;background:#000"></canvas></div>
+        <div class="row"><label title="How far the generated height slopes away from a hard ink edge, in texels of the map (at most 1024 on its longer side). Moving it remakes a generated map.">Soften</label>
+          <input type="range" id="depthGenSoft" min="0" max="16" value="2"><span class="val" id="depthGenSoftVal">2</span></div>
         <div class="row"><label title="What the loaded file is. It is worked out when the file is loaded — a normal map by its colours, and which way its green channel points by which reading makes a consistent surface — and can be changed here if that got it wrong.">File is</label>
           <select id="depthKind" style="flex:1" title="Depth map — greyscale, light is high.&#10;Normal map, DirectX — green points down (War Thunder's own _n maps).&#10;Normal map, OpenGL — green points up (Blender, many online tools).&#10;If the relief looks inverted along one direction only, pick the other normal-map type."><option value="depth">a depth map (light is high)</option><option value="normal-dx">a normal map, DirectX (green down)</option><option value="normal-gl">a normal map, OpenGL (green up)</option></select></div>
         <div class="row"><label style="font-size:11.5px" title="Depth tools disagree about which end is near. This expects light = near; if ridges come out as grooves, tick it."><input type="checkbox" id="reliefInvert"> Invert (dark = high)</label>
@@ -1308,6 +1415,7 @@ body.carrying canvas{cursor:copy !important}
     </div>
     <div class="section" id="secExport">
       <h3>Skin &amp; export <span class="mini"><button class="prefreset" data-sec="export" title="Put the export settings back to the defaults this build ships">Reset</button></span></h3>
+      <div id="expZipNote" class="hint" style="display:none"></div>
       <div class="row"><label title="Which real in-game vehicles this skin will be installed for. War Thunder picks a skin up by the unit name of the .blk file, which is usually NOT the 3D model's name.">Applies to</label>
         <span class="val" id="unitCount" style="margin-left:auto">—</span></div>
       <div id="unitList" class="hint">Load a vehicle to see which in-game vehicles this skin covers.</div>
@@ -1339,6 +1447,9 @@ body.carrying canvas{cursor:copy !important}
         <input type="range" id="camoTileScale" min="20" max="200" step="2" value="100" title="Camouflage scale as the hangar slider sets it, 20 %–200 % — preview only, the player owns it"><span class="val" id="camoTileScaleVal">100%</span>
         <input type="range" id="camoTileRot" min="-180" max="180" step="1" value="0" title="Camouflage rotation as the hangar slider sets it, ±180° — preview only, the player owns it"><span class="val" id="camoTileRotVal">0°</span>
         <button id="btnCamoTileEdit" title="Open the tile in the 2-D view — it is drawn 3 × 3 there, and every stroke wraps at its edges">Edit tile</button></div>
+      <div class="row" id="rowCamoCal" style="display:none"><label title="Check the camouflage's scale against the game: put this on the tile, export the skin under a new name, and compare where the numbered cells land on the hull in the hangar with where they land here.">Scale check</label>
+        <button id="btnCamoTileCal" title="Fill the tile with a mid-grey grid of 16 numbered cells, a red frame on its edge (one red square is one repeat) and an arrow in cell 1 pointing to +v — down the picture, the way a DDS's rows run. While it is in, this button reads Remove grid and puts back the base it covered, even after other edits.">Calibration grid</button></div>
+      <div id="camoTileInfo" class="hint" style="display:none"></div>
       <div id="camoPinInfo" class="hint" style="display:none"></div>
       <div class="row"><label>Preset</label><select id="expPreset" style="flex:1" title="Game = BC3 albedo, uncompressed normal. WT Live = smaller. Lossless = biggest.">
         <option value="game">Game (quality)</option>
@@ -1356,11 +1467,21 @@ body.carrying canvas{cursor:copy !important}
         <summary id="expValidateSum"></summary>
         <div id="expValidateList"></div>
       </details>
+      <!-- ROADMAP 4.50 (13): the Market's rules a file cannot show, beside the ones the list above
+           checked. The ticks are the author's own and are not saved. Bound in ui/panels/export.js. -->
+      <details id="expMarket" class="vchk">
+        <summary id="expMarketSum" title="The WT Live market's rules that no file can show — the list above is what the app checked">For WT Live — only you can confirm</summary>
+        <div class="row"><label title="The Market shows a 16:9 picture of the skin. The screenshot button in the 3-D view's bar has a Market preview that frames and writes one."><input type="checkbox" class="mktChk"> A 16:9 preview image (screenshot ▸ Market preview)</label></div>
+        <div class="row"><label title="A camouflage presented as historical is checked against photos of the real vehicle — attach them to the upload."><input type="checkbox" class="mktChk"> Reference photos, if the scheme is historical</label></div>
+        <div class="row"><label title="No real brands, company logos or trademarks, and no symbols the game bans — the Market refuses them whatever the rest of the skin is like."><input type="checkbox" class="mktChk"> No trademarks, logos or banned symbols</label></div>
+        <div class="row" id="expMarketInv"><label title="These textures carry inverted roughness (Advanced export), which every skin made since 2022 does — the upload form has a box for it, and without it the game reads the gloss backwards."><input type="checkbox" class="mktChk"> “Inverted roughness” ticked on the upload form</label></div>
+        <div class="hint">One archive per vehicle, only the textures its .blk names, and plain names: <b>Zip for WT Live</b> below does those.</div>
+      </details>
       <details class="adv">
         <summary>Advanced export</summary>
         <div class="row"><label>Albedo</label><select id="expAlbFmt" disabled><option value="bc3">DDS BC3</option><option value="rgba8">DDS RGBA8</option><option value="tga">TGA</option></select></div>
         <div class="row"><label>Normal</label><select id="expNrmFmt" disabled><option value="rgba8">DDS RGBA8</option><option value="bc3">DDS BC3</option><option value="tga">TGA</option></select></div>
-        <div class="row"><label><input type="checkbox" id="optMips" checked title="Smaller copies of the texture for distant views; they reduce shimmer. Optional — the game accepts a skin without them.&#10;&#10;Turn OFF if you play with the older-video-card support option: it makes mipmapped angled surfaces look blurry."> Mipmaps</label>
+        <div class="row"><label><input type="checkbox" id="optMips" title="Off by default. Mipmaps are smaller copies for distant views: they reduce shimmer far away, and the game accepts a skin with or without them.&#10;&#10;Leave them off if you play with the older-video-card support option — it blurs mipmapped surfaces seen at an angle."> Mipmaps</label>
           <label style="margin-left:10px"><input type="checkbox" id="optPad" checked title="Bleed colour a few pixels past each UV island so seams don't show a dark edge in game."> Seam padding</label></div>
         <div class="row"><label style="font-size:11.5px"><input type="checkbox" id="optInvRough" checked title="Since the “Wind of Change” update War Thunder stores inverted roughness in the _n red channel instead of plain smoothness. Required for anything made after 2022 — the Live market has a matching checkbox.">Inverted roughness (post-2022)</label></div>
         <div class="hint pvnote" id="expRoughNote"></div>
@@ -1379,7 +1500,7 @@ body.carrying canvas{cursor:copy !important}
       <div class="row"><label>Camo mix</label><input type="range" id="optPaintStrength" min="0" max="100" value="100" title="How far the preview goes from the raw detail sheet to the game's paint colour"><span class="val" id="optPaintStrengthVal">100</span></div>
       <div class="row"><label style="font-size:11.5px" title="Blend over the camouflage using the albedo's alpha, as the game does — so the Wear mask brush shows live. Turn it off to judge colours flat."><input type="checkbox" id="optCoverage" checked> Use coverage mask (albedo alpha)</label></div>
       <div class="row"><label title="How often the track texture repeats along the generated track. War Thunder builds tracks at runtime, so the preview picks an aspect-correct default — nudge it if the links look too long or too short.">Track tiling</label><input type="range" id="optTrackTiling" data-k="0.01" min="25" max="400" value="100"><span class="val" id="optTrackTilingVal">1.0×</span></div>
-      <div class="row"><label style="font-size:11.5px" title="The model's own jet-exhaust plume, muzzle-flash and flare billboards. They are drawn unlit and additive, so on a static model they read as dark rectangles on the wing root or tailpipe, and they have no paintable texture of their own. Off by default."><input type="checkbox" id="optShowEffects"> Jet flames &amp; gun flashes</label></div>
+      <div class="row"><label style="font-size:11.5px" title="The model's own jet-exhaust plume, muzzle-flash and flare billboards. Drawn additive from the jet-flame and gun-flash slots, so a flame you paint or load from a skin shows here. The in-flight plume is volumetric in the game and is not drawn. Off by default."><input type="checkbox" id="optShowEffects"> Jet flames &amp; gun flashes</label></div>
       <div class="row"><label style="font-size:11.5px" title="The suspended armament of the loadout picked in the Weapons tab — bombs, rockets, tanks and missiles. Off until you pick a loadout, which turns it on."><input type="checkbox" id="optShowWeapons"> Suspended armament</label></div>
       <div class="row"><label style="font-size:11.5px" title="Pylons, racks and built-in pods that are part of the vehicle's model. Off until you pick a loadout that uses them, so a vehicle arrives as a bare airframe."><input type="checkbox" id="optShowPylons"> Pylons, racks &amp; built-in pods</label></div>
       <details class="adv">
@@ -1420,12 +1541,12 @@ body.carrying canvas{cursor:copy !important}
   </div></div>
 </div>
 <!-- The status line: a bar along the bottom of the window (ROADMAP 3.36), click it for Messages. -->
-<div id="statusbar"><div id="status">Open your War Thunder folder to begin — or drop in an .obj / .dds / .wtproj</div></div>
+<div id="statusbar"><div id="status">Open your War Thunder folder to begin — or drop in an .obj / .dds / .wtproj</div><button id="statusVersion" class="statusver" title="What's new in this build, and Check for updates"></button></div>
 <!-- ROADMAP 3.29. Three windows under the top bar, non-modal: the sections they hold are the same
      elements the right sidebar used to carry, MOVED here at load by ui/panels/topwin.js, so every id
      and every handler is untouched. Export gets a second column, the preview of what each setting
      does (ui/panels/export-preview.js), and a foot with the three ways out. View can be docked back. -->
-<div class="topwin" id="winExport" style="display:none" data-for="btnExport">
+<div class="topwin" id="winExport" style="display:none" data-for="btnExportGear">
   <div class="twbody"><div class="twcol" id="winExportSettings"></div><div class="twcol pv" id="expPreview"></div></div>
   <div class="twfoot" id="winExportFoot"></div>
 </div>
@@ -1462,6 +1583,7 @@ body.carrying canvas{cursor:copy !important}
           <dt><kbd>Ctrl</kbd>+<kbd>right-click</kbd></dt><dd>The inverse: deselect it, or — with nothing selected — shut just that one part out of painting</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>wheel</kbd></dt><dd>Widen / narrow the selection one level at a time: the part, its shape, its sub-group, the group above, the whole category, the model</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Alt</kbd></dt><dd>Add every part whose geometry is identical to the last one you clicked</dd>
+          <dt><kbd>H</kbd></dt><dd>Hide or show the selection overlay — the selection stays in force</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>H</kbd></dt><dd>Show only the selected parts (again to bring the rest back)</dd>
           <dt><kbd>Alt</kbd>+<kbd>click</kbd></dt><dd>Pick colour from the model</dd>
           <dt><kbd>F</kbd></dt><dd>Fly camera — <kbd>WASD</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> down/up, <kbd>Shift</kbd> faster</dd>
@@ -1521,7 +1643,7 @@ body.carrying canvas{cursor:copy !important}
     </div>
     <div style="color:var(--muted); line-height:1.7; font-size:12.5px">
       <b style="color:var(--text)">Workflow</b><br>
-      1. On the welcome screen pick "Open War Thunder folder" — Chrome or Edge can open a folder, remember it and write into it; an install under Program Files is opened with "Open it another way…" — then search a vehicle in the sidebar and click it: its model and textures load straight from the game. Or start empty and drop in an .obj / .dds / .wtproj. 2. Pick a texture slot and add layers — <b>+ Layer</b>, <b>Img</b>, <b>Text</b> or <b>Group</b> at the top of the Layers panel. 3. Paint in 2D or press <kbd>B</kbd> and paint on the model. 4. <b>Export as… ▸ To War Thunder</b> → in-game "Update custom camouflage list". Where the browser cannot write into UserSkins — an install under Program Files — it offers <b>Download .zip</b> instead, which works everywhere.<br><br>
+      1. On the welcome screen pick "Open War Thunder folder" — Chrome or Edge can open a folder, remember it and write into it; an install under Program Files is opened with "Open it another way…" — then search a vehicle in the sidebar and click it: its model and textures load straight from the game. Or start empty and drop in an .obj / .dds / .wtproj. 2. Pick a texture slot and add layers — <b>+ Layer</b>, <b>Img</b>, <b>Text</b> or <b>Group</b> at the top of the Layers panel. 3. Paint in 2D or press <kbd>B</kbd> and paint on the model. 4. <b>Export</b> (its gear opens the settings) → in-game "Update custom camouflage list". Where the browser cannot write into UserSkins — an install under Program Files — it offers <b>Download .zip</b> instead, which works everywhere; in Firefox, Export downloads the .zip at once — put it in War Thunder/UserSkins and choose Extract here.<br><br>
       <b style="color:var(--text)">Where your files go</b><br>
       Inside your War Thunder folder the app writes only <code>UserSkins/&lt;name&gt;/</code>, and only when you press <b>To War Thunder</b>. Everything else — a .wtproj, a .zip, an OBJ, an exported layer, your settings, a session recording — goes wherever the browser saves downloads; reopen a .wtproj with <b>Add files…</b> or by dragging it onto the window. The recovery copy and the index of your install stay in the browser's own storage on this machine. The .zip holds one folder, <code>&lt;name&gt;/</code>: extract it <i>into</i> UserSkins, so that <code>UserSkins/&lt;name&gt;/</code> holds the .blk — Windows' Extract All proposes a folder named after the zip and nests it one level too deep — and under Program Files, Windows asks for administrator approval to write there. On a later visit a remembered War Thunder folder may need one click on <b>Reopen War Thunder folder</b>.<br><br>
       <b style="color:var(--text)">Reporting a bug</b><br>
@@ -1627,6 +1749,9 @@ body.carrying canvas{cursor:copy !important}
      with the layers they draw, because that is where their code was. Both are for ROADMAP 2.3,
      which replaces load order with real imports. -->
 <!-- codecs / formats / game — bottom layers, split out 2026-08-05 -->
+<!-- RELEASE_NOTES.md goes here, as text the page neither runs nor fetches (tools/build.mjs, NOTES_AT):
+     ui/updates.js shows this build's section as What's new, with no network (ROADMAP 5.7). -->
+<!--==RELEASE_NOTES==-->
 <script src="./codecs/dds.js"></script>
 <script src="./codecs/bcn-decode.js"></script>
 <script src="./codecs/bcn-encode.js"></script>
@@ -1641,6 +1766,7 @@ body.carrying canvas{cursor:copy !important}
 <script src="./formats/ora.js"></script>
 <script src="./formats/psd.js"></script>
 <script src="./codecs/tga.js"></script>
+<script src="./codecs/png.js"></script>
 <!-- what was app/2-editor.js: the editor document model, the 3-D view, and their panels -->
 <script src="./ui/dom.js"></script>
 <script src="./ui/gate.js"></script>
@@ -1702,6 +1828,8 @@ body.carrying canvas{cursor:copy !important}
 <script src="./editor/tips.js"></script>
 <script src="./editor/brushes.js"></script>
 <script src="./editor/scope.js"></script>
+<script src="./editor/levels.js"></script>
+<script src="./view3d/levelview.js"></script>
 <script src="./editor/islands.js"></script>
 <script src="./editor/strokes.js"></script>
 <script src="./editor/selshape.js"></script>
@@ -1709,6 +1837,8 @@ body.carrying canvas{cursor:copy !important}
 <script src="./view3d/sel-overlay.js"></script>
 <script src="./ui/view2d.js"></script>
 <script src="./ui/panels/select.js"></script>
+<script src="./editor/path-layer.js"></script>
+<script src="./editor/path-lib.js"></script>
 <script src="./ui/panels/path.js"></script>
 <script src="./ui/panels/path3d.js"></script>
 <script src="./ui/panels/guides.js"></script>
@@ -1717,10 +1847,13 @@ body.carrying canvas{cursor:copy !important}
 <script src="./editor/paint3d.js"></script>
 <script src="./editor/projector-gl.js"></script>
 <script src="./editor/projection.js"></script>
+<script src="./editor/paint-proj.js"></script>
 <script src="./editor/proj-grip.js"></script>
 <script src="./view3d/proj-handles.js"></script>
 <script src="./view3d/path-overlay.js"></script>
 <script src="./ui/panels/brush.js"></script>
+<script src="./ui/panels/swatches.js"></script>
+<script src="./ui/panels/refwin.js"></script>
 <script src="./ui/scrollbox.js"></script>
 <script src="./ui/keys.js"></script>
 <!-- what was app/3-export.js: export, the game-file extractor, armament and posing, prefs, boot -->
@@ -1742,6 +1875,7 @@ body.carrying canvas{cursor:copy !important}
 <script src="./ui/panels/mask-bake.js"></script>
 <script src="./export/blk-write.js"></script>
 <script src="./export/pipeline.js"></script>
+<script src="./export/one-texture.js"></script>
 <script src="./editor/replace-tex.js"></script>
 <script src="./editor/paste-tex.js"></script>
 <script src="./game/packs.js"></script>
@@ -1780,6 +1914,7 @@ body.carrying canvas{cursor:copy !important}
 <script src="./editor/stack.js"></script>
 <script src="./editor/interchange.js"></script>
 <script src="./ui/panels/view.js"></script>
+<script src="./ui/panels/ingame.js"></script>
 <script src="./ui/welcome.js"></script>
 <script src="./ui/recovery.js"></script>
 <script src="./ui/drop.js"></script>
@@ -1788,6 +1923,7 @@ body.carrying canvas{cursor:copy !important}
 <script src="./ui/panels/history.js"></script>
 <script src="./ui/panels/topwin.js"></script>
 <script src="./core/version.js"></script>
+<script src="./ui/updates.js"></script>
 <script src="./main.js"></script>
 <script src="./vendor/zstd-b64.js"></script>
 <script src="./vendor/oodle-b64.js"></script>

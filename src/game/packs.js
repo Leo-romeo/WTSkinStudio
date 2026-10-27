@@ -49,13 +49,13 @@ const GameDB = { entries: [], stems: new Map(), packs: 0,
     return en.fmt || "";
   },
   // Why one entry does not open, as a key: "" when it does, else empty · decoder · comp · format.
-  // The one copy of that order — entryBlockReason (codecs/oodle.js) words it, the scan's summary
+  // The one copy of that order — Oodle.entryBlockReason (codecs/oodle.js) words it, the scan's summary
   // counts it. Compression is asked before the format, so a "format" entry is always one the build
   // can decompress, which is what lets the summary say they decompress fine.
   blockKind(en){
     if (!en || !en.size) return "empty";
     if (en.supported) return "";
-    if (en.compName === "oodle" && !oodleAvailable()) return "decoder";
+    if (en.compName === "oodle" && !Oodle.oodleAvailable()) return "decoder";
     if (!/^(raw|zstd|zlib|oodle)$/.test(en.compName)) return "comp";
     return "format";
   },
@@ -226,7 +226,7 @@ async function restoreGameIndex(fp){
       const fmt = String.fromCharCode(heads[b+4], heads[b+5], heads[b+6], heads[b+7]).replace(/[\0 ]/g, "");
       const comp = (hv.getUint32(b + 8, true) >>> 24) & 0xE0;
       const { stem, tier } = parseTexName(names[i]);
-      const knownComp = comp === 0 || comp === 0x20 || comp === 0x80 || (comp === 0x60 && oodleAvailable());
+      const knownComp = comp === 0 || comp === 0x20 || comp === 0x80 || (comp === 0x60 && Oodle.oodleAvailable());
       const en = { name: names[i], stem, tier, pack: nums[i*3+2], header,
         off: nums[i*3], size: nums[i*3+1], fmt,
         w: hv.getUint16(b + 12, true), h: hv.getUint16(b + 14, true),

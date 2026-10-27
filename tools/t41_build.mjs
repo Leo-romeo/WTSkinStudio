@@ -20,7 +20,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { build, VENDORED, cdnTag, CDN_TEXT } from "./build.mjs";
+import { build, VENDORED, cdnTag, CDN_TEXT, inlineScript } from "./build.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let pass = 0, fail = 0;
@@ -47,7 +47,12 @@ else {
 // `<script>` — the page's own comments mention the tag, and only the parse that treats
 // opener-to-first-closer as one block agrees with what a browser does.
 const sources = build().used;
-const inline = built.match(/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/gi) || [];
+// RELEASE_NOTES.md's tag (ROADMAP 5.7) is text, not a source: the one script of type text/plain.
+const notesTags = (built.match(/<script type="text\/plain" id="releaseNotes">/g) || []).length;
+ok(notesTags === 1 && !built.includes("<!--==RELEASE_NOTES==-->"),
+  `RELEASE_NOTES.md is embedded once, where src/index.html's marker was, as text the page neither runs nor fetches (${notesTags})`);
+const inline = (built.match(/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/gi) || [])
+  .filter(t => !t.startsWith('<script type="text/plain" id="releaseNotes">'));
 ok(inline.length === sources.length, `every source is its own inline <script> tag → ${inline.length} tags, ${sources.length} sources`);
 ok(sources.length > 5, `the codecs layer is split into modules, not one block → ${sources.length} sources`);
 ok(/\/\*==DDS==\*\//.test(built) && /\/\*==ENDDDS==\*\//.test(built),
@@ -77,6 +82,49 @@ const order = ["const DDS_MAGIC", "function decodeBCn", "function encodeBC3", "f
 const at = order.map(s => built.indexOf(s));
 ok(at.every(i => i > 0) && at.every((v, i) => i === 0 || v > at[i - 1]),
   "the bottom layers load in dependency order: dds → bcn → obj → zstd → blk → vromfs → registry → aces → model → a2d → tga");
+
+console.log("\n=== every script is named after its src/ file ===");
+// A stack trace, an ErrorEvent and the console's "Uncaught" entry name a script by its
+// `//# sourceURL`, and count its lines from the script's own first line (build.mjs's inlineScript
+// has the measurement). So each source must be in the page exactly as inlineScript lays it out:
+// its first line straight after `<script>`, since a newline there put every reported line one past
+// the file's, and the comment after its last line.
+const bodyOf = rel => fs.readFileSync(path.join(ROOT, "src", rel), "utf8").replace(/\r?\n$/, "");
+const misplaced = sources.filter(rel => !built.includes(inlineScript(rel, bodyOf(rel))));
+ok(misplaced.length === 0, misplaced.length ? `not in the page as inlineScript lays it out: ${misplaced.join(", ")}`
+  : `all ${sources.length} sources are in the page whole, from the first character after <script>, each followed by its //# sourceURL`);
+const named = [...built.matchAll(/^\/\/# sourceURL=(.*)$/gm)].map(m => m[1]);
+ok(named.length === sources.length && named.every((u, i) => u === "src/" + sources[i]),
+  `one //# sourceURL per script, naming its own file, in load order (${named.length} for ${sources.length} sources)`);
+// What the pools and the tests lift must be byte for byte what it was: pageSections()'s own rule —
+// the longest complete body under each name, a prose mention never shadowing a section — run over
+// the page's scripts and over the source files gives the same sections.
+const sectionsOf = texts => {
+  const found = new Map();
+  for (const t of texts) {
+    const re = /\/\*==([A-Z0-9]+)==\*\//g;
+    let x;
+    while ((x = re.exec(t))) {
+      if (x[1].startsWith("END")) continue;
+      const end = t.indexOf("/*==END" + x[1] + "==*/", x.index);
+      if (end < 0) continue;
+      const body = t.slice(x.index + x[0].length, end);
+      if (!found.has(x[1]) || found.get(x[1]).length < body.length) found.set(x[1], body);
+    }
+  }
+  return found;
+};
+const liftedFromPage = sectionsOf(inline.map(s => s.replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "")));
+const liftedFromFiles = sectionsOf(sources.map(bodyOf));
+const notTheFile = [...new Set([...liftedFromPage.keys(), ...liftedFromFiles.keys()])]
+  .filter(n => liftedFromPage.get(n) !== liftedFromFiles.get(n));
+ok(notTheFile.length === 0 && liftedFromPage.size > 10, notTheFile.length
+  ? `section(s) lifted from the page differ from their files: ${notTheFile.join(", ")}`
+  : `all ${liftedFromPage.size} sections lifted from the page are their files' sections, byte for byte — no //# sourceURL inside one`);
+const planted = sectionsOf(inline.map(s => s.replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "")
+  .replace("/*==ENDDDS==*/", () => "//# sourceURL=src/codecs/dds.js\n/*==ENDDDS==*/")));
+ok(planted.get("DDS") !== liftedFromFiles.get("DDS"), "and that comparison can fail: a //# sourceURL planted inside DDS's section is a different lift");
+ok(!/sourceMappingURL/.test(built), "and the page names no sourceMappingURL, which would make DevTools fetch a file");
 
 console.log("\n=== the page needs no network, and carries the libraries it was pinned to ===");
 // CLAUDE.md §0.1 promises a page that opens "offline, with no server and no network". What breaks
@@ -165,7 +213,7 @@ ok(cdnLeaks.length === 2 && cdnLeaks.every(l => l.startsWith("<script src> https
 let expectCdn = built;
 for (const [rel, lib] of Object.entries(VENDORED)) {
   const body = fs.readFileSync(path.join(ROOT, "src", rel), "utf8").replace(/\r?\n$/, "");
-  expectCdn = expectCdn.replace("<script>\n" + body + "\n</script>", () => cdnTag(lib));  // a function: `body` is full of `$`
+  expectCdn = expectCdn.replace(inlineScript(rel, body), () => cdnTag(lib));  // a function: `body` is full of `$`
 }
 const onceEach = CDN_TEXT.map(([from]) => built.split(from).length - 1);
 for (const [from, to] of CDN_TEXT) expectCdn = expectCdn.replace(from, () => to);
@@ -221,8 +269,8 @@ const mk = (html, files) => {
 const good = mk(`<body><script src="./app/a.js"></script><script src="./app/b.js"></script></body>`,
   { "app/a.js": "var a = 1;", "app/b.js": "var b = a + 1;" });
 const r = build(good);
-ok(r.html === `<body><script>\nvar a = 1;\n</script><script>\nvar b = a + 1;\n</script></body>`,
-  "a relative <script src> is replaced by the file's text, in place and in order");
+ok(r.html === `<body><script>var a = 1;\n//# sourceURL=src/app/a.js\n</script><script>var b = a + 1;\n//# sourceURL=src/app/b.js\n</script></body>`,
+  "a relative <script src> is replaced by the file's text, in place and in order, each named after its file");
 
 // `$&` and `$1` in a source would be eaten by String.replace with a string replacement. Every
 // regex in this codebase is a source that contains them, so this is not hypothetical — it is the

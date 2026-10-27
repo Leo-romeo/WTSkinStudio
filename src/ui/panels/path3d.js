@@ -64,7 +64,11 @@ Object.assign(PathUI, {
     for (const n of path.pts) {
       const c = worldToScreen(PathUI.lift(n.x, n.y, n.d));
       const h = n.hx || n.hy ? worldToScreen(PathUI.lift(n.x + n.hx, n.y + n.hy, n.d)) : c;
-      out.pts.push({ x: c.x, y: c.y, hx: h.x - c.x, hy: h.y - c.y });
+      const q = { x: c.x, y: c.y, hx: h.x - c.x, hy: h.y - c.y };
+      // An incoming handle of its own (an inserted node, 4.52 (2)) is projected as itself: under
+      // perspective the mirror of a projected handle is not the projection of the mirror.
+      if (n.ix != null) { const k = worldToScreen(PathUI.lift(n.x + n.ix, n.y + n.iy, n.d)); q.ix = k.x - c.x; q.iy = k.y - c.y; }
+      out.pts.push(q);
     }
     return out;
   },
@@ -79,7 +83,9 @@ Object.assign(PathUI, {
   down3d(e){
     if (!PathUI.on || e.button !== 0) return false;
     const path = PathUI.cur();
-    if (path.pts.length && !PathUI.frame) {
+    // A path layer is a sheet object even with no points left (review, 2026-10-23: a model click
+    // wrote plane metres into its recipe), so the model is refused while one is held.
+    if ((path.pts.length || PathUI.layer) && !PathUI.frame) {
       if (e.ctrlKey || e.altKey || !ray3d(e, true)) return false;
       setStatus("This path is on the 2-D sheet — finish it there, or Esc clears it to start one on the model", "err");
       return true;
@@ -88,12 +94,17 @@ Object.assign(PathUI, {
     if (hit) return PathUI.onNode(e, hit, path);
     // S and X held are "jump to this part's slot" and "protect it", which work in every mode.
     if (e.ctrlKey || e.altKey || keyHeld("KeyS") || keyHeld("KeyX")) return false;
+    // A click on the line puts a node there (4.52 (2)), measured on the screen as a node is grabbed.
+    const seg = PathUI.frame && Path.nearest(path, e.clientX, e.clientY, q => {
+      const w = worldToScreen(PathUI.lift(q[0], q[1], q[2])); return [w.x, w.y]; });
+    if (PathUI.onLine(seg, PathUI.GRAB)) return PathUI.insert(seg);
     const at = ray3d(e, true);
     if (!at) return false;
     if (path.closed) { setStatus("This path is closed — Esc starts a new one", "err"); return true; }
     if (!path.pts.length) PathUI.frame = Object.assign(projFrame(at), { dens: PathUI.densAt(at) });
     const q = PathUI.toPlane(at.point);
     Path.add(path, q.x, q.y).d = q.d;
+    PathUI.sel = path.pts.length - 1;
     PathUI.drag = { kind: "handle", i: path.pts.length - 1, moved: false, fresh: true };
     PathUI.sync(); PathUI.redraw();
     return true;
@@ -183,6 +194,7 @@ Object.assign(PathUI, {
     if (!path || path.pts.length < 3 || !path.closed) { setStatus("Close the path first — click its first point again", "err"); return; }
     if (!s || !s.composite) return;
     if (App.brush.tool === "height") { setStatus("Panel line carves along a stroke — it has no fill. Pick another tool.", "err"); return; }
+    if (App.brush.tool === "retouch") { setStatus(PathUI.RETOUCH_FILL, "err"); return; }
     let cov = PathUI.cover3d(s.composite.width, s.composite.height);
     if (!cov) { setStatus(PathUI.MISSED, "err"); return; }
     if (!beginStroke(false, false)) return;            // says why itself
@@ -224,7 +236,7 @@ Object.assign(PathUI, {
     const pts = Path.walk(poly, step, path.closed);
     const back = F.n.clone().negate(), sym = symEnabled(), copies = radialCount();
     let laid = 0;
-    for (const q of pts) {
+    for (const [i, q] of pts.entries()) {
       // Which way the path heads here, on the model — what a tip that follows the stroke turns by.
       const dir = F.r.clone().multiplyScalar(Math.cos(q.a)).addScaledVector(F.u, Math.sin(q.a));
       const o = PathUI.lift(q.x, q.y, B.dc + B.lim);
@@ -234,7 +246,8 @@ Object.assign(PathUI, {
       laid++;
       // The copies read the global ray, as they do for a hand-drawn stroke (mirrorHit, radialHit).
       raycaster.ray.set(o, back);
-      PathUI.stampCopies(hit, o, dir, sym, copies);
+      // How far along the path, in the layer's texels, for Colour along: the walk is a step a point.
+      PathUI.stampCopies(hit, o, dir, sym, copies, i * step * dens);
     }
     endStroke();
     draw2D();
@@ -244,9 +257,9 @@ Object.assign(PathUI, {
   },
   // One sample's dab and its mirrored and turned copies, each facing the way the path heads there —
   // reflected or turned with it — and each laid alone (`stamp3d`'s `alone`).
-  stampCopies(hit, o, dir, sym, copies){
+  stampCopies(hit, o, dir, sym, copies, run){
     const lay = [];
-    const put = (h, ch, d) => { if (h && h.uv) { ensureStrokePart(h.object.name); stamp3d(h, ch, lay, d); } };
+    const put = (h, ch, d) => { if (h && h.uv) { ensureStrokePart(h.object.name); stamp3d(h, ch, lay, d, run); } };
     put(hit, 0, dir);
     if (sym) put(mirrorHit(), 1, mirrorRay(o, dir).d);
     for (let k = 1; k < copies; k++) {

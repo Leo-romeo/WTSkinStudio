@@ -28,7 +28,22 @@ const App = {
            // ROADMAP 4.50 (10) (editor/tips.js, Pen.dab): the tip each dab is laid in, and how a dab
            // varies — size, flow and angle jitter and scatter as fractions, the angle in degrees,
            // and whether it turns to face the stroke. All per tool; all 0 is the brush as it was.
-           tip: "round", sizeJit: 0, flowJit: 0, scatter: 0, angle: 0, angleJit: 0, follow: false },
+           tip: "round", sizeJit: 0, flowJit: 0, scatter: 0, angle: 0, angleJit: 0, follow: false,
+           // ROADMAP 4.56 (Pen.ink): the colour along the stroke — "off", "hue" or a `Gradient.HOLO`
+           // id — and the length of one cycle in brush sizes. Per tool; only the colour brush reads it.
+           cycle: "off", cycleLen: 10,
+           // ROADMAP 4.50 (11) (Effect.retouch): the Retouch brush's kind, strength 0…1 and tones.
+           retouch: "blur", strength: .5, range: "mids",
+           // the projected 3-D brush (editor/paint-proj.js), on since ROADMAP 1.19 (e) (2026-10-24), and
+           // its facing limit in degrees: a surface turned further than this from the camera takes no
+           // paint, fading in over the 15° before it (the owner's answer (2), at 85° until he reads
+           // Substance's default off his install)
+           proj3d: true, face: 85,
+           // ROADMAP 4.55, the pattern brush (Pen.cells, ProjBrush.lattice): "off", or the lattice whose
+           // whole cells a stroke on the model reveals, with its look and its tile's width in metres —
+           // `Procedural.brushPatMake`'s record, written out here because state loads before it. The
+           // hand's, like the colour: only the colour brush reads it.
+           pattern: { kind: "off", fill: "#262a30", border: "#d8dde4", width: .08, fillOn: true, borderOn: true, size: .3, angle: 0 } },
   // What every OTHER tool was left set to (ROADMAP 3.22). `brush` above is whichever one is in
   // hand; this is where the rest of them wait, so a 4-texel panel line and a 200-texel wear brush
   // can both exist. Filled lazily — a tool that has never been picked up has no row here.

@@ -29,6 +29,8 @@ const PathOverlay = {
     PathOverlay.nodes = add(new THREE.Points(geo(1), ptMat(9, true)), 1001);
     // The first node of an open path is the one that closes it, so it is drawn bigger and square.
     PathOverlay.first = add(new THREE.Points(geo(1), ptMat(12, false)), 1002);
+    // The selected node — what Delete takes (4.52 (2)) — bigger again, and round.
+    PathOverlay.sel = add(new THREE.Points(geo(1), ptMat(15, true)), 1003);
     G.visible = false;
     scene.add(G);
     return (PathOverlay.group = G);
@@ -55,17 +57,26 @@ const PathOverlay = {
     const lift = q => PathUI.lift(q[0], q[1], q[2]);
     const poly = Path.flatten(path, PathUI.TOL / PathUI.frame.dens).map(lift);
     if (path.closed && poly.length > 2) poly.push(poly[0]);
-    const hs = [];
-    for (const n of path.pts) if (n.hx || n.hy) hs.push(PathUI.lift(n.x - n.hx, n.y - n.hy, n.d), PathUI.lift(n.x + n.hx, n.y + n.hy, n.d));
+    const hs = [], ends = [];
+    for (const n of path.pts) {
+      const [ix, iy] = Path.inH(n), o = n.hx || n.hy, i = ix || iy;
+      if (!o && !i) continue;
+      const a = PathUI.lift(n.x + ix, n.y + iy, n.d), b = PathUI.lift(n.x + (n.hx || 0), n.y + (n.hy || 0), n.d);
+      hs.push(a, b);
+      // Handle ends ride with the nodes: the same round face, so a handle reads as something to grab.
+      if (o) ends.push(b);
+      if (i) ends.push(a);
+    }
     PathOverlay.put(PathOverlay.line, poly);
     PathOverlay.put(PathOverlay.handles, hs);
     PathOverlay.handles.visible = hs.length > 0;
     const nodes = path.pts.map(n => PathUI.lift(n.x, n.y, n.d));
-    // Handle ends ride with the nodes: the same round face, so a handle reads as something to grab.
-    for (const n of path.pts) if (n.hx || n.hy) nodes.push(PathUI.lift(n.x + n.hx, n.y + n.hy, n.d), PathUI.lift(n.x - n.hx, n.y - n.hy, n.d));
-    PathOverlay.put(PathOverlay.nodes, nodes);
+    PathOverlay.put(PathOverlay.nodes, nodes.concat(ends));
     PathOverlay.put(PathOverlay.first, [nodes[0]]);
     PathOverlay.first.visible = !path.closed && path.pts.length > 2;
+    const sel = nodes[PathUI.sel];
+    if (sel) PathOverlay.put(PathOverlay.sel, [sel]);
+    PathOverlay.sel.visible = !!sel;
     PathOverlay.group.visible = true;
     PathOverlay.shown = true;
   },

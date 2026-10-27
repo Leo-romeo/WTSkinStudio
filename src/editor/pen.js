@@ -39,12 +39,17 @@ const Pen = {
   // ---- what the pointer says ----
   pressure(e){ return e && e.pointerType === "pen" ? Pen.clamp(+e.pressure || 0) : 1; },
   // The samples one pointer move carries, in client pixels with their pressure. A pen reports at
-  // 130–240 Hz and the browser dispatches one move per frame, keeping the rest as coalesced events;
-  // without them a curve drawn fast is a polyline of 60 Hz chords. A pen's only: a mouse's would add
-  // raycasts in 3-D for a fidelity nobody asked for. `getCoalescedEvents` is detected rather than
-  // assumed — it is a secure-context API, and without it the move itself is the one sample.
+  // 130–240 Hz and a mouse at 125–1000, and the browser dispatches one move per frame, keeping the
+  // rest as coalesced events; without them a curve drawn fast is a polyline of 60 Hz chords. Until
+  // 2026-10-22 only a pen's were read — a mouse's "would add raycasts in 3-D for a fidelity nobody
+  // asked for" — and then the owner's live test asked for it: fast mouse curves came out faceted.
+  // They cost little: the 3-D walk spreads its rays by arc length (`paint3dStrokeTo`), so extra
+  // samples add only what a curve is longer than its chord, and on the sheet the dab count is set by
+  // distance and Spacing, not by how many samples the move came in. `getCoalescedEvents` is detected
+  // rather than assumed — it is a secure-context API, and without it the move itself is the one
+  // sample.
   samples(e){
-    const all = e.pointerType === "pen" && e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    const all = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
     return (all && all.length ? all : [e]).map(v => ({ x: v.clientX, y: v.clientY, p: Pen.pressure(v) }));
   },
 
@@ -160,20 +165,34 @@ const Pen = {
   },
 
   // ---- where the dabs of one segment land ----
+  // The build's default Spacing, as a fraction of the dab: the same number as the slider's markup
+  // (t95 holds the two together), and what a brush that carries none is walked at. 35 % until
+  // 2026-10-22, which lays an edge as soft as one dab's own — but a dab lands only once the pointer is
+  // a whole step past the last, so the painted end trails the pointer by up to a step and catches up
+  // in hops of one: 17 texels at the default 48-texel brush, 45 at 128, with a curve cut into chords
+  // that long. The owner's live test called that jumpy; 15 % trails by 7 and 19. The price is a
+  // firmer soft edge, since more dabs overlap in the buffer — at hardness 70 the 90 → 10 % edge band
+  // narrows from 0.25 to 0.18 of the radius — and not speed: stroke cost was flat from 5 % to 100 %
+  // (ROADMAP_DONE 1.7), and the 3-D brush's rays no longer follow Spacing (1.9). Panel line keeps
+  // 35 % (`BrushTools.SPACING`).
+  SPACING: .15,
   // From the last dab `a` to the input point (x, y) at pressure p, each spaced by `spacing` of the
   // previous dab's OWN diameter: a light dab is small, and spacing it by the whole brush would dot
   // the stroke exactly where pressure had made it thin. Pressure runs linearly along the segment.
   // At constant pressure this is the loop it replaced number for number — the same step, the same
   // accumulation and `a.x + dx * d / dist` in the same order — which is what keeps a mouse stroke
   // byte-identical to what it was.
-  walk(a, x, y, p, b, line){
+  // `k`, when given, is how many walk units one texel of size is at a point — the projected 3-D
+  // brush walks the SCREEN, where a dab further away is smaller (ROADMAP 1.19 (a)), so its spacing
+  // is the dab's own size where it lands. Without it the loop is the one above, untouched.
+  walk(a, x, y, p, b, line, k){
     const dx = x - a.x, dy = y - a.y, dist = Math.hypot(dx, dy);
-    const p0 = a.p == null ? p : a.p, sp = b.spacing || .35;
+    const p0 = a.p == null ? p : a.p, sp = b.spacing || Pen.SPACING;
     const out = [];
-    for (let d = Math.max(1, Pen.size(b, p0) * sp); d <= dist; ) {
-      const pp = p0 + (p - p0) * d / dist;
-      out.push({ x: a.x + dx * d / dist, y: a.y + dy * d / dist, p: pp });
-      d += Math.max(1, Pen.size(b, pp) * sp);
+    for (let d = Math.max(1, Pen.size(b, p0) * sp * (k ? k(a.x, a.y) : 1)); d <= dist; ) {
+      const pp = p0 + (p - p0) * d / dist, q = { x: a.x + dx * d / dist, y: a.y + dy * d / dist, p: pp };
+      out.push(q);
+      d += Math.max(1, Pen.size(b, pp) * sp * (k ? k(q.x, q.y) : 1));
     }
     // A move shorter than one spacing adds nothing — except at the end of a straight line, where
     // the endpoint itself is the point of the gesture.
@@ -223,6 +242,98 @@ const Pen = {
   deposit(b){
     const op = Pen.clamp(b.opacity), fl = Pen.clamp(b.flow == null ? 1 : b.flow);
     return b.build ? { dab: fl * op, apply: 1, fill: op } : { dab: fl, apply: op, fill: 1 };
+  },
+
+  // ---- colour along the stroke (ROADMAP 4.56) ----
+  // The owner's holographic wing was painted by nudging the colour slider between short strokes. This
+  // is that, done by the stroke: each dab's colour comes from how far the stroke has painted so far,
+  // `run` texels, over a cycle `cycleLen` brush SIZES long — sizes rather than texels so the same
+  // setting reads the same at any brush size, and so the panel's sample stroke (laid at a smaller
+  // size, below) shows the stroke's colours where the stroke will have them. Two kinds of cycle:
+  //   "hue"     the brush colour's hue turns once round the wheel per cycle, its saturation and
+  //             value kept (HSV) — so a grey brush has no hue to turn, which the panel says;
+  //   a preset  one of `Gradient.HOLO`'s named sets (the caller hands its table, `lut`, so this
+  //             section still stands alone), run there and back — a ping-pong has no seam where
+  //             a cycle starts over, whatever colours the set ends on.
+  // Only the colour brush on a layer's content takes it: a mask, a value channel, the eraser and
+  // the Clone have no colour of their own to vary.
+  cycles(b){ return !!b && b.tool === "brush" && b.chan === "color" && b.target === "content" && !!b.cycle && b.cycle !== "off" && b.cycleLen > 0; },
+  phase(b, run){ const L = b.cycleLen * b.size; return L > 0 ? run / L : 0; },
+  // Whether a stroke lays a lattice's cells rather than a colour (4.55, the pattern brush,
+  // `ProjBrush.lattice`): the same colour brush on a layer's content, with a pattern picked. Its
+  // colours are the lattice's, so it takes the place of the colour along the stroke while it is on.
+  cells(b){ return !!b && b.tool === "brush" && b.chan === "color" && b.target === "content" && !!b.pattern && !!b.pattern.kind && b.pattern.kind !== "off"; },
+  // The colour at `run`, as bytes, or null where the brush does not cycle.
+  ink(b, run, lut){
+    if (!Pen.cycles(b)) return null;
+    const ph = Pen.phase(b, run);
+    if (b.cycle === "hue") return Pen.turnHue(Pen.hex(b.color), ph);
+    if (!lut || !lut.length) return null;
+    const u = ph % 2, t = u <= 1 ? u : 2 - u, n = lut.length >> 2, k = Math.round(t * (n - 1)) * 4;
+    return [lut[k], lut[k + 1], lut[k + 2]];
+  },
+  // The colours of a run of dabs `pts` a stroke channel `ch` lays after `last` (null at a stroke's
+  // start or a jump), advancing `runs[ch]` — how far the channel has painted, in texels. Measured
+  // between the WALK's points, not the scattered dabs', or scatter would push the colour on; and
+  // never across a jump, a leap to another island with no paint laid on the way. Null when the
+  // brush does not cycle. `lutOf` names a preset's table (`Gradient.holoLut`), handed in so this
+  // section stands alone. `at`, when given, is where the channel's run stands before `pts` — a caller
+  // that lays dabs alone along a line it walks knows it (Stamp along: `stampAt`'s opt.run).
+  inks(b, pts, last, runs, ch, lutOf, at){
+    if (!Pen.cycles(b)) return null;
+    if (at != null) runs[ch] = at;
+    const lut = b.cycle === "hue" ? null : lutOf(b.cycle);
+    let prev = last;
+    return pts.map(q => {
+      if (prev) runs[ch] = (runs[ch] || 0) + Math.hypot(q.x - prev.x, q.y - prev.y);
+      prev = q;
+      return Pen.ink(b, runs[ch] || 0, lut);
+    });
+  },
+  hex(c){ const m = /^#?([0-9a-f]{6})$/i.exec(String(c || "")); const v = m ? parseInt(m[1], 16) : 0; return [v >> 16 & 255, v >> 8 & 255, v & 255]; },
+  // `rgb` turned `turns` of the way round the hue wheel, in HSV with S and V held. A whole turn is
+  // the colour it started as, to the byte.
+  turnHue(rgb, turns){
+    const r = rgb[0] / 255, g = rgb[1] / 255, bl = rgb[2] / 255, v = Math.max(r, g, bl), c = v - Math.min(r, g, bl);
+    if (!(c > 0)) return rgb.slice(0, 3);
+    let h = v === r ? (g - bl) / c : v === g ? 2 + (bl - r) / c : 4 + (r - g) / c;     // sixths of a turn
+    h = (((h + 6 * turns) % 6) + 6) % 6;
+    const x = c * (1 - Math.abs(h % 2 - 1)), m = v - c, i = Math.floor(h);
+    const [a, b2, d] = i === 0 ? [c, x, 0] : i === 1 ? [x, c, 0] : i === 2 ? [0, c, x] : i === 3 ? [0, x, c] : i === 4 ? [x, 0, c] : [c, 0, x];
+    return [Math.round((a + m) * 255), Math.round((b2 + m) * 255), Math.round((d + m) * 255)];
+  },
+
+  // ---- the panel's sample stroke (ROADMAP 3.41 (3)) ----
+  // The dabs a short S-curve across a W × H box would lay with this brush: its tip size, spacing,
+  // flow, every dynamic and the colour cycle, through the same `walk`, `heading` and `dab` a real
+  // stroke takes, so the sample cannot disagree with the brush. Spacing, scatter and the cycle are
+  // all in the brush's own sizes, so the brush is laid at a size that fits the box (`size`) and the
+  // stroke is the real one scaled down. At full pressure: that is what a mouse paints, and a sample
+  // tapered for a pen would show a mouse user a stroke they cannot make. The random stream has a
+  // fixed seed, so the sample holds still while nothing changes. Each dab carries the `run` it was
+  // laid at, for the colour.
+  SAMPLE_SEED: 0x5EED,
+  sample(b, W, H){
+    const sc = Math.max(0, +b.scatter || 0);
+    const size = Math.max(3, Math.min(b.size || 3, (H - 4) / (1 + 2 * sc)));
+    const bb = Object.assign({}, b, { size });
+    const m = size / 2 * (1 + 2 * sc) + 2, A = Math.max(0, H / 2 - m), x0 = Math.min(m, W / 2), x1 = Math.max(W - m, W / 2);
+    const at = t => ({ x: x0 + (x1 - x0) * t, y: H / 2 - A * Math.sin(2 * Math.PI * t), p: 1 });
+    const rnd = Pen.dynamic(bb) ? Pen.rng(Pen.SAMPLE_SEED) : null;
+    const N = Math.max(8, Math.ceil((x1 - x0) / 2)), out = [];
+    let last = at(0), head = null, run = 0;
+    out.push(Object.assign(Pen.dab(bb, last, head, rnd), { run }));
+    for (let i = 1; i <= N; i++) {
+      const s = at(i / N);
+      const pts = Pen.walk(last, s.x, s.y, 1, bb);
+      head = Pen.heading(last, s.x, s.y, null, head);
+      for (const q of pts) {
+        run += Math.hypot(q.x - last.x, q.y - last.y);
+        out.push(Object.assign(Pen.dab(bb, q, head, rnd), { run }));
+        last = q;
+      }
+    }
+    return { size, dabs: out };
   },
 
   // ---- a copy that is not a copy ----

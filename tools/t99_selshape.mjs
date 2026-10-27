@@ -61,7 +61,7 @@ import { findBrowser, evalInPage, pageExpr, makeReport } from "./headless.mjs";
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\\/g, "/").replace(/\/+$/, "");
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -182,6 +182,56 @@ console.log("\n=== the wand's three steps, band by band, agree with the one-call
   R.is(boxBad === 0, `and the count and box the flood keeps as it goes are the ones a scan of the bytes finds (${boxBad} of 96 disagree)`);
 }
 
+console.log("\n=== the wand's Edge: an antialiased marking's fringe, and nothing past it (ROADMAP 3.39 (2)) ===");
+{
+  // A star drawn the way a stock marking is: coverage from 16 × 16 samples a texel, turned off the axes
+  // so every edge is a slope, white on olive under ±6 of weathering. The coverage is the truth the
+  // oracle reads: a texel ≥ 15 % star left out after a fill is the ragged ring of the report, and a
+  // texel < 5 % star taken is paint on bare background.
+  const W = 160, H = 160, pts = [];
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + .13 + i * Math.PI / 5, r = i % 2 ? 22 : 58; pts.push([80 + r * Math.cos(a), 80 + r * Math.sin(a)]); }
+  const inside = (x, y) => { let c = false; for (let i = 0, j = 9; i < 10; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const A = new Float32Array(W * H), img = new Uint8ClampedArray(W * H * 4), bg = [110, 120, 82], fg = [232, 230, 222];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let n = 0; for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) n += inside(x + (i + .5) / 16, y + (j + .5) / 16);
+    const a = n / 256, o = (y * W + x) * 4, w = (rnd() - .5) * 12; A[y * W + x] = a;
+    for (let k = 0; k < 3; k++) img[o + k] = a * fg[k] + (1 - a) * bg[k] + w;
+    img[o + 3] = 255;
+  }
+  const look = bits => { let left = 0, spill = 0; for (let i = 0; i < W * H; i++) { if (bits[i] && A[i] < .05) spill++; if (!bits[i] && A[i] >= .15) left++; } return { left, spill }; };
+  const s0 = (80 * W + 80) * 4, c = [img[s0], img[s0 + 1], img[s0 + 2], img[s0 + 3]];
+  const flood = SelShape.range(img, W, H, 80, 80, 32, true);
+  const info = { n: count(flood), box: SelShape.bounds(flood, W, H) };
+  const ring = SelShape.edge(img, W, H, 0, 0, H, flood, c, 32, flood.slice(), info);
+  const before = look(flood), after = look(ring);
+  console.log(`   tolerance 32: ${before.left} fringe texels left out, ${before.spill} on bare background; with Edge ${after.left} and ${after.spill}`);
+  R.is(before.left > 100, `without Edge the hard tolerance leaves the star's fringe out — ${before.left} texels at least 15 % star — which is the ragged ring the report showed`);
+  R.is(after.left <= 10 && after.spill === 0,
+    `with Edge the fringe comes in (${after.left} left) and no bare background does (${after.spill}) — the unmixing takes a texel only for the share of the picked colour it holds`);
+  R.is(info.n === count(ring) && JSON.stringify(info.box) === JSON.stringify(SelShape.bounds(ring, W, H)),
+    `the count and box it keeps are the ones a scan finds (${info.n}, ${JSON.stringify(info.box)})`);
+  // band by band, a row either side, as the page reads it — the same ring wherever the bands fall
+  let worst = 0;
+  for (const band of [1, 4, 13]) {
+    const out = flood.slice();
+    for (let y0 = 0; y0 < H; y0 += band) {
+      const n = Math.min(band, H - y0), r0 = Math.max(0, y0 - 1), r1 = Math.min(H, y0 + n + 1);
+      SelShape.edge(img.subarray(r0 * W * 4, r1 * W * 4), W, H, r0, y0, y0 + n, flood, c, 32, out, null);
+    }
+    worst = Math.max(worst, diff(out, ring));
+  }
+  R.is(worst === 0, `read in bands of 1, 4 and 13 rows the ring is the one-call ring texel for texel (worst ${worst} differ)`);
+  // a pick much like its surroundings adds nothing, and a hard-edged patch has no fringe to add
+  const flat = new Uint8ClampedArray(20 * 20 * 4);
+  for (let i = 0; i < 400; i++) { const v = (i % 20) < 10 ? 100 : 110; flat[i * 4] = flat[i * 4 + 1] = flat[i * 4 + 2] = v; flat[i * 4 + 3] = 255; }
+  const fl = SelShape.range(flat, 20, 20, 2, 2, 4, true), fr = SelShape.edge(flat, 20, 20, 0, 0, 20, fl, [100, 100, 100, 255], 4, fl.slice(), null);
+  const hard = new Uint8ClampedArray(20 * 20 * 4);
+  for (let i = 0; i < 400; i++) { const v = (i % 20) < 10 ? 40 : 200; hard[i * 4] = hard[i * 4 + 1] = hard[i * 4 + 2] = v; hard[i * 4 + 3] = 255; }
+  const hl = SelShape.range(hard, 20, 20, 2, 2, 10, true), hr = SelShape.edge(hard, 20, 20, 0, 0, 20, hl, [40, 40, 40, 255], 10, hl.slice(), null);
+  R.is(count(fl) === 200 && count(fr) === 200 && count(hl) === 200 && count(hr) === 200,
+    `a 10-level step (${count(fr)}) and a hard edge with no blend in it (${count(hr)}) add nothing to the 200 the flood took`);
+}
+
 console.log("\n=== Shift adds, Alt removes; the box; the undo step's bits ===");
 {
   const a = SelShape.rect(0, 0, 4, 4, 8, 8), b = SelShape.rect(2, 2, 6, 6, 8, 8);
@@ -226,6 +276,8 @@ const browser = findBrowser(argv.includes("--chrome") ? argv[argv.indexOf("--chr
 if (!browser) { console.log("\n(SKIP: no Chrome or Edge found, so the gestures are not exercised)"); R.finish(); }
 
 const BODY = `async function(){
+  // The one-shot Fill and Stamp along, which these checks are about; a path LAYER is t147's (4.52 (3)).
+  document.getElementById("pathAsLayer").checked = false;
   var out = {}, N = 256;
   var keep = { slot: App.activeSlot, layer: App.activeLayer, mode: App.brush.mode, color: App.brush.color, size: App.brush.size,
                hard: App.brush.hardness, op: App.brush.opacity, sc: v2.sc, ox: v2.ox, oy: v2.oy, chanView: App.chanView };
@@ -783,7 +835,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 300000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 300000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const o = run.result;
 if (o.__threw) { console.log("FAIL: the test body threw\n" + o.__threw); process.exit(1); }

@@ -83,7 +83,15 @@ function buildSlotMenu(slot){
   // lands on the selected texture, which the ⋮ that opened this menu has just made this one.
   if (!slot.missing && !tile) add("export layers…", "Write every layer of this texture as one file another editor opens — OpenRaster for Krita, GIMP and MyPaint, PSD for Photoshop and Paint.NET — with the base sheet at the bottom", () => Interchange.exportFile(slot));
   if (!slot.missing && !tile) add("import layers…", "Bring an .ora or .psd file's layers in, as paint layers above this texture's stack", () => pickFiles(Interchange.ACCEPT));
-  if (!slot.missing) add("resolution…", "Change the resolution you paint this texture at. Working bigger than the game's own sheet is normal — decals and fine detail are rasterised at this size, so it is what decides how sharp they come out.", () => resizeSlotPrompt(slot));
+  // One sheet out as a file of its own (ROADMAP 4.59): as the skin export writes it, as an image, or
+  // the game's original.
+  if (!slot.missing) add("export texture…", "Write this texture on its own — the albedo or _n exactly as Export writes it into the skin, as a PNG / TGA image, or the game's original .dds", () => OneTex.fromSlot(slot));
+  // The level ruler (ROADMAP 4.58, docs/MIP_LEVELS.md §6.1): one colour and number per mip level, to
+  // see in the game which level lands where on this vehicle.
+  if (!slot.missing && !tile) add("level ruler","Add a group that colours and numbers every mip level of this texture, with a filter strip. The 3-D view's Mip levels view shows where each level takes over here; export it and walk away from the vehicle in the game to see where each level takes over — the measurement every level effect is set from.", () => Levels.ruler(slot));
+  // ...and the level effects built on it (4.58 (c)): holo foil, colour flip, distance camouflage, metal flake
+  if (!slot.missing && !tile) add("level effect…", "Add a holo foil, a colour flip, a distance camouflage or a metal flake — ordinary layers whose look changes from one mip level to the next, so with distance and, on a UserSkin, with the viewing angle.", () => LayerProps.presetDialog(slot));
+  if (!slot.missing) add("resolution…","Change the resolution you paint this texture at. Working bigger than the game's own sheet is normal — decals and fine detail are rasterised at this size, so it is what decides how sharp they come out.", () => resizeSlotPrompt(slot));
   if (!slot.missing && !tile) add("remove albedo", "Revert this slot to an empty placeholder", () => removeAlbedo(slot), true);
   if (slot.smooth) add("remove _n", "Drop this slot's surface stack", () => removeSurface(slot), true);
   add("delete slot", "Remove the slot entirely and unbind its materials", () => deleteSlot(slot), true);
@@ -129,7 +137,10 @@ function resizeSlot(slot, w, h){
   if (!slot || !slot.baseC) return false;
   const ow = slot.baseC.width, oh = slot.baseC.height;
   if (ow === w && oh === h) return false;
-  slot.baseC = resizeCanvasTo(slot.baseC, w, h);
+  // A tile wearing the calibration grid takes the grid drawn at the new size, not the old one
+  // resampled — smoothing would widen its two-texel frame and move its numbers, and the grid would no
+  // longer be recognised as the grid (ROADMAP 3.45, found in its review).
+  slot.baseC = CamoTile.is(slot) && CamoTile.calIn() && w === h ? CamoTile.calibration(w) : resizeCanvasTo(slot.baseC, w, h);
   slot.covBase = resizeBytes(slot.covBase, ow, oh, w, h);
   slot.wearC = null; slot._cov = null; slot.chanC = null;
   // The vehicle's own sheet and its paint mask move with it, so the preview keeps working.

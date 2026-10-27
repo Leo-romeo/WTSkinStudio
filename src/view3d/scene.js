@@ -112,7 +112,10 @@ function animate(){
   SelOverlay.sync();                                           // the selection, on the model
   ProjHandles.sync();                                          // a projected decal's handles (ROADMAP 4.2)
   PathOverlay.sync();                                          // the shape tool's path on the model (6.1b)
+  // `render` is where a changed sheet is uploaded to the GPU, so it is a stroke's phase too (recorder note 4).
+  const t0 = Rec.clock();
   renderer.render(scene, camera);
+  Rec.span("render", t0);
 }
 // Position the key light from the azimuth/elevation sliders (when not following the camera).
 function applyLightDir(){

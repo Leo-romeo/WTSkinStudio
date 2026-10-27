@@ -119,8 +119,11 @@ const STACK = `
   var decalName = 'decal & "q" <a> \\u00e9\\ttab';
   var decal = LayerNode.of({ type: "decal", name: decalName, bmp: dbmp, x: .7, y: .3, scale: 1, rot: 25, flip: false, visible: true, opacity: 1, blend: "normal" });
   var g1paint = paint("g1paint", "overlay", 1, function(g){ for (var y = 0; y < N; y += 8) { g.fillStyle = y % 16 ? "#ffffff" : "#101010"; g.fillRect(0, y, N, 4); } });
-  var g1fx = LayerNode.of({ type: "adjust", name: "g1fx", visible: true, opacity: 1, blend: "normal", hue: 90, sat: 150, bright: 100, contrast: 100 });
-  var G1 = grp("G1", "normal", .9, [g1paint, g1fx]);
+  // A plain layer, not the four numbers it was until 2026-10-23: those land source-atop now like
+  // every effect kind, so a group holding one is written as one layer (G3's case, below), and G1 is
+  // here to be written as an isolated stack.
+  var g1top = paint("g1top", "normal", 1, function(g){ g.fillStyle = "#30c060"; g.fillRect(10, 0, 20, N); });
+  var G1 = grp("G1", "normal", .9, [g1paint, g1top]);
   var G2 = grp("G2", "multiply", 1, [LayerNode.of({ type: "fill", name: "g2a", color: "#ff8000", visible: true, opacity: 1, blend: "normal" })]);
   G2.mask = mkCanvas(N, N);
   (function(g){ var gr = g.createRadialGradient(N / 2, N / 2, 4, N / 2, N / 2, 30); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, N, N); })(ctx2d(G2.mask));
@@ -955,7 +958,7 @@ if (argv.includes("--install")) {
   R.finish();
 }
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 120000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 120000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -976,15 +979,15 @@ R.is(names(r.tree).join("|") === ["fxTop", "both", "clip", "grime", "P", "G2", "
 const T = Object.fromEntries(r.tree.map(d => [d.name, d]));
 R.is(T.mul.op === "svg:multiply" && T.mul.opacity === .6 && T.tint.op === "svg:screen" && T.tint.opacity === .5 && T.hidden.vis === "hidden" && T.mul.vis === "visible",
   `opacity, blend and visibility stay live: mul ${T.mul.op} ${T.mul.opacity}, tint ${T.tint.op} ${T.tint.opacity}, hidden ${T.hidden.vis}`);
-R.is(T.G1.tag === "stack" && T.G1.iso === "isolate" && T.G1.opacity === .9 && names(T.G1.kids).join() === "g1fx,g1paint" && T.G1.kids[1].op === "svg:overlay" && T.G1.kids[0].op === "svg:src-over",
-  `a plain group is an isolated stack with its opacity (${T.G1.opacity}); inside it the overlay stays overlay and the effect is written as its result, source-over`);
+R.is(T.G1.tag === "stack" && T.G1.iso === "isolate" && T.G1.opacity === .9 && names(T.G1.kids).join() === "g1top,g1paint" && T.G1.kids[1].op === "svg:overlay" && T.G1.kids[0].op === "svg:src-over",
+  `a plain group is an isolated stack with its opacity (${T.G1.opacity}); inside it the overlay stays overlay and the normal layer normal`);
 R.is(T.G2.tag === "layer" && T.G2.op === "svg:multiply" && r.notes.flat.join() === "G2",
   `a masked group is ONE layer in the file, still multiply (${T.G2.tag}, ${T.G2.op}) — a soft mask on a group is not the same mask on each child`);
 R.is(T.P.tag === "stack" && T.P.iso === "auto" && T.P.opacity === 1 && T.P.op === "svg:src-over" && T.P.kids[0].name === "pb" && T.P.kids[0].opacity === .56 && T.P.kids[1].opacity === .8 && T.P.kids[0].op === "svg:color" && T.P.kids[1].op === "svg:soft-light",
   `a pass-through group is isolation="auto" at full opacity, and each child carries the group's 0.8: pb ${T.P.kids[0].opacity}, pa ${T.P.kids[1].opacity}`);
-R.is(r.notes.baked.join() === "tint,pa,pb,grime,clip" && r.notes.effects.join() === "g1fx,fxTop",
+R.is(r.notes.baked.join() === "tint,pa,pb,grime,clip" && r.notes.effects.join() === "fxTop",
   `the stencils applied to pixels are the mask, the group's rectangle, the blend-if and the clip (${r.notes.baked.join(", ")}); effects written as results: ${r.notes.effects.join(", ")}`);
-R.is(/carry their mask/.test(r.said) && /“G2” written as one layer/.test(r.said) && /2 effects written/.test(r.said), `the status line says all three:\n        ${r.said}`);
+R.is(/carry their mask/.test(r.said) && /“G2” written as one layer/.test(r.said) && /1 effect written/.test(r.said), `the status line says all three:\n        ${r.said}`);
 R.is(r.sizes.length === 1 && r.sizes[0] === "64x64", `every layer PNG is a whole sheet (${r.sizes.join(", ")})`);
 R.is(r.hiddenPx[1] === 255 && r.hiddenPx[3] === 255, `a hidden layer is written with its pixels (${r.hiddenPx.join(",")}) and hidden`);
 R.is(r.tintAlpha[0] > 245 && r.tintAlpha[1] > 100 && r.tintAlpha[1] < 150 && r.tintAlpha[2] < 10,
@@ -1068,7 +1071,7 @@ R.is(errs.length === 0, errs.length ? "uncaught errors during the run:\n        
 
 // ==== PSD ====
 console.log("\n=== PSD ===");
-const prun = await evalInPage({ browser, expr: pageExpr(PSD_BODY, 400), timeoutMs: 180000, keep: argv.includes("--keep") });
+const prun = await evalInPage({ browser, expr: pageExpr(PSD_BODY), timeoutMs: 180000, keep: argv.includes("--keep") });
 if (!prun.ok) { console.log("FAIL: " + prun.reason); process.exit(1); }
 const p = prun.result;
 if (p.__threw) { console.log("FAIL: the PSD body threw\n" + p.__threw); process.exit(1); }
@@ -1090,7 +1093,7 @@ const marks = recs.map(x => x.lsct ? x.lsct + ":" + x.name : null).filter(Boolea
 R.is(h.count === recs.length && recs.length === 18 && leaf.length === 14 && marks === "3:</Layer group> 1:G1 3:</Layer group> 1:P",
   `a group is a divider below its children and a folder above them, named: ${h.count} records, ${leaf.length} layers, the markers bottom first ${marks}`);
 const topDown = leaf.map(x => x.name);
-R.is(topDown.join("|") === ["Base colour — t101a", "mul", "hidden", "tint", r.decalName, "g1paint", "g1fx", "G2", "pa", "pb", "grime", "clip", "both", "fxTop"].join("|"),
+R.is(topDown.join("|") === ["Base colour — t101a", "mul", "hidden", "tint", r.decalName, "g1paint", "g1top", "G2", "pa", "pb", "grime", "clip", "both", "fxTop"].join("|"),
   "the layers run bottom first, the base sheet at the bottom and the names in 'luni' exactly (ampersand, quotes, é, a tab):\n        " + topDown.join(" / "));
 // A record the checks below look for that is not there fails its check by name, not by a TypeError.
 const PR = new Proxy(Object.fromEntries(recs.map(x => [x.name + (x.lsct ? "#" + x.lsct : ""), x])), { get: (t, k) => t[k] || {} });

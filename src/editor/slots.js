@@ -36,7 +36,7 @@ async function addFiles(files){
         // buffer to the decode worker and hands it back as .raw, so `buf` is detached after it.
         let dec;
         if (name.endsWith(".dds")) dec = await parseDDSAsync(buf);
-        else { dec = parseTGA(buf); dec.raw = buf; }
+        else { dec = TGA.parseTGA(buf); dec.raw = buf; }
         dec.fileName = f.name;
         dec.rawName = f.name;
         App.decoded.set(texStemOf(f.name), dec);
@@ -179,7 +179,6 @@ function rebindMaterials(stems){
       // that really does carry a t0 keeps its slot, because only the fallback is gated. ROADMAP 3.18.
       const cStem = dref.c || (isNonPaintableMat("", dref.cls) ? null : (others.find(t => !/_n$/.test(t)) || others[0])) || null;
       if (cStem) {
-        // t1 is the paint slot of the masked shaders — keep it for the preview tint
         // t1 is the camo slot of the masked shaders — but stowage materials (bags, bedrolls, the
         // spare track links bolted to a hull) point t1 back at their OWN albedo. That is not a
         // camouflage, and treating it as one made the exporter emit a replace_tex that swapped the
@@ -192,6 +191,7 @@ function rebindMaterials(stems){
         slot.cStem = cStem;                                 // remember exact names even before decode
         if (dref.n) slot.nStem = dref.n;
         App.matSlot.set(mat, m.stem);
+        if (Transfer.GLASS.test(String(dref.cls || "").toLowerCase())) App.matGlass.set(mat, { cls: dref.cls, coat: (dref.all && dref.all.t3) || "", tex: true });   // glass WITH a sheet: Mats.seeThrough (1.26)
       } else {
         App.matSlot.delete(mat);                            // glass/chrome/null — no paintable texture
         // ...and remember WHY, because the viewport needs it and cannot re-derive it. 3.18 measured
@@ -280,7 +280,7 @@ function completeSlots(stems){
     if (!slot.smooth) {
       const n = (slot.nStem && stems.has(slot.nStem)) ? slot.nStem : (stems.has(base + "_n") ? base + "_n" : null);
       const dn = n && App.decoded.get(n);
-      if (dn) { slot.nStem = n; initSlotSurface(slot, dn); }
+      if (dn) { slot.nStem = n; NSheet.init(slot, dn); }
     }
   }
 }
@@ -290,10 +290,12 @@ function completeSlots(stems){
 // precisely so the rebuild that follows the loadout can bind them. Releasing them here was one
 // half of "the weapons show the game's textures until the skin is loaded again" (2026-09-20).
 function gcDecoded(){
-  if (App.decoded.size < 64) return;
+  const ck = Cockpit.sheets();                                    // the cockpit body's, off screen (1.26)
+  if (App.decoded.size < 64 || !ck) return;
   const live = new Set(App.skinDecoded || []);
   for (const s of App.slots.values()) { if (s.cStem) live.add(s.cStem.toLowerCase()); if (s.nStem) live.add(s.nStem.toLowerCase()); }
   for (const stem of App.matEffect.values()) live.add(stem);     // a flame's sheet is drawn, not painted
+  for (const stem of ck) live.add(stem);
   let freed = 0;
   for (const k of [...App.decoded.keys()]) if (!live.has(k)) { App.decoded.delete(k); freed++; }
   if (freed) console.debug("released " + freed + " unused decoded texture(s)");
@@ -321,7 +323,7 @@ function ensureSlot(m){
   if (dc && (!slot.baseC || slot.missing)) fillSlotAlbedo(slot, dc, m.c);
   else if (!slot.baseC) initPlaceholderAlbedo(slot);
   if (!m.n) slot.nStem = slot.nStem || null;
-  if (dn && !slot.smooth) { slot.nStem = m.n; initSlotSurface(slot, dn); }
+  if (dn && !slot.smooth) { slot.nStem = m.n; NSheet.init(slot, dn); }
   return slot;
 }
 
@@ -400,29 +402,63 @@ function rescaleSlotLayers(slot, w, h){
     const n = mkCanvas(w, h); n.getContext("2d").drawImage(c, 0, 0, w, h); return n;
   };
   // Groups carry masks too, so this walks every NODE and not only the leaves (ROADMAP 4.9).
-  for (const L of layerNodes(slot.layers)) { if (L.type === "paint") L.canvas = rs(L.canvas); if (L.mask) L.mask = rs(L.mask); }
-}
-// Build (or rebuild) the smooth/metal/normal stack from a decoded WT _n texture.
-function initSlotSurface(slot, dn){
-  const { width: w, height: h } = dn;
-  slot.nFileName = dn.fileName; slot.nSize = w;
-  const src = dn.mips[0].rgba;
-  const sm = new ImageData(w, h), mt = new ImageData(w, h), nr = new ImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const R = src[i*4], G = src[i*4+1], B = src[i*4+2], A = src[i*4+3];
-    sm.data[i*4] = sm.data[i*4+1] = sm.data[i*4+2] = R; sm.data[i*4+3] = 255;
-    mt.data[i*4] = mt.data[i*4+1] = mt.data[i*4+2] = B; mt.data[i*4+3] = 255;
-    nr.data[i*4] = G; nr.data[i*4+1] = A; nr.data[i*4+2] = 128; nr.data[i*4+3] = 255;
+  for (const L of layerNodes(slot.layers)) {
+    // A path layer's recipe goes with its pixels (4.52 (3)), on whichever channel it is.
+    for (const ch of LayerNode.channelsOf(L)) { const c = L.chans[ch]; if (c && c.shape) { PathLayer.fit(c, w, h); c.canvas = rs(c.canvas); } }
+    if (L.type === "paint") L.canvas = rs(L.canvas);
+    if (L.mask) L.mask = rs(L.mask);
   }
-  slot.smooth = mkCanvas(w, h); ctx2d(slot.smooth).putImageData(sm, 0, 0);
-  slot.metal = mkCanvas(w, h); ctx2d(slot.metal).putImageData(mt, 0, 0);
-  slot.normal = mkCanvas(w, h); ctx2d(slot.normal).putImageData(nr, 0, 0);
-  // A different _n means different sheets, so the textures that point at them are rebuilt.
-  slot._hadSurfLayers = false;
-  disposeSurfaceTextures(slot);
-  refreshSurfaceTextures(slot);
-  if (App.skinDecoded && App.skinDecoded.has(String(slot.nStem || "").toLowerCase())) slot.nEdited = true;   // as fillSlotAlbedo
 }
+// ---- the packed `_n` and the three sheets the editor keeps of it ----
+// A `_n` is R = inverted roughness, G = normal Y, B = metalness, A = normal X — X the left/right
+// slope, Y the up/down one with high G leaning toward the sheet's BOTTOM row (DirectX's sense). The
+// app had X and Y the other way round from its first day; measured on 2026-10-24 over the 50 usable
+// `_n` in the install's UserSkins (X in A on 48, high G toward the bottom on 49) and confirmed in the
+// game the same day on `dist/plan/1.24/n_slope_test/`, mirrored wing strip included (ROADMAP 1.24).
+// Stock sheets round-tripped through the old order unchanged, which is how it went unseen: only what
+// the app GENERATED into the slopes reached the game across the diagonal. The editor's own normal
+// sheet is X in red, Y in green, whatever the file — every tool, the relief and the preview work in
+// that — so this is the one place a file's slope bytes are named, both directions (the packer is
+// ExportCollect.pack; t169 holds both).
+const NSheet = {
+  X: 3, Y: 1,                                   // the bytes of a packed _n holding normal X and Y
+  // The three sheets of a packed _n, as ImageData: smoothness and metalness grey, and its slopes.
+  split(src, w, h){
+    const sm = new ImageData(w, h), mt = new ImageData(w, h);
+    for (let o = 0; o < w * h * 4; o += 4) {
+      sm.data[o] = sm.data[o+1] = sm.data[o+2] = src[o]; sm.data[o+3] = 255;
+      mt.data[o] = mt.data[o+1] = mt.data[o+2] = src[o+2]; mt.data[o+3] = 255;
+    }
+    return { sm, mt, nr: NSheet.slopes(src, w, h) };
+  },
+  // The normal sheet alone — X in red, Y in green, blue a constant 128 (the preview derives Z) — for a
+  // reader that wants nothing else (a loose _n's paste source), at a third of split's memory.
+  slopes(src, w, h){
+    const nr = new ImageData(w, h), d = nr.data, X = NSheet.X, Y = NSheet.Y;
+    for (let o = 0; o < w * h * 4; o += 4) { d[o] = src[o+X]; d[o+1] = src[o+Y]; d[o+2] = 128; d[o+3] = 255; }
+    return nr;
+  },
+  // A normal sheet written in the OLD order (red = the file's G, green = its A) turned to this one —
+  // a project saved before version 8 stores its edited surface sheet that way (core/project.js).
+  turn(canvas){
+    const g = ctx2d(canvas), im = g.getImageData(0, 0, canvas.width, canvas.height), d = im.data;
+    for (let o = 0; o < d.length; o += 4) { const r = d[o]; d[o] = d[o+1]; d[o+1] = r; }
+    g.putImageData(im, 0, 0);
+  },
+  // Build (or rebuild) the smooth/metal/normal stack from a decoded WT _n texture.
+  init(slot, dn){
+    const { width: w, height: h } = dn, { sm, mt, nr } = NSheet.split(dn.mips[0].rgba, w, h);
+    slot.nFileName = dn.fileName; slot.nSize = w;
+    slot.smooth = mkCanvas(w, h); ctx2d(slot.smooth).putImageData(sm, 0, 0);
+    slot.metal = mkCanvas(w, h); ctx2d(slot.metal).putImageData(mt, 0, 0);
+    slot.normal = mkCanvas(w, h); ctx2d(slot.normal).putImageData(nr, 0, 0);
+    // A different _n means different sheets, so the textures that point at them are rebuilt.
+    slot._hadSurfLayers = false;
+    disposeSurfaceTextures(slot);
+    refreshSurfaceTextures(slot);
+    if (App.skinDecoded && App.skinDecoded.has(String(slot.nStem || "").toLowerCase())) slot.nEdited = true;   // as fillSlotAlbedo
+  },
+};
 // Reassign materials in place — for fills that happen outside a full rebuildAll().
 function rebuildMaterials(){
   if (!App.meshes.size) return;
@@ -439,6 +475,7 @@ function disposeSlotTextures(slot){
   disposeSurfaceTextures(slot);
   for (const k of ["tex", "texCov", "texStock", "texPaintMask"]) if (slot[k]) { slot[k].dispose(); slot[k] = null; }
   disposeChannelTextures(slot);
+  LevelView.drop(slot);                                       // the views' own chains (4.58 (b))
   slot.chanC = null; slot.chanView = null; slot._cov = null;
 }
 

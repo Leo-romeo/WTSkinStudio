@@ -11,7 +11,25 @@ document.querySelectorAll(".sidebar .section h3").forEach(h => {
 // skin does not fully cover) and `keepAlpha:false` (which ships alpha 255 and throws the coverage
 // mask away). Anything written before version 2 has those two reset to the new, safe defaults;
 // everything else in the file is still honoured.
-const PREFS_VERSION = 2;
+//
+// Version 3 (2026-10-22): Spacing's default went from 35 % to 15 % (`Pen.SPACING`), and since every
+// blob holds every row, touched or not, a 35 written before then is the old default rather than a
+// choice — `applyPrefs` turns it into the tool's new one. Without that, nobody who had ever opened
+// the app would have seen the change.
+//
+// Version 4 (2026-10-22): Mipmaps are off by default (ROADMAP 3.42 (4)) — with the game's
+// older-video-card support on, a mipmapped surface seen at an angle comes out blurry. The same
+// reasoning as Spacing: every blob stores the box, so a `true` written before then is the old
+// default and not a choice, and it is turned off. A `false` was always a choice and stays. Decided
+// without the owner (ROADMAP_DONE 3.42); to keep a stored `true` instead, delete the `ver < 4` line
+// in `applyPrefs`.
+//
+// Version 5 (2026-10-24): the projected 3-D brush is on by default (ROADMAP 1.19 (e)). Every blob
+// stores its switch, so a `false` written before then is the old default — the switch shipped off
+// behind it from 2026-10-23 — and not a choice, and it is turned on; a `false` written from version 5
+// on was chosen and stays. Decided without the owner (ROADMAP_DONE 1.19e); to keep a stored `false`,
+// delete the `ver < 5` line in `applyPrefs`.
+const PREFS_VERSION = 5;
 
 // ---------- one row per setting ----------
 // Every persisted setting is declared once, here, and save / load / reset / export all walk this
@@ -81,9 +99,10 @@ const PREFS = [
   // painting with a spacing they had not chosen and could not see (2026-08-23). Measured at a 48 px
   // brush: up to 35% the stroke edge wobbles 0-1 px, at 50% 3 px, at 100% 10-17 px, and past 100%
   // the stamps stop touching at all. So a stored value outside the range is brought back into it
-  // rather than kept as a setting the UI cannot show.
-  { id: "brush.spacing", sec: "brush", get: () => App.brush.spacing || .35,
-    set: v => { const s = Math.min(1, Math.max(.05, v || .35)); App.brush.spacing = s;
+  // rather than kept as a setting the UI cannot show. The default is `Pen.SPACING`, 15 % since
+  // 2026-10-22 (why, there; how a stored 35 moves to it, `applyPrefs`).
+  { id: "brush.spacing", sec: "brush", get: () => App.brush.spacing || Pen.SPACING,
+    set: v => { const s = Math.min(1, Math.max(.05, v || Pen.SPACING)); App.brush.spacing = s;
       $("brushSpacing").value = Math.round(s * 100); $("brushSpacingVal").textContent = Math.round(s * 100); } },
   // ROADMAP 4.50 (4) + 6.4. Flow, Build up and what pressure drives are the tool in hand's, like the
   // rows above — every other tool keeps its own through brush.tools below.
@@ -109,6 +128,18 @@ const PREFS = [
   ...["sizeJit", "flowJit", "scatter", "angle", "angleJit", "follow"].map(k => ({ id: "brush." + k, sec: "brush",
     get: () => k === "follow" ? !!App.brush.follow : +App.brush[k] || 0,
     set: v => BrushTools.put(BrushTools.field(k), k === "follow" ? !!v : +v || 0) })),
+  // ROADMAP 4.56: the colour along the stroke, the tool's like the dynamics. A name the select does
+  // not have is refused by BrushTools.put, which leaves the row where it was.
+  { id: "brush.cycle", sec: "brush", get: () => App.brush.cycle || "off",
+    set: v => { BrushTools.put(BrushTools.field("cycle"), String(v)); BrushPanel.syncCycle(); } },
+  { id: "brush.cycleLen", sec: "brush", get: () => +App.brush.cycleLen || 10,
+    set: v => { BrushTools.put(BrushTools.field("cycleLen"), +v || 10); BrushPanel.syncCycle(); } },
+  // ROADMAP 4.50 (11): the Retouch brush's settings, the tool's own like the rest.
+  { id: "brush.retouch", sec: "brush", get: () => App.brush.retouch || "blur",
+    set: v => { BrushTools.put(BrushTools.field("retouch"), String(v)); BrushPanel.syncRetouch(); } },
+  { id: "brush.range", sec: "brush", get: () => App.brush.range || "mids", set: v => BrushTools.put(BrushTools.field("range"), String(v)) },
+  { id: "brush.strength", sec: "brush", get: () => App.brush.strength == null ? .5 : +App.brush.strength,
+    set: v => BrushTools.put(BrushTools.field("strength"), isFinite(+v) ? +v : .5) },
   // Smoothing and the pressure curve belong to the HAND, not the tool — one string length and one
   // curve across the tools, the way the colour is one colour.
   { id: "brush.lazy", sec: "brush", get: () => App.brush.lazy || 0,
@@ -116,8 +147,17 @@ const PREFS = [
       $("brushLazy").value = n; $("brushLazyVal").textContent = BrushPanel.lazyText(n); } },
   { id: "brush.curve", sec: "brush", get: () => App.brush.curve,
     set: v => { const g = BrushPanel.CURVES.includes(+v) ? +v : 1; App.brush.curve = g; $("penCurve").value = String(g); } },
+  // The projected 3-D brush's switch (ROADMAP 1.19 (a)) is the hand's too: one way of painting on the
+  // model, whichever tool is in it.
+  { id: "brush.proj3d", sec: "brush", get: () => !!App.brush.proj3d,
+    set: v => { App.brush.proj3d = !!v; $("brushProj").checked = !!v; BrushPanel.syncPattern(); } },
+  // …and its facing limit (1.19 (e)), the hand's for the same reason.
+  { id: "brush.face", sec: "brush", get: () => App.brush.face,
+    set: v => { const n = ProjBrush.faceOf(v); App.brush.face = n; $("brushFace").value = n; $("brushFaceVal").textContent = n + "°"; } },
+  // ROADMAP 4.55: the pattern brush's lattice, one record — the hand's, like the colour.
+  { id: "brush.pattern", sec: "brush", get: () => Procedural.brushPatClone(App.brush.pattern), set: v => BrushPanel.setPattern(v) },
   { id: "brush.color", sec: "brush", get: () => App.brush.color,
-    set: v => { App.brush.color = v; $("brushColor").value = v; brushStamp._key = null; } },
+    set: v => { App.brush.color = v; $("brushColor").value = v; brushStamp._key = null; BrushPanel.syncCycle(); } },
   { id: "brush.value", sec: "brush", get: () => App.brush.value,
     set: v => { App.brush.value = v; $("brushValue").value = v; $("brushValueVal").textContent = v; } },
   // The Clone's tone matching, like the colour: one setting across the tools, since one tool reads it.
@@ -146,6 +186,9 @@ const PREFS = [
     } },
   { id: "palette", sec: "brush", data: true, get: () => App.palette || [],
     set: v => { if (v && v.length) { App.palette = v; renderPalette(); } } },
+  // Your own palette (4.50 (12)): data like the recent row — reset keeps it, a settings export carries it.
+  { id: "brush.myPalette", sec: "brush", data: true, get: () => Swatches.mine.slice(), set: v => Swatches.adopt(v) },
+  { id: "brush.swLib", sec: "brush", get: () => Swatches.lib, set: v => Swatches.set(v) },
   // ---- symmetry ----
   { id: "sym.on", sec: "sym", get: () => $("symOn").checked, set: v => $("symOn").checked = !!v },
   { id: "sym.axis", sec: "sym", get: () => $("symAxis").value, set: v => $("symAxis").value = v },
@@ -175,7 +218,7 @@ const PREFS = [
     set: v => $("expCamoBase").value = v },
   { id: "camoColor", sec: "export", get: () => $("expCamoColor").value, set: v => $("expCamoColor").value = v },
   { id: "invRough", sec: "export", get: () => $("optInvRough").checked, set: v => $("optInvRough").checked = v !== false },
-  { id: "mips", sec: "export", get: () => $("optMips").checked, set: v => $("optMips").checked = v !== false },
+  { id: "mips", sec: "export", get: () => $("optMips").checked, set: v => $("optMips").checked = v === true },
   { id: "pad", sec: "export", get: () => $("optPad").checked, set: v => $("optPad").checked = v !== false },
   { id: "flipV", sec: "export", get: () => $("optFlipV").checked, set: v => $("optFlipV").checked = !!v },
   // ---- game list ----
@@ -261,9 +304,22 @@ function prefsBlob(forFile){
   return o;
 }
 function applyPrefs(p){
-  const fresh = (p.v | 0) >= PREFS_VERSION;
+  const ver = p.v | 0;
+  // A 35 from before v3 becomes the tool's own default — 15, or Panel line's 35 (`BrushTools.fresh`)
+  // — while any other value was chosen and stays. Here rather than in loadPrefs, so that a settings
+  // file exported by an older build is read the same way.
+  if (ver < 3 && p.brush && typeof p.brush === "object") {
+    const was = s => typeof s === "number" && Math.abs(s - .35) < 1e-9, b = p.brush;
+    if (was(b.spacing)) b.spacing = BrushTools.fresh(b.mode || App.brush.mode).spacing;
+    if (b.tools && typeof b.tools === "object")
+      for (const m in b.tools) if (b.tools[m] && was(b.tools[m].spacing)) b.tools[m].spacing = BrushTools.fresh(m).spacing;
+  }
+  if (ver < 4 && p.mips === true) p.mips = false;          // the old default, not a choice (version 4, above)
+  if (ver < 5 && p.brush && typeof p.brush === "object" && p.brush.proj3d === false) p.brush.proj3d = true;   // version 5, above
   for (const r of PREFS) {
-    if (r.sinceV && !fresh) continue;                 // the two values a pre-v2 file must not restore
+    // Gated on the version that brought the row in, not on this build's: compared with the build's,
+    // the two v2 rows would be dropped from every v2 file the moment the version moved on.
+    if (r.sinceV && ver < r.sinceV) continue;
     const v = prefGet(p, r.id);
     if (v === undefined || v === null) continue;
     try { r.set(v); } catch (e) { reportFailure("Restoring the setting “" + r.id + "”", e, "prefs-load"); }

@@ -36,7 +36,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { findBrowser, evalInPage, pageExpr, makeReport } from "./headless.mjs";
 import { build } from "./build.mjs";
@@ -75,7 +75,7 @@ const OOZ_NEEDLE = "AGFzbQEAAAABpAESYAJ/fwF/YAN/f38Bf2AEf39/fwF/YAV/f39/fwF/YAt/
 const oozPath = path.join(ROOT, "src", "vendor", "ooz-b64.js");
 const hasOoz = fs.existsSync(oozPath);
 R.is(/const OODLE_IMPL = "wtlz";/.test(pub), 'the slot names the decoder: OODLE_IMPL is "wtlz"');
-R.is(pub.includes("\n/*==WTLZ==*/") && pub.includes("\n/*==ENDWTLZ==*/"), "and the WTLZ section is in the page for the worker to lift");
+R.is(/[\n>]\/\*==WTLZ==\*\//.test(pub) && pub.includes("\n/*==ENDWTLZ==*/"), "and the WTLZ section is in the page for the worker to lift");
 R.is(/const OODLE_WASM_B64 = "";/.test(pub), "there is no WASM Oodle blob in the build — the slot declares it empty");
 if (hasOoz) R.is(blobNeedle(fs.readFileSync(oozPath, "utf8"))?.[1] === OOZ_NEEDLE, "the stored ooz needle is still how src/vendor/ooz-b64.js begins, so the exclusion below means something");
 R.is(!pub.includes(OOZ_NEEDLE), "ooz's bytes are NOT in the build — nothing GPL-3 is linked into the page that ships (docs/LICENSING.md)");
@@ -85,7 +85,7 @@ R.is(!pub.includes("UnrealEngine") && !pub.includes("Unreal Engine EULA"),
 if (hasOoz) {
   const ooz = build(ROOT, { ooz: true }).html;
   R.is(ooz.includes(OOZ_NEEDLE), "--ooz still produces the diagnostic build that has ooz's bytes");
-  R.is(!ooz.includes("\n/*==WTLZ==*/") && /const OODLE_IMPL = "ooz";/.test(ooz), "and that build carries no WTLZ section — one decoder per page, so an A/B compares decoders");
+  R.is(!/[\n>]\/\*==WTLZ==\*\//.test(ooz) && /const OODLE_IMPL = "ooz";/.test(ooz), "and that build carries no WTLZ section — one decoder per page, so an A/B compares decoders");
 } else {
   console.log("  ---- src/vendor/ooz-b64.js is absent (not in the public repository), so the two --ooz checks");
   console.log("       are skipped. The page is still searched for ooz's bytes, by the stored needle.");
@@ -96,7 +96,7 @@ if (hasRad) {
   R.is(!!radNeedle, "RAD's blob was located too, so the exclusion below means something");
   R.is(radNeedle && !pub.includes(radNeedle[1]), "RAD's bytes are NOT in the build (CLAUDE.md §0.2)");
   R.is(radNeedle && rad.includes(radNeedle[1]), "--rad still produces the diagnostic build that has them");
-  R.is(!rad.includes("\n/*==WTLZ==*/") && !rad.includes(OOZ_NEEDLE), "and that build carries neither WTLZ nor ooz");
+  R.is(!/[\n>]\/\*==WTLZ==\*\//.test(rad) && !rad.includes(OOZ_NEEDLE), "and that build carries neither WTLZ nor ooz");
   R.is(pub.length < rad.length, `the shipped artifact is smaller than the RAD one — ${Math.round((rad.length - pub.length) / 1024)} KB less`);
 } else {
   console.log("  ---- src/vendor/oodle-b64.js is absent (git-ignored, as on a clone), so the five");
@@ -152,20 +152,75 @@ if (fs.existsSync(path.join(ROOT, ".git")) && hasRad) {
   const radSrc = fs.readFileSync(radPath, "utf8");
   const needle = /const OODLE_WASM_B64 = "([A-Za-z0-9+/]{96})/.exec(radSrc);
   const run = (cmd, opts) => execSync(cmd, { cwd: ROOT, maxBuffer: 1 << 28, ...opts });
-  let scanned = 0;
+  // ROADMAP 0.4: this scan was 49 of the suite's 307 s (2026-10-22), because it started one `git
+  // cat-file blob` process per object. Two things fixed it. (1) One `git cat-file --batch` stream
+  // reads every object in one process. (2) Objects are immutable — an id that was clean against a
+  // needle stays clean against it — so the ids found clean are kept in a git-ignored record keyed by
+  // the needle and by SCAN_VERSION, and a later run opens only objects it has not seen. Every object
+  // is still scanned against every needle set once (CLAUDE.md §0.2); a new needle, or a bump of
+  // SCAN_VERSION when the scan itself changes, starts the record over. A carrier is never recorded.
+  const SCAN_VERSION = 1;
+  const recPath = path.join(ROOT, "dist", "t46-clean.json");
+  const key = needle ? sha(SCAN_VERSION + ":" + needle[1]) : "";
+  let rec = { key, clean: [] };
+  try { const r = JSON.parse(fs.readFileSync(recPath, "utf8")); if (r.key === key && Array.isArray(r.clean)) rec = r; }
+  catch { /* no record yet, or an unreadable one: the answer is a full scan */ }
+  const known = new Set(rec.clean);
+  let scanned = 0, skipped = 0;
   const carriers = [];
   if (needle) {
+    const todo = [];
     for (const line of run("git cat-file --batch-all-objects --batch-check", { encoding: "utf8" }).split("\n")) {
-      const [sha, type, size] = line.trim().split(/\s+/);
+      const [id, type, size] = line.trim().split(/\s+/);
       if (type !== "blob" || +size < 100000) continue;
-      scanned++;
-      if (run(`git cat-file blob ${sha}`).includes(needle[1])) carriers.push(sha.slice(0, 10));
+      if (known.has(id)) { skipped++; continue; }
+      todo.push(id);
+    }
+    if (todo.length) {
+      // Streamed, one object in memory at a time: the blobs over 100 KB were 1.19 GB on 2026-10-22,
+      // and read into one buffer that is most of the way to Node's limit and grows with every commit.
+      const want = Buffer.from(needle[1], "latin1");
+      await new Promise((resolve, reject) => {
+        const git = spawn("git", ["cat-file", "--batch"], { cwd: ROOT, stdio: ["pipe", "pipe", "inherit"] });
+        // --batch writes "<id> <type> <size>\n<bytes>\n" per object, in the order asked.
+        // Chunks are gathered in a list and joined once per object: joining on every chunk copied a
+        // 5 MB artifact ~80 times and cost a third of the scan.
+        let parts = [], have = 0, cur = null;
+        git.stdout.on("data", chunk => {
+          parts.push(chunk); have += chunk.length;
+          for (;;) {
+            if (!cur) {
+              const head = parts.length > 1 ? Buffer.concat(parts) : parts[0];
+              const nl = head ? head.indexOf(10) : -1;
+              if (nl < 0) return;
+              const [id, , size] = head.toString("latin1", 0, nl).split(" ");
+              cur = { id, size: +size };
+              const rest = head.subarray(nl + 1);
+              parts = rest.length ? [rest] : []; have = rest.length;
+            }
+            if (have < cur.size + 1) return;
+            const all = parts.length > 1 ? Buffer.concat(parts) : parts[0];
+            scanned++;
+            if (all.subarray(0, cur.size).includes(want)) carriers.push(cur.id.slice(0, 10));
+            else known.add(cur.id);
+            const rest = all.subarray(cur.size + 1);
+            parts = rest.length ? [rest] : []; have = rest.length;
+            cur = null;
+          }
+        });
+        git.on("error", reject);
+        git.on("close", code => code === 0 ? resolve() : reject(new Error("git cat-file --batch exited " + code)));
+        git.stdin.end(todo.join("\n") + "\n");
+      });
+      R.is(scanned === todo.length, `the batch stream answered every object asked for → ${scanned} of ${todo.length}`);
+      try { fs.mkdirSync(path.dirname(recPath), { recursive: true }); fs.writeFileSync(recPath, JSON.stringify({ key, clean: [...known] })); }
+      catch (e) { console.log(`  (could not keep the clean-id record at ${recPath}: ${e.message} — the next run scans everything again)`); }
     }
   }
   R.is(!!needle, "the RAD needle was built, so the scan below means something");
   R.is(carriers.length === 0, carriers.length
     ? `${carriers.length} git objects carry the RAD blob: ${carriers.join(", ")} — history needs purging (docs/LICENSING.md)`
-    : `no git object carries the RAD blob (${scanned} blobs over 100 KB opened and searched)`);
+    : `no git object carries the RAD blob (${scanned} blobs over 100 KB opened and searched, ${skipped} already found clean against this needle)`);
 } else if (!hasRad) {
   console.log("\n  ---- the repository scan needs RAD's bytes to search for, and the blob is absent.");
   console.log("       On a clone that is the expected state: there is nothing to have leaked.");
@@ -173,7 +228,7 @@ if (fs.existsSync(path.join(ROOT, ".git")) && hasRad) {
 
 console.log("\n=== the decoder reads real Leviathan, and agrees with RAD byte for byte ===");
 const O = oodleFrom(pub);
-R.is(O.oodleAvailable() === true, "oodleAvailable() is true in the shipped build");
+R.is(O.oodleAvailable() === true, "Oodle.oodleAvailable() is true in the shipped build");
 const ex = await O.ensureOodle();
 const out = O.oodleDecompress(ex, new Uint8Array(FIXTURE), RAW);
 R.is(out.length === RAW, `it decoded the whole block — ${out.length} bytes`);
@@ -212,14 +267,21 @@ if (hasRad) {
 
   console.log("\n=== how fast ===");
   const time = (fn, n) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < n; i++) fn(); return Number(process.hrtime.bigint() - t0) / 1e6 / n; };
-  const N = 40;
+  const N = 5, ROUNDS = 12;
   // Warm both first: the JIT's first pass over 2 300 lines of decoder costs about as much as one
   // block, and a vehicle is hundreds of blocks. What is being measured is the decoder, not the
   // compiler — a WASM module pays its equivalent at instantiate, outside the loop, already.
   time(() => O.oodleDecompress(ex, new Uint8Array(FIXTURE), RAW), 5);
   time(() => RADD.oodleDecompress(rex, new Uint8Array(FIXTURE), RAW), 5);
-  const tOwn = time(() => O.oodleDecompress(ex, new Uint8Array(FIXTURE), RAW), N);
-  const tRad = time(() => RADD.oodleDecompress(rex, new Uint8Array(FIXTURE), RAW), N);
+  // Interleaved, and each one's BEST round: under a loaded suite one 40-block run apiece put a burst of
+  // load on ours alone — 4.57× at three lanes on 2026-10-23, 3.3× alone, no decoder file changed. Round
+  // by round the same load falls on both, and the minimum is what each decoder costs when it gets the
+  // machine (fix plan 2026-10-23, step 7). The 4× bar is unchanged.
+  let tOwn = Infinity, tRad = Infinity;
+  for (let r = 0; r < ROUNDS; r++) {
+    tOwn = Math.min(tOwn, time(() => O.oodleDecompress(ex, new Uint8Array(FIXTURE), RAW), N));
+    tRad = Math.min(tRad, time(() => RADD.oodleDecompress(rex, new Uint8Array(FIXTURE), RAW), N));
+  }
   const mbs = ms => (RAW / 1048576 / (ms / 1000)).toFixed(0);
   console.log(`  own ${tOwn.toFixed(2)} ms/block (${mbs(tOwn)} MB/s)   RAD ${tRad.toFixed(2)} ms/block (${mbs(tRad)} MB/s)   ratio ${(tOwn / tRad).toFixed(2)}×`);
   // Everything decodes in a worker pool (CLAUDE.md §3.1), so this is throughput, not UI latency —
@@ -242,13 +304,13 @@ if (!browser) {
   const inject = `<script>${FNV}\nwindow.__fix = Uint8Array.from(atob(${JSON.stringify(FIXTURE.toString("base64"))}), function(c){ return c.charCodeAt(0); });</script>`;
   const BODY = `async function(){
     var out = { gold: ${GOLD_FNV} };
-    out.available = oodleAvailable();
-    out.impl = oodleImpl();
+    out.available = Oodle.oodleAvailable();
+    out.impl = Oodle.oodleImpl();
     // A release artifact that cannot say which build it is makes every bug report start with a guess
     out.stamp = (document.getElementById("buildStamp") || {}).textContent;
     // main thread, through the app's own two functions
-    var ex = await ensureOodle();
-    out.mainFnv = fnv(oodleDecompress(ex, window.__fix, ${RAW}));
+    var ex = await Oodle.ensureOodle();
+    out.mainFnv = fnv(Oodle.oodleDecompress(ex, window.__fix, ${RAW}));
 
     // and through the decode pool, as a texture — 262 144 bytes IS a 512×512 DXT5 surface, so this
     // is the ordinary gameTexture path with nothing special-cased for the test. The pool lifts
@@ -257,12 +319,12 @@ if (!browser) {
     var r = await decodePool().call("gameTexture", { body: body, comp: 0x60, compName: "oodle",
       memSz: ${RAW}, packedSz: ${FIXTURE.length}, fmt: "DXT5", w: 512, h: 512, levels: 1, revMip: false }, [body]);
     out.rgbaBytes = r.rgba.byteLength;
-    // writeBCnDDS puts a 128-byte header in front of the untouched compressed level 0, so what
+    // DDS.writeBCnDDS puts a 128-byte header in front of the untouched compressed level 0, so what
     // follows it is exactly what the worker's Oodle step produced.
     out.workerFnv = fnv(new Uint8Array(r.dds).subarray(128));
     return out;
   }`;
-  const run = await evalInPage({ browser, html: pub, inject, expr: pageExpr(BODY, 700), timeoutMs: 90000, keep: argv.includes("--keep") });
+  const run = await evalInPage({ browser, html: pub, inject, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
   if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
   const r = run.result;
   if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }

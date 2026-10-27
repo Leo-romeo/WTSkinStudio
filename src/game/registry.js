@@ -134,7 +134,7 @@ const GameUnits = { byId: new Map(), list: [], loaded: false, source: "", nation
   // entry that cannot be read is null and counted in `bad`, never thrown: one unreadable blk costs
   // that one vehicle, not the scan.
   rootParams: function(a){
-    const names = vromfsNameMap(a.nm), ddict = zstdDict(a.dict, a.dictKey);
+    const names = vromfsNameMap(a.nm), ddict = Zstd.zstdDict(a.dict, a.dictKey);
     const vals = new Array(Math.max(0, a.offs.length - 1)).fill(null);
     let bad = 0;
     for (let i = 0; i < vals.length; i++) {

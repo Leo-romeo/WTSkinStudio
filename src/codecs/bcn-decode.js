@@ -1,5 +1,8 @@
 "use strict";
 /*==BCNDEC==*/
+// One scope per module (ROADMAP 2.3): the body below is private, `BCnDec` — returned at the end — is
+// the only name this module puts into the shared scope. Not re-indented; see `codecs/dds.js`.
+const BCnDec = (() => {
 function c565(v){ return [((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31]; }
 // The block decoders below run once per 4×4 texels — a 4096² sheet is a million iterations. They
 // used to allocate four short arrays per block (two endpoint triples, two interpolated ones, plus
@@ -281,4 +284,6 @@ function decodeBC4Tex(src, w, h){
   return out;
 }
 /* ---- end BC7/BC4 ---- */
+return { c565, decodeBCn, decodeBC4Block, decodeBC7Block, decodeBC7, decodeBC4Tex };
+})();
 /*==ENDBCNDEC==*/

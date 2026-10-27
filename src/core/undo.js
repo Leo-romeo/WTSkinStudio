@@ -346,7 +346,7 @@ const TileUndo = {
   //
   // The scratch canvas is shared between strokes and is NOT cleared, so it still holds the last
   // stroke's pixels in tiles this one has not reached. That is safe because every reader —
-  // `restoreTile` and `readTiles` — only ever asks for keys in `touched`, and a key gets into
+  // `restoreTile` and `copyTiles` — only ever asks for keys in `touched`, and a key gets into
   // `touched` and snapshotted in the same statement.
   snapTile(k){
     if (this.snapped.has(k)) return;
@@ -365,42 +365,38 @@ const TileUndo = {
     for (const k of this.touched) R = rectUnion(R, this.tileRect(k));
     return rectClamp(R, this.canvas.width, this.canvas.height);
   },
-  // One getImageData per tile ROW, sliced into tiles in JS afterwards — not one per tile. A
-  // readback costs a whole-surface transfer whatever rectangle is asked for, so the call count is
-  // what matters, and a stroke's tiles nearly always sit in a handful of rows. Reading the whole
-  // bounding box in one go would be fewer calls still, but a stroke across an 8192² sheet would
-  // then allocate a 268 MB scratch buffer on top of the tiles themselves; a band is bounded.
-  readTiles(src){
-    const m = new Map(), g2 = ctx2d(src);
-    const rows = new Map();
-    for (const k of this.touched) {
-      const ty = +k.slice(k.indexOf(",") + 1);
-      if (!rows.has(ty)) rows.set(ty, []);
-      rows.get(ty).push(k);
-    }
-    for (const keys of rows.values()) {
-      let band = null;
-      const rects = [];
-      for (const k of keys) {
-        const t = this.tileRect(k);
-        if (t.w <= 0 || t.h <= 0) continue;
-        rects.push([k, t]); band = rectUnion(band, t);
-      }
-      if (!band) continue;
-      const big = g2.getImageData(band.x, band.y, band.w, band.h).data;
-      for (const [k, t] of rects) {
-        const img = new ImageData(t.w, t.h), row = t.w * 4, ox = t.x - band.x;
-        for (let y = 0; y < t.h; y++) {
-          const s = (y * band.w + ox) * 4;
-          img.data.set(big.subarray(s, s + row), y * row);
-        }
-        m.set(k, img);
-      }
-    }
-    return m;
+  // The touched tiles copied into one atlas canvas, GPU side — never read back. This was a
+  // getImageData per tile row from the snapshot and another from the sheet, and on an accelerated
+  // canvas each of those transfers the whole surface whatever rectangle it is given (wt-canvas): the
+  // owner's 4096² recordings put `undo` at 80–392 ms on every stroke, a single click included,
+  // while the rest of a click cost 7–45 ms (ROADMAP 1.19 (d)); at 8192² it is four times that, the
+  // stall after each stroke in 1.17 (3). A drawImage between canvases is queued and stays on the
+  // GPU. The atlas is as near square as the tile count allows, so it never grows to a whole sheet
+  // for a stroke that crosses one; each tile keeps its own rectangle, partial edge tiles included.
+  // `t172_undocommit` holds that commit reads neither the sheet nor the snapshot back.
+  copyTiles(src){
+    const keys = [...this.touched].filter(k => { const t = this.tileRect(k); return t.w > 0 && t.h > 0; });
+    const cols = Math.max(1, Math.ceil(Math.sqrt(keys.length))), rows = Math.max(1, Math.ceil(keys.length / cols));
+    const atlas = mkCanvas(cols * TILE, rows * TILE), ag = ctx2d(atlas), at = new Map();
+    keys.forEach((k, i) => {
+      const t = this.tileRect(k), ax = (i % cols) * TILE, ay = Math.floor(i / cols) * TILE;
+      ag.drawImage(src, t.x, t.y, t.w, t.h, ax, ay, t.w, t.h);
+      at.set(k, { t, ax, ay });
+    });
+    // The copies are recorded, not done: Chrome plays them back when the atlas is next used, and if
+    // the sheet is written first it must snapshot the WHOLE sheet to keep the copy honest — which
+    // landed in the next stroke's first frame (t47 at 4096², 12 ms → 39–58). One texel of the atlas
+    // read here plays the copies now; it transfers the atlas, a few tiles, never the sheet.
+    if (keys.length) ag.getImageData(0, 0, 1, 1);
+    return { atlas, at };
   },
   restoreAll(m){
-    for (const [k, img] of m) { const t = this.tileRect(k); this.g.putImageData(img, t.x, t.y); }
+    const g = this.g;
+    g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; g.filter = "none";
+    for (const { t, ax, ay } of m.at.values()) {
+      g.clearRect(t.x, t.y, t.w, t.h);                       // a tile with alpha must not land on the stroke
+      g.drawImage(m.atlas, ax, ay, t.w, t.h, t.x, t.y, t.w, t.h);
+    }
     this.after(this.bbox());
   },
   // Put one tile back to its pre-stroke pixels. A blit out of the snapshot, so the live-stroke
@@ -426,9 +422,9 @@ const TileUndo = {
   },
   commit(){
     if (!this.touched.size) return;
-    const b = this.readTiles(this.snap), a = this.readTiles(this.canvas);
+    const b = this.copyTiles(this.snap), a = this.copyTiles(this.canvas);
     let bytes = 0;
-    for (const img of b.values()) bytes += img.data.length;
+    for (const { t } of b.at.values()) bytes += t.w * t.h * 4;
     // These snapshots are the heaviest thing the history holds; without a size the memory
     // budget could not see them and trimmed by entry count alone. `t56_undo` drives this
     // recorder for real and checks the number against the tiles it actually stored.

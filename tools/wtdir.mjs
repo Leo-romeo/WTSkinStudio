@@ -280,6 +280,18 @@ export function describeInstall(r) {
   return `${r.dir}  (${how}; ${r.ms.toFixed(1)} ms)`;
 }
 
+// Whether a readdirSync({ withFileTypes: true }) entry is a folder to walk into, following links.
+// A junction or folder symlink reports isSymbolicLink() and NOT isDirectory(), so a walk that asks
+// only isDirectory() passes over it in silence. Measured 2026-10-24 on the owner's machine: with
+// content/base, content.hq/hq_tex, content.hq/uhq_aircraft and levels junctioned to an SSD, every
+// roster walk skipped all four and still ran green over the rest. `p` is the entry's full path.
+export function isDirEntry(e, p) {
+  if (e.isDirectory()) return true;
+  if (!e.isSymbolicLink()) return false;
+  try { return fs.statSync(p).isDirectory(); }
+  catch { return false; }   // a dangling link: statSync throwing is the answer, there is no folder
+}
+
 let cached = null;
 // The install for a tool that cannot run without it. Resolved on the first call, not at import.
 export function installDir() {

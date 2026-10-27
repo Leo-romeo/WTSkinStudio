@@ -181,6 +181,36 @@ function cdnText(html) {
   return html;
 }
 
+// One source as the page carries it. Exported so a test that looks for a source's script in the page
+// asks for this shape rather than spelling it a second time.
+//
+// THE `//# sourceURL` NAMES THE SCRIPT AFTER ITS FILE. Without it every script in the page was
+// anonymous, and a stack trace pointed at a line of wt_skin_studio.html instead of at the module
+// (docs/AGENT_ACCESS.md §11). Measured 2026-10-17 on Chrome 155: with it, error.stack, an
+// ErrorEvent's filename and lineno, and the console's own "Uncaught" entry all name `src/<file>`,
+// and count lines from the first line of the SCRIPT, not of the page. That is why the body follows
+// `<script>` with no newline: with one there, every line number was the file's line plus one.
+// The comment goes after the body, so it is outside every /*==NAME==*/ section, and what the pools
+// and the tests lift is byte for byte what it was. It is a name and nothing else: the browser
+// fetches nothing for it. A `sourceMappingURL` would make DevTools fetch a file, so none is ever
+// written (t41 holds the page to all of this). In the decoder slot it names the file actually
+// inlined, since that is the file its line numbers count.
+export const inlineScript = (rel, body) => "<script>" + body + "\n//# sourceURL=src/" + rel + "\n</script>";
+
+// RELEASE_NOTES.md, the one copy of what each build adds (ROADMAP 5.7), goes into the page at the
+// comment `<!--==RELEASE_NOTES==-->` as a `<script type="text/plain" id="releaseNotes">`: text the
+// browser neither runs nor fetches, which ui/updates.js reads for *What's new*, so the page needs no
+// network to say what it adds. `publish.mjs` cuts the same file's section into the release's notes,
+// and `.public` carries it so a public clone builds the same page. A tree without the file (the
+// tests' fixture trees) embeds nothing; text that would end the tag is refused, as for a script.
+export const NOTES_AT = "<!--==RELEASE_NOTES==-->";
+function notesTag(root) {
+  const file = path.join(root, "RELEASE_NOTES.md");
+  const md = fs.existsSync(file) ? fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n").replace(/\n$/, "") : "";
+  if (/<\/script/i.test(md)) throw new Error('RELEASE_NOTES.md contains "</script>", which would end the tag early');
+  return '<script type="text/plain" id="releaseNotes">\n' + md + "\n</script>";
+}
+
 // `root` is the repo root; it is a parameter only so the tests can build a fixture tree.
 export function build(root = ROOT, opts = {}) {
   const subs = opts.noOodle ? SUBS_NO_OODLE : opts.rad ? SUBS_RAD : opts.ooz ? SUBS_OOZ : SUBS_WTLZ;
@@ -223,11 +253,12 @@ export function build(root = ROOT, opts = {}) {
     const ctl = /[\x00-\x08\x0b\x0c\x0e-\x1f]/.exec(body);
     if (ctl) throw new Error(`${rel} line ${body.slice(0, ctl.index).split("\n").length} holds raw control character ` +
       `U+${ctl[0].charCodeAt(0).toString(16).padStart(4, "0")} — write it as "\\u${ctl[0].charCodeAt(0).toString(16).padStart(4, "0")}"`);
-    out += html.slice(cur, m.index) + "<script>\n" + body + "\n</script>";
+    out += html.slice(cur, m.index) + inlineScript(rel, body);
     cur = m.index + m[0].length;
     used.push(rel);
   }
   out += html.slice(cur);
+  if (out.includes(NOTES_AT)) out = out.replace(NOTES_AT, () => notesTag(root));
   if (!used.length) throw new Error("src/index.html has no relative <script src> to inline — nothing to build");
   return { html: out, used };
 }
@@ -274,13 +305,15 @@ if (isMain) {
     try { once(false); } catch (e) { console.error("  build failed: " + e.message); }
     console.log("watching src/ — Ctrl+C to stop");
     let timer = null;
-    fs.watch(path.join(ROOT, "src"), { recursive: true }, (_ev, file) => {
+    const rebuild = (_ev, file) => {
       clearTimeout(timer);                       // an editor's save is several events; coalesce them
       timer = setTimeout(() => {
         try { if (once(true)) console.log("  " + new Date().toLocaleTimeString() + "  " + file); }
         catch (e) { console.error("  build failed: " + e.message); }
       }, 80);
-    });
+    };
+    fs.watch(path.join(ROOT, "src"), { recursive: true }, rebuild);
+    fs.watch(ROOT, (ev, file) => { if (file === "RELEASE_NOTES.md") rebuild(ev, file); });   // embedded too
   } else {
     // A missing RAD blob is an expected state, not a crash: it is git-ignored, so it is simply not
     // there on a clone. Say the sentence and stop, rather than printing a stack for a condition the

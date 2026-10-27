@@ -330,38 +330,34 @@ const Autosave = {
   },
   async get(keys){
     const db = await idb();
-    try {
-      return await new Promise((res, rej) => {
-        const t = db.transaction("kv"), st = t.objectStore("kv"), out = [];
-        keys.forEach((k, i) => { const q = st.get(k); q.onsuccess = () => { out[i] = q.result; }; });
-        t.oncomplete = () => res(out);
-        t.onerror = t.onabort = () => rej(t.error || new Error("the browser refused to read its storage"));
-      });
-    } finally { db.close(); }
+    return await new Promise((res, rej) => {
+      const t = db.transaction("kv"), st = t.objectStore("kv"), out = [];
+      keys.forEach((k, i) => { const q = st.get(k); q.onsuccess = () => { out[i] = q.result; }; });
+      t.oncomplete = () => res(out);
+      t.onerror = t.onabort = () => rej(t.error || new Error("the browser refused to read its storage"));
+    });
   },
   // One readwrite transaction over the index and whatever records `fn` touches, so a copy, the index
   // that lists it and the copies it evicts land together or not at all. `fn(store, index)` returns
   // true when it changed the index. An index from a newer build is left exactly as it is.
   async tx(fn){
     const db = await idb();
-    try {
-      return await new Promise((res, rej) => {
-        const t = db.transaction("kv", "readwrite"), st = t.objectStore("kv");
-        const rq = st.get(this.INDEX_KEY);
-        rq.onsuccess = () => {
-          try {
-            const idx = this.norm(rq.result);
-            if (idx.v > this.VERSION) {
-              this.foreign = true;
-              throw new Error("the recovery copies in this browser were written by a newer build of the app, and this one will not overwrite them");
-            }
-            if (fn(st, idx)) st.put(idx, this.INDEX_KEY);
-          } catch (e) { rej(e); t.abort(); }
-        };
-        t.oncomplete = () => res(true);
-        t.onerror = t.onabort = () => rej(t.error || new Error("the browser refused to write its storage"));
-      });
-    } finally { db.close(); }
+    return await new Promise((res, rej) => {
+      const t = db.transaction("kv", "readwrite"), st = t.objectStore("kv");
+      const rq = st.get(this.INDEX_KEY);
+      rq.onsuccess = () => {
+        try {
+          const idx = this.norm(rq.result);
+          if (idx.v > this.VERSION) {
+            this.foreign = true;
+            throw new Error("the recovery copies in this browser were written by a newer build of the app, and this one will not overwrite them");
+          }
+          if (fn(st, idx)) st.put(idx, this.INDEX_KEY);
+        } catch (e) { rej(e); t.abort(); }
+      };
+      t.oncomplete = () => res(true);
+      t.onerror = t.onabort = () => rej(t.error || new Error("the browser refused to write its storage"));
+    });
   },
 };
 // A page load is a new document like any other.

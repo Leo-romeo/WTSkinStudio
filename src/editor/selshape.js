@@ -192,6 +192,67 @@ const SelShape = {
     return { n, box: y0 < 0 ? null : { x0, y0, x1, y1 } };
   },
 
+  // 4. The edge (ROADMAP 3.39 (2)): one ring of texels round `bits` that are a MIX of the picked colour
+  // `c` and what lies outside — an antialiased marking's fringe — added to `out`. Reported 2026-10-21:
+  // a star picked with the wand and filled red kept a ragged ring of the stock star round it. A hard
+  // tolerance cannot take a fringe: its texels run every blend from the star to the paint under it,
+  // so whether one is in turns on the tolerance and the weathering, texel by texel. Measured on an
+  // antialiased star turned off the axes (white on olive, weathering ±6): at tolerance 32 the wand
+  // left 252 of the 498 edge texels out, 116 of them more than half star; growing the selection by a
+  // texel left 4 but painted 215 texels of bare background. This ring left 4 and painted none; on a
+  // blurred two-texel edge under weathering ±20 it took the over-half-star leftovers from 216 to 3,
+  // still with none (a second ring did spill: 89 texels). So one ring, never a grow.
+  //
+  // For each unselected texel touching the selection (eight-connected): `b` is its unselected
+  // neighbour farthest from `c` — the outside, as near as the texel's own surroundings tell it — and
+  // `a` the texel's share of `c` along b → c (the unmixing an antialiased edge is the mixing of). It
+  // is taken when `a` ≥ EDGE_MIN and the texel lies within max(16, t) of that line — a third colour
+  // (an outline, a rivet) is off the line and stays out — and only when `b` itself is outside the
+  // tolerance, so a pick on a colour much like its surroundings adds nothing. A texel inside the
+  // tolerance is never taken here: whether it is in is the flood's question, already answered.
+  //
+  // `px` holds rows `py` … of the sheet (w wide), and rows y0 … y1 − 1 are decided: a band at a time
+  // with a row either side, the way the page reads it, or the whole sheet in one call. `bits` is read
+  // and never written, so a band's answer does not depend on the band before it. Adds `info.n` and
+  // widens `info.box` (inclusive, `walk`'s shape) by what it took.
+  EDGE_MIN: .15,
+  edge(px, w, h, py, y0, y1, bits, c, t, out, info){
+    const tt = Math.max(16, t), N = [-1, -1, 0, -1, 1, -1, -1, 0, 1, 0, -1, 1, 0, 1, 1, 1];
+    const rows = px.length / (4 * w);
+    for (let y = Math.max(0, y0); y < Math.min(h, y1); y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (bits[i] || out[i]) continue;
+      let touch = false, far = -1, bo = -1;
+      for (let k = 0; k < 16; k += 2) {
+        const X = x + N[k], Y = y + N[k + 1];
+        if (X < 0 || Y < 0 || X >= w || Y >= h || Y - py < 0 || Y - py >= rows) continue;
+        if (bits[Y * w + X]) { touch = true; continue; }
+        const o = ((Y - py) * w + X) * 4;
+        const d = Math.max(Math.abs(px[o] - c[0]), Math.abs(px[o + 1] - c[1]), Math.abs(px[o + 2] - c[2]), Math.abs(px[o + 3] - c[3]));
+        if (d > far) { far = d; bo = o; }
+      }
+      if (!touch || far <= t) continue;
+      const o = ((y - py) * w + x) * 4;
+      // a texel within the tolerance is the flood's to decide, not a fringe: the one touching a patch
+      // only at a corner stays out, as `walk`'s edge-to-edge rule says
+      if (Math.max(Math.abs(px[o] - c[0]), Math.abs(px[o + 1] - c[1]), Math.abs(px[o + 2] - c[2]), Math.abs(px[o + 3] - c[3])) <= t) continue;
+      let num = 0, den = 0;
+      for (let k = 0; k < 4; k++) { const cb = c[k] - px[bo + k]; num += (px[o + k] - px[bo + k]) * cb; den += cb * cb; }
+      const a = num / den;
+      if (!(a >= SelShape.EDGE_MIN) || a > 1.25) continue;
+      let off = 0;
+      for (let k = 0; k < 4; k++) off = Math.max(off, Math.abs(px[o + k] - px[bo + k] - a * (c[k] - px[bo + k])));
+      if (off > tt) continue;
+      out[i] = 1;
+      if (info) {
+        info.n++;
+        const B = info.box || (info.box = { x0: x, y0: y, x1: x, y1: y });
+        if (x < B.x0) B.x0 = x; if (x > B.x1) B.x1 = x; if (y < B.y0) B.y0 = y; if (y > B.y1) B.y1 = y;
+      }
+    }
+    return out;
+  },
+
   // A rectangle of texels, [x0, x1) × [y0, y1), clipped to the raster.
   rect(x0, y0, x1, y1, w, h, out){
     const bits = out || new Uint8Array(w * h);

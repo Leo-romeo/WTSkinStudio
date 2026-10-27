@@ -4,43 +4,66 @@
 // Returns `{ drawn, box }`. The box is where the projection actually landed on this sheet, in sheet
 // pixels, and it is what ROADMAP 4.8b needed before a projected decal could carry its Look: the
 // derived surface layers walk per pixel, and the alternative to a box is walking the whole sheet.
-// It is null while dragging, on purpose — nothing reads it there, and finding it costs a readback.
+// It is null for a live frame drawn whole (the canvas fallback's) — nothing reads it there, and finding
+// it costs a readback; a live frame drawn in boxes (`region`) reads a 512-px scout for its box instead.
 //
 // `beam` ({ basis, halfW, halfH }) states the beam outright instead of deriving it from a decal's
 // frame, rotation and scale — the shape tool's Fill on the model (6.1b) projects a path whose extent
 // is its own bounding box in the plane of its first click, and it goes through this same projector
 // (depth pre-pass, facing, tiled UVs, the canvas fallback) rather than a second one.
-function renderProjection(canvas, src, frame, slot, live, beam){
+//
+// `region` makes it a LIVE FRAME (ROADMAP 1.18, `ProjDrag`): `{ prev, scale }` — where the decal was
+// on this sheet last frame (null when not known) and the resolution to project at. Only the old and
+// the new box are cleared and drawn, and `rect` in the result is that union, for the composite.
+function renderProjection(canvas, src, frame, slot, live, beam, region){
   const { halfW, halfH } = beam || projHalfSize(src);
   const basis = beam ? beam.basis : projBasis(frame, src.rot, src.flip);
+  // A pose marks its meshes' world matrices stale until the next render; the projector reads them
+  // (`Project.local`), as the projected brush does at its setup.
+  if (modelGroup) modelGroup.updateMatrixWorld(true);
   const G = canvas && src.bmp ? projGL() : null;
   if (G) {
     const w = canvas.width, h = canvas.height, gl = G.gl;
-    // ---- grow-only, never per sheet ----
+    // ---- grow-only, never per sheet, and never past what the context gives ----
     // One projected decal routinely spans several sheets of DIFFERENT sizes (this project has it on
     // four, one of them 8192²). Sizing the drawing buffer to each sheet in turn reallocated up to
     // 268 MB several times per drag frame, which is why a drag started fast and then degraded
-    // without recovering. Keep one buffer at the largest size seen, give each sheet a viewport, and
-    // blit that sub-rectangle back.
-    if (G.canvas.width < w || G.canvas.height < h) {
-      G.canvas.width = Math.max(G.canvas.width, w);
-      G.canvas.height = Math.max(G.canvas.height, h);
-    }
+    // without recovering. So one buffer is kept at the largest size seen — capped at what the
+    // context really gives (`ProjWin.fit`), with a bigger sheet drawn a window at a time — each window
+    // gets a viewport, and that sub-rectangle is blitted back.
+    ProjWin.fit(G, w, h);
+    // The sheet drawn at ws × hs, in the windows that cover `box` of it (all of it when null), each
+    // window handed to `k` with what it drew while it is still in the buffer.
+    const pass = (ws, hs, box, k) => {
+      let sent = 0;
+      for (const t of ProjWin.windows(G, ws, hs, box)) {
+        ProjWin.aim(G, ws, hs, t);
+        let n = projDrawGL(G, src, basis, halfW, halfH, slot, true, 0, t.w, t.h);
+        if (src.sym2) n += projDrawGL(G, src, mirrorBasis(basis, !!src.sym2Read), halfW, halfH, slot, false, 1, t.w, t.h);
+        sent += n;
+        k(t, n);
+      }
+      gl.disable(gl.SCISSOR_TEST);
+      return sent;
+    };
+    if (region) return ProjDrag.frame(G, canvas, pass, region);
     const CH = G.canvas.height;
-    gl.viewport(0, 0, w, h);
-    gl.enable(gl.SCISSOR_TEST);                    // so the clear costs the sheet, not the buffer
-    gl.scissor(0, 0, w, h);
-    let sent = projDrawGL(G, src, basis, halfW, halfH, slot, true, 0, w, h);
-    if (src.sym2) sent += projDrawGL(G, src, mirrorBasis(basis, !!src.sym2Read), halfW, halfH, slot, false, 1, w, h);
-    gl.disable(gl.SCISSOR_TEST);
-    if (!sent) { const g = ctx2d(canvas); g.clearRect(0, 0, w, h); return { drawn: 0, box: null }; }
-    // The viewport sits at the framebuffer's bottom-left, which as an image is y = CH - h.
-    // `preserveDrawingBuffer` is off, so the copy has to happen in this same task — it does.
-    // The coverage probe is a readback, so it is skipped while dragging: it only feeds the
-    // "empty here" tag and the status line, neither of which is read mid-drag.
-    const cov = live ? { texels: 1, box: null } : projCoverage(G.canvas, 0, CH - h, w, h);
-    projBlit(canvas, G.canvas, 0, CH - h, w, h);
-    return { drawn: cov.texels, box: cov.box };    // texels covered, not triangles touched
+    let texels = 0, box = null;
+    const sent = pass(w, h, null, (t, n) => {
+      if (!n) { ctx2d(canvas).clearRect(t.x, t.y, t.w, t.h); return; }
+      // The viewport sits at the framebuffer's bottom-left, which as an image is y = CH - t.h.
+      // `preserveDrawingBuffer` is off, so the copy has to happen in this same task — it does.
+      // The coverage probe is a readback, so it is skipped while dragging: it only feeds the
+      // "empty here" tag and the status line, neither of which is read mid-drag.
+      if (!live) {
+        const c = projCoverage(G.canvas, 0, CH - t.h, t.w, t.h);
+        texels += c.texels;
+        if (c.box) box = rectUnion(box, { x: c.box.x + t.x, y: c.box.y + t.y, w: c.box.w, h: c.box.h });
+      }
+      projBlit(canvas, G.canvas, 0, CH - t.h, t.w, t.h, t.x, t.y);
+    });
+    if (!sent) return { drawn: 0, box: null };
+    return { drawn: live ? 1 : texels, box };     // texels covered, not triangles touched
   }
   // The canvas fallback knows exactly which triangles it rasterised and where, so its box is the
   // union of their sheet-space bounds rather than a probe of the result.
@@ -48,6 +71,114 @@ function renderProjection(canvas, src, frame, slot, live, beam){
   const b = src.sym2 ? projectInto(canvas, src, mirrorBasis(basis, !!src.sym2Read), halfW, halfH, slot) : null;
   return { drawn: a.drawn + (b ? b.drawn : 0), box: rectUnion(a.box, b && b.box) };
 }
+// ---- a live frame costs what the decal covers, not what the sheet does (ROADMAP 1.18) ----
+// "The decal's projection should follow the dragged preview swiftly, not creating a ghost-like effect."
+// Measured 2026-10-23 in software GL with one 512 × 256 decal on a plate: a live render took 109 ms at
+// 2048² and 338 ms at 4096², and the composite after it 13 and 55 — four times the sheet, three times
+// the cost, with the decal the same size. Every one of those costs was the SHEET's: the layer cleared
+// whole, every window cleared, drawn and blitted, and a composite and texture upload with no rectangle.
+// At 8192² that is well past a frame, so the projection trailed the handles — the ghost.
+//
+// So a live frame (a drag in either view, a handle, a nudge, a slider) finds where the decal lands with
+// a scout of the same projection at SCOUT px on the sheet's longer side, clears and re-projects only
+// its old box and its new one, and composites only those. While the decal is MOVING on a sheet longer
+// than SIDE, the new box is projected at SIDE / side of the resolution and drawn up softly — the
+// owner's own proposal — and once it moves SLOWLY (under STILL of its own size a frame) the box is
+// projected at full resolution. SETTLE_MS after the last live frame the sheet is projected exactly as
+// a placement projects it, so the settled picture is byte for byte a placement's, and so is the drop,
+// which is the full render it always was. A frame that changes nothing after that draws nothing: a
+// hand resting on the mouse must not re-project an 8192² sheet on every twitch.
+const ProjDrag = {
+  SIDE: 2048, SCOUT: 512, SETTLE_MS: 150,
+  STILL: .01,                 // of the decal's half size, per frame: under this it is not moving
+  last: null,                 // the decal at the last live frame: { P, p, scale, rot, n }
+  full: null,                 // the decal whose next live frame is the settled one
+  calm: null,                 // …and what the last settled frame drew: { P, at: projParamsClone(P) }
+  timer: 0,
+  stats: { scaled: 0, region: 0, settled: 0, same: 0 },
+  // How P moves this live frame — "moving", "slow", "settled", or "same" (nothing changed since it
+  // settled). Once per frame, whatever sheets it is on.
+  pace(P){
+    const L = ProjDrag.last, { halfW, halfH } = projHalfSize(P), lim = ProjDrag.STILL * Math.max(halfW, halfH);
+    const moved = !L || L.P !== P || L.scale !== P.scale || L.rot !== P.rot || L.n.join() !== P.frame.n.join() ||
+      Math.hypot(P.frame.p[0] - L.p[0], P.frame.p[1] - L.p[1], P.frame.p[2] - L.p[2]) > lim;
+    ProjDrag.last = { P, p: P.frame.p.slice(), n: P.frame.n.slice(), scale: P.scale, rot: P.rot };
+    clearTimeout(ProjDrag.timer);
+    // Everything a render reads, the Look's outline and shadow included: the style rows re-project
+    // through this same live path, and a signature of the frame alone called each of their steps after
+    // a settle "same" and drew nothing until the release (review of 1.18).
+    const at = projParamsClone(P), calm = ProjDrag.calm;
+    if (ProjDrag.full === P) { ProjDrag.full = null; ProjDrag.calm = { P, at }; return "settled"; }
+    if (calm && calm.P === P && ProjSource.same(calm.at, at)) return "same";
+    ProjDrag.calm = null;
+    return moved ? "moving" : "slow";
+  },
+  // After a frame drawn in boxes: the settled frame, unless another live frame — or the drop, which
+  // bumps ProjLive.gen — comes first.
+  // A slider step the sliders' gate held back (`ProjLive.held`, decals.js) is a hand still moving, so
+  // the settle waits SETTLE_MS from the last of them: on a machine slow enough to close the gate it
+  // otherwise re-projected the whole sheet between every two steps it let through — 136–184 ms each
+  // at 4096 × 2048 in software GL, twice what a step had cost (review of 1.18). A drag is never gated.
+  arm(P){
+    const gen = ProjLive.gen, at = performance.now();
+    ProjDrag.timer = setTimeout(function settle(){
+      if (ProjLive.gen !== gen) return;
+      const quiet = performance.now() - ProjLive.held;
+      if (ProjLive.held > at && quiet < ProjDrag.SETTLE_MS) { ProjDrag.timer = setTimeout(settle, ProjDrag.SETTLE_MS - quiet); return; }
+      ProjDrag.full = P; projLiveRender(P);
+    }, ProjDrag.SETTLE_MS);
+  },
+  // One live frame on one sheet, given renderProjection's own `pass`. `region.prev` is where the decal
+  // was on this canvas last frame (null: nowhere; undefined: not known, so all of it is cleared).
+  frame(G, canvas, pass, region){
+    const w = canvas.width, h = canvas.height, CH = G.canvas.height;
+    const k = Math.min(1, ProjDrag.SCOUT / Math.max(w, h));
+    const sw = Math.max(1, Math.round(w * k)), sh = Math.max(1, Math.round(h * k));
+    let box = null;
+    const sent = pass(sw, sh, null, (t, n) => {
+      if (!n) return;
+      const c = projCoverage(G.canvas, 0, CH - t.h, t.w, t.h);
+      if (c.box) box = rectUnion(box, { x: c.box.x + t.x, y: c.box.y + t.y, w: c.box.w, h: c.box.h });
+    });
+    // back to the sheet's texels, a scout texel wider each way than the probe's own padding
+    if (box) {
+      const fx = w / sw, fy = h / sh, x0 = Math.max(0, Math.floor((box.x - 1) * fx)), y0 = Math.max(0, Math.floor((box.y - 1) * fy));
+      box = { x: x0, y: y0, w: Math.min(w, Math.ceil((box.x + box.w + 1) * fx)) - x0, h: Math.min(h, Math.ceil((box.y + box.h + 1) * fy)) - y0 };
+    }
+    const R = region.prev === undefined ? { x: 0, y: 0, w, h } : rectUnion(region.prev, box);
+    const g = ctx2d(canvas);
+    g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; g.filter = "none";
+    if (R) g.clearRect(R.x, R.y, R.w, R.h);
+    if (box) {
+      const sc = region.scale, ws = Math.max(1, Math.round(w * sc)), hs = Math.max(1, Math.round(h * sc));
+      const bx = Math.floor(box.x * ws / w), by = Math.floor(box.y * hs / h);
+      const bs = { x: bx, y: by, w: Math.min(ws, Math.ceil((box.x + box.w) * ws / w)) - bx, h: Math.min(hs, Math.ceil((box.y + box.h) * hs / h)) - by };
+      g.imageSmoothingEnabled = true;                 // drawn up softly, at a reduced scale
+      let drew = null;
+      pass(ws, hs, bs, (t, n) => {
+        if (!n) return;
+        const dx = t.x * w / ws, dy = t.y * h / hs, dw = t.w * w / ws, dh = t.h * h / hs;
+        // A scaled drawImage filters from texels just past its source rectangle, and the buffer there
+        // holds what the scout or another window drew: a faint line (alpha 15–63) along the top of the
+        // box, left behind by the next frame (t159, 2026-10-23). So a clear row above the window and a
+        // clear column right of it; its other two sides are the buffer's own edge, which clamps.
+        if (sc < 1) {
+          const gl = G.gl;
+          gl.enable(gl.SCISSOR_TEST); gl.clearColor(0, 0, 0, 0);
+          gl.scissor(0, t.h, t.w + 1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.scissor(t.w, 0, 1, t.h); gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+        g.drawImage(G.canvas, 0, CH - t.h, t.w, t.h, dx, dy, dw, dh);
+        drew = rectUnion(drew, { x: Math.floor(dx), y: Math.floor(dy), w: Math.ceil(dx + dw) - Math.floor(dx), h: Math.ceil(dy + dh) - Math.floor(dy) });
+      });
+      // What was DRAWN is what the next frame clears: a box drawn up from a reduced one reaches past
+      // it by up to a reduced texel, and a soft edge left there would stay until the drop.
+      box = rectClamp(rectUnion(box, drew), w, h);
+      ProjDrag.stats[sc < 1 ? "scaled" : "region"]++;
+    }
+    return { drawn: sent ? 1 : 0, box, rect: rectClamp(rectUnion(R, box), w, h) };
+  },
+};
 // ---- A projected decal is ONE object, even when it spans several textures ----
 // A marking across a wing root sits on the fuselage sheet and on the wing sheet. Each sheet needs
 // its own layer, but the user placed one decal: the layers share a single parameter object
@@ -102,8 +233,9 @@ function projParamsAssign(P, s){
 // by reference, a record by a shallow copy, a string as itself. The text tool (4.50(3)) added its
 // record here — `text: "copy"`, a flat record, so the shallow copy is a whole one — and got the
 // undo step, the snapshot comparison and `set` for nothing. The `.wtproj` is the one other place it
-// has to be named: `ProjNode.saveContent` writes `m.proj` field by field, while `sharedProj` spreads
-// it back, so reading it costs nothing.
+// has to be named, twice: `ProjNode.saveContent` writes `m.proj` field by field and `ProjNode.projOf`
+// reads it back the same way — by name, since 2026-10-17, because a file is not trusted to say what
+// a projection holds (t140 round-trips one with every field set).
 const ProjSource = {
   FIELDS: { bmp: "ref", surf: "copy", heightMap: "ref", heightName: "value", text: "copy" },
   // The Size slider's range (`#projScale`, 5–400 %), which the keyboard resize clamps to as well.
@@ -378,7 +510,13 @@ function gdBounds(gd){
 // noAdd refreshes only the sheets that already have a layer; the live drag uses it, because
 // creating layers on every mouse-move frame would leave ones no undo step knows about.
 function renderProjGroup(P, noAdd){
-  if (!noAdd) ProjLive.gen++;                    // a live render still queued is superseded (decals.js)
+  if (!noAdd) {
+    ProjLive.gen++;                              // a live render still queued is superseded (decals.js)
+    clearTimeout(ProjDrag.timer); ProjDrag.last = ProjDrag.calm = ProjDrag.full = null;   // and a drag's state (1.18)
+  }
+  const pace = noAdd ? ProjDrag.pace(P) : null;
+  if (pace === "same") { ProjDrag.stats.same++; return { added: [], drawn: 0, sheets: 0, pace }; }
+  let boxed = false;
   const frame = frameFromArrays(P.frame);
   const existing = new Map();
   for (const e of projSiblings(P.id)) existing.set(e.slot, e.L);
@@ -397,10 +535,29 @@ function renderProjGroup(P, noAdd){
     } else if (target.canvas.width !== slot.composite.width || target.canvas.height !== slot.composite.height) {
       target.canvas = mkCanvas(slot.composite.width, slot.composite.height);
     }
+    // A live frame while the decal moves is drawn in the boxes it moves between (ProjDrag, 1.18); a
+    // settled one, and every placement, is the whole sheet.
+    if ((pace === "moving" || pace === "slow") && projGL()) {
+      const c = target.canvas, side = Math.max(c.width, c.height);
+      const sc = pace === "moving" && side > ProjDrag.SIDE ? ProjDrag.SIDE / side : 1;
+      const prev = target.liveOn === c ? target.liveBox : target.projBoxOn === c ? target.projBox : undefined;
+      const f = renderProjection(c, P, frame, slot, true, null, { prev, scale: sc });
+      boxed = true;
+      target.liveBox = f.box; target.liveOn = c;
+      target.projEmpty = !f.drawn;
+      target.projBoxOn = null;
+      if (f.drawn) { total += f.drawn; sheets++; }
+      if (f.rect) scheduleComposite(slot, rectToSlot(slot, f.rect, c.width, c.height));
+      continue;
+    }
     const g = ctx2d(target.canvas);
     g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; g.filter = "none";
     g.clearRect(0, 0, target.canvas.width, target.canvas.height);
-    const r = renderProjection(target.canvas, P, frame, slot, noAdd);
+    // The settled live frame measures where it landed, as a placement does, so the next moving frame
+    // knows what to clear.
+    const r = renderProjection(target.canvas, P, frame, slot, noAdd && pace !== "settled");
+    if (noAdd) { target.liveBox = r.box; target.liveOn = target.canvas; if (pace === "settled") ProjDrag.stats.settled++; }
+    else target.liveOn = null;
     target.projEmpty = !r.drawn;
     // Where it landed on THIS sheet, kept on the layer it describes. Not stored in the .wtproj:
     // it is recomputed by the next render, and a loaded project's derived layers already hold
@@ -420,9 +577,10 @@ function renderProjGroup(P, noAdd){
   // content's current visibility and puts it back at the end, so refreshing while they are still
   // hidden would make "hidden" the value it restores. The predicate names the LAYER since 4.28(f) —
   // the response is inside it, so there is no sibling to identify.
+  if (boxed) ProjDrag.arm(P);
   if (noAdd) SurfDrag.hold(P, x => x.proj === P);
   else { SurfDrag.release(); refreshProjSurfaces(P); }
-  return { added, drawn: total, sheets };
+  return { added, drawn: total, sheets, pace };
 }
 // One undo step for a whole-group change. Undo re-renders from the old parameters instead of
 // snapshotting canvases — a projection is fully described by its source image and its frame, so

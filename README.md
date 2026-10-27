@@ -32,10 +32,16 @@ Free and open source (GPL-3). Unofficial: not affiliated with Gaijin Entertainme
 3. **Search a vehicle** (`F-4E`, `Abrams`, `T-34`) and click it.
 4. **Paint:** press <kbd>B</kbd> and paint on the model or on the 2-D sheet. Strokes always go onto
    a layer; the game's own texture is never changed.
-5. **Export:** *Export as… ▸ To War Thunder*, then *Update custom camouflage list* in the hangar.
+5. **Export:** *Export* (the gear beside it opens the settings), then *Update custom camouflage list* in the hangar.
    If the browser cannot write into the game folder (a `Program Files` install, or Firefox), it
    offers **Download .zip**: extract it **into** `War Thunder\UserSkins\`, so the skin's folder
    lands there and not one level deeper.
+
+**Updating:** click the version on the welcome card or at the right of the status bar. *What's new*
+says what your build adds, and *Check for updates* shows what every newer build adds before you
+download anything, with a link to its release page; download the new `wt_skin_studio.html` there
+and use it in place of the old one. The check is the only time the app goes online, and only when
+you click it; it sends nothing about you.
 
 Save with <kbd>Ctrl</kbd>+<kbd>S</kbd>: a `.wtproj` holds the model, the textures and every edit.
 Unsaved work is also kept as a recovery copy in the browser and offered back after a crash. Press
@@ -70,7 +76,7 @@ More in the guide's [Known limits](docs/GUIDE.md#known-limits).
 
 ## Reporting a bug
 
-Say which version (on the welcome card, e.g. `v1.0.0-beta.2 · own decoder`), which browser and
+Say which version (on the welcome card, e.g. `v1.0.0-beta.3 · own decoder`), which browser and
 vehicle, and what you did. Copy any red error from <kbd>F12</kbd> ▸ *Console*. For something slow
 or jumpy, use *View & scene ▸ Advanced ▸ Record a session*, press <kbd>F9</kbd> when it goes wrong,
 and attach the `.json` it saves. The app sends nothing anywhere, so a report holds only what you

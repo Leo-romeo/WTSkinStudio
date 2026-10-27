@@ -17,14 +17,18 @@ async function mergeProjectLayers(file){
     const s = mine.get(String(sm.id).toLowerCase());
     if (!s || !s.composite) { skipped.push(sm.id); continue; }
     for (const lm of (sm.layers || [])) {
-      const L = { type: lm.type, name: lm.name, visible: lm.visible !== false, opacity: lm.opacity != null ? lm.opacity : 1,
-        blend: lm.blend || "normal" };
-      if (lm.chan) L.chan = lm.chan;
+      // A second reader of the same file, so every field it copies goes through the project
+      // reader's own shapes (ProjNode, core/project.js). It copied them as given until 2026-10-17:
+      // a crafted blend, fill colour, channel or hue was markup in the layer panel, untouched by the
+      // review that forced them in ProjNode (t140).
+      const L = { type: lm.type, name: lm.name, visible: lm.visible !== false, opacity: ProjNode.inOf(lm.opacity, 0, 1, 1),
+        blend: ProjNode.blendOf(lm.blend) };
+      if (ProjNode.chanOf(lm.chan)) L.chan = lm.chan;
       L.scope = ProjNode.scopeOf(lm);      // parts and/or a rectangle, either shape of file (4.28(g))
       try {
-        if (lm.type === "fill") L.color = lm.color;
-        else if (lm.type === "adjust") Object.assign(L, { hue: lm.hue, sat: lm.sat, bright: lm.bright, contrast: lm.contrast });
-        else if (lm.type === "decal" && lm.bmpFile) { Object.assign(L, { x: lm.x, y: lm.y, scale: lm.scale, rot: lm.rot, flip: lm.flip, sym: lm.sym || null, surf: lm.surf || null }); L.bmp = await img(lm.bmpFile); }
+        if (lm.type === "fill") L.color = ProjNode.hexOf(lm.color);
+        else if (lm.type === "adjust") Object.assign(L, ProjNode.hsbcOf(lm));
+        else if (lm.type === "decal" && lm.bmpFile) { Object.assign(L, ProjNode.placeOf(lm)); L.bmp = await img(lm.bmpFile); }
         else if (lm.type === "paint" && lm.canvasFile) L.canvas = await img(lm.canvasFile);
         else continue;                                    // a projected decal needs its projector; skip rather than guess
         if (lm.maskFile) L.mask = await img(lm.maskFile);
@@ -38,6 +42,7 @@ async function mergeProjectLayers(file){
       try {
         const paint = async (f, c) => { const im = await img(f); const g = ctx2d(c); g.clearRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height); };
         await paint(sm.smoothFile, s.smooth); await paint(sm.metalFile, s.metal); await paint(sm.normalFile, s.normal);
+        if ((meta.version | 0) < 8) NSheet.turn(s.normal);            // stored in the old order, as tryApplyProject turns it (1.24)
         s.nEdited = true; refreshSurfaceTextures(s);
       } catch (e) { console.warn("merge surface", e); }
     }

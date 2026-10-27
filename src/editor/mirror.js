@@ -218,7 +218,8 @@ const Mirror = {
                  Mirror.JUMP * Math.max(2, Math.hypot(p.x - prev.p.x, p.y - prev.p.y));
     Mirror._prev = { p: { x: p.x, y: p.y }, q: { x: q.x, y: q.y } };
     Mirror.hit++;
-    let o = jump ? { jump: true } : opt;
+    // A copy that leaps keeps its dab's place along the line, so it takes its dab's colour.
+    let o = jump ? (opt && opt.run != null ? { jump: true, run: opt.run } : { jump: true }) : opt;
     // Which way the copy heads where no walk of its own says so (ROADMAP 4.50 (10)): a stamp laid on
     // its own (Stamp along, whose caller gives the stroke's heading) and the dab a leap lands on. The
     // stroke's heading is reflected — for a freehand leap the one it has here, since the copy's own

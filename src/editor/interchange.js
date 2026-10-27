@@ -68,7 +68,7 @@ const Interchange = {
     // an export must not be the thing that catches it half-way.
     if (GradFill.needsBake(slot) && !Bake.cached(slot, "pos") && GradFill.bakeable(slot)) await GradFill.enqueue(slot);
     const cx = { slot, ch, W, H, sx: 0, sy: 0, tw: W, th: H, amb: null };
-    const st = { sink, done: 0, total: 3 + Interchange.leafCount(slot, ch), notes: { baked: [], flat: [], flatFx: [], effects: [], ops: [], dodge: [] } };
+    const st = { sink, done: 0, total: 3 + Interchange.leafCount(slot, ch), notes: { baked: [], flat: [], flatFx: [], effects: [], ops: [], dodge: [], levels: [] } };
     const back = mkCanvas(W, H), g = ctx2d(back);
     Composite.reset(g);
     Composite.blit(cx, g, base);
@@ -92,11 +92,14 @@ const Interchange = {
       const px = Interchange.leaf(cx, into, L, c);
       // What lands is what the file says: the layer's opacity times every pass-through group's
       // around it (those are written fully opaque), and an effect is Normal in the file whatever
-      // its blend says, because the compositor ignores it — the four numbers land source-over and
-      // any other kind source-atop, and the walk lands each the way the compositor does.
-      const alpha = (L.opacity == null ? 1 : L.opacity) * (fx || c.opacity == null ? 1 : c.opacity) * Composite.ambAlpha(cx);
-      const blend = fx ? "normal" : (L.blend || "normal"), atop = fx && !!c.fx;
-      const shown = !!L.visible && c.visible !== false;
+      // its blend says, because the compositor ignores it — every kind lands source-atop (the four
+      // numbers too, since 2026-10-23), and the walk lands each the way the compositor does.
+      // A file has one level, so a node limited to some mip levels goes in as level 0 shows it —
+      // faded by its weight there, hidden where that is 0 — and the report names it (4.58).
+      const lw = Interchange.level0(L, st);
+      const alpha = (L.opacity == null ? 1 : L.opacity) * (fx || c.opacity == null ? 1 : c.opacity) * Composite.ambAlpha(cx) * (lw || 1);
+      const blend = fx ? "normal" : (L.blend || "normal"), atop = fx;
+      const shown = !!L.visible && c.visible !== false && lw > 0;
       if (live && shown) Interchange.land(into, px, alpha, atop ? "source-atop" : blend);
       if (atop) Interchange.keepCoverage(px, into.canvas);
       if (emit) {
@@ -112,9 +115,11 @@ const Interchange = {
   // A group, the way `Composite.group` composites it — see the header for what each kind becomes.
   async group(cx, into, G, live, st, emit){
     if (!layerLeaves(G.children).some(x => LayerNode.contentOn(x, cx.ch))) return null;
-    const shown = !!G.visible, ambWas = cx.amb, kids = G.children.slice(), name = G.name || "Group";
+    const lw = Interchange.level0(G, st);
+    const shown = !!G.visible && lw > 0, ambWas = cx.amb, kids = G.children.slice(), name = G.name || "Group";
     if (G.blend === "pass through") {
       cx.amb = Composite.passAmb(cx, G);
+      cx.amb.alpha *= lw || 1;
       let children;
       try { children = await Interchange.walk(cx, into, kids, live && shown, st, emit); }
       finally { cx.amb = ambWas; }
@@ -128,7 +133,7 @@ const Interchange = {
     try { children = await Interchange.walk(cx, { g: kg, canvas: K }, kids, true, st, emit && !flat); }
     finally { cx.amb = ambWas; }
     Composite.groupStencil(cx, into, G, kg);
-    const alpha = (G.opacity == null ? 1 : G.opacity) * Composite.ambAlpha(cx), blend = G.blend || "normal";
+    const alpha = (G.opacity == null ? 1 : G.opacity) * Composite.ambAlpha(cx) * (lw || 1), blend = G.blend || "normal";
     if (live && shown) Interchange.land(into, K, alpha, blend);
     let node = null;
     if (emit && flat) {
@@ -137,6 +142,14 @@ const Interchange = {
     } else if (emit) node = { kind: "group", name, pass: false, opacity: alpha, visible: shown, blend, children };
     K.width = K.height = 0;
     return node;
+  },
+  // A node's weight at mip level 0 (ROADMAP 4.58), noted when it has a range at all.
+  level0(n, st){
+    // a number keyed by level (4.58 (c)) is written as level 0 has it, and said too
+    const keyed = !isGroup(n) && LayerNode.channelsOf(n).some(ch => Levels.keyed(n.chans[ch]));
+    if (!n.levels && !keyed) return 1;
+    st.notes.levels.push(n.name || "Layer");
+    return Levels.weight(n, 0);
   },
   // One leaf's raster: its content through its stencil, at full strength, on a transparent sheet.
   // `into.canvas` is the sheet beneath it, which blend-if reads and an effect adjusts.
@@ -147,7 +160,7 @@ const Interchange = {
     Composite.reset(g);
     return px;
   },
-  // `Composite.tables` lands a Levels, Curves… result source-ATOP — colour, never coverage — and the
+  // `Composite.effect` lands every effect's result source-ATOP — colour, never coverage — and the
   // walk lands it the same way (`walk`). The FILE's layer is then given the beneath's alpha, which
   // makes it, drawn source-over, the same picture wherever the beneath is opaque: the whole sheet at
   // the top of the stack and in any pass-through group there. Inside a normal group the beneath is
@@ -160,16 +173,13 @@ const Interchange = {
     Composite.reset(g);
   },
   // What a leaf draws, as the compositor draws it: the content, or an effect's adjusted copy of the
-  // sheet beneath — the four numbers through `Composite.fxFilter`, any other kind through the same
-  // tables and the same GPU-or-CPU pass `Composite.tables` uses (4.50 (5)). A kind this build does
-  // not know compiles to nothing and draws nothing, there as here.
+  // sheet beneath — `Composite.adjust`, the one function the compositor's effect draws with, for
+  // every kind (4.50 (5)). A kind this build does not know adjusts nothing and draws nothing, there
+  // as here.
   drawOf(cx, into, L, c){
     if (c.kind !== "effect") return dst => Composite.content(cx, dst, c, L);
-    if (!c.fx) return dst => { dst.filter = Composite.fxFilter(c); dst.drawImage(into.canvas, 0, 0); dst.filter = "none"; };
-    const T = Effect.table(c);
-    if (!T) return () => {};
-    const adj = Composite.fxGL.draw(cx, into, T) || Composite.fxCPU(cx, into, T);
-    return dst => dst.drawImage(adj, 0, 0);
+    const adj = Composite.adjust(cx, into, c);
+    return adj ? dst => dst.drawImage(adj, 0, 0) : () => {};
   },
   land(into, px, alpha, blend){
     const g = into.g;
@@ -190,15 +200,15 @@ const Interchange = {
   // different picture. "effect": a Levels, Curves… inside it (directly, or in a pass-through group
   // in it), because the app lands that on the group's own content without adding coverage, and a
   // layer in a file cannot — over a 70 % layer, a Levels at rest would make it 91 % (the case t92
-  // measured in the compositor). The four numbers draw source-over in the app as well, so they
-  // write exactly and do not count; a hidden effect draws nothing and does not count.
+  // measured in the compositor). Since 2026-10-23 that is every kind, the four numbers included; a
+  // hidden effect draws nothing and does not count.
   flatWhy(cx, G){
     if (Interchange.stencilled(cx, G)) return "mask";
     const has = list => list.some(n => {
       if (!n.visible) return false;
       if (isGroup(n)) return n.blend === "pass through" && has(n.children);
       const c = LayerNode.contentOn(n, cx.ch);
-      return !!(c && c.kind === "effect" && c.fx && c.visible !== false);
+      return !!(c && c.kind === "effect" && c.visible !== false && !Effect.atRest(c));
     });
     return has(G.children) ? "effect" : null;
   },
@@ -647,6 +657,8 @@ const Interchange = {
     if (N.flatFx.length) out.push("group" + s(N.flatFx.length) + " " + N.flatFx.map(x => "“" + x + "”").join(", ") + " written as one layer, because an effect inside changes only what the group has painted, which a layer in the file cannot");
     if (N.effects.length) out.push(N.effects.length + " effect" + s(N.effects.length) + " written as what " + (N.effects.length === 1 ? "it does" : "they do") + " to the layers below, which will not follow edits made under " + (N.effects.length === 1 ? "it" : "them"));
     if (N.ops.length) out.push("no " + (psd ? "Photoshop" : "OpenRaster") + " name for the blend of " + N.ops.join(", ") + " — written as Normal");
+    if (N.levels && N.levels.length) out.push(N.levels.length + " limited to some mip levels, written as level 0 shows them (hidden where they do not show there): " +
+      N.levels.map(x => "“" + x + "”").join(", "));
     if (psd && N.soft) out.push(N.soft + " soft-light layer" + s(N.soft) + " will look a little different: Photoshop's soft light is its own curve");
     if (psd && N.dodge.length) out.push(N.dodge.length + " in Linear Dodge below full opacity will look darker in Photoshop wherever the sum passes white — Photoshop fades after the add, this app within it: " +
       N.dodge.map(x => "“" + x + "”").join(", "));

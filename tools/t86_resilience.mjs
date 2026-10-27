@@ -140,7 +140,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r0 = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r0 = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r0.ok) { console.log("FAIL: " + r0.reason); process.exit(1); }
 const r = r0.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }

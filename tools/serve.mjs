@@ -14,9 +14,14 @@
 //
 // It rebuilds on every request for `/`, so a reload is the whole edit loop and there is no second
 // process to run alongside. That is affordable because the build is a concatenation with no
-// dependencies: 113 ms measured 2026-09-03, and idempotent, so serving does not dirty the tree.
+// dependencies: 113 ms measured 2026-09-03.
 //
-// Usage: node tools/serve.mjs [port]        (default 3000)
+// It never WRITES the artifact. It used to write wt_skin_studio.html back whenever it differed from
+// the build, so opening the preview silently reverted a hand-edit to it — the loss t41_build exists
+// to catch, not hide (ROADMAP 1.21 (5), 2026-10-22). It says when the file on disk differs instead;
+// `npm run build` is what writes it. `t146_serve` holds this against a stand-in (`--artifact`).
+//
+// Usage: node tools/serve.mjs [port] [--artifact <path>]     (default 3000, the repo's artifact)
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -24,7 +29,8 @@ import { fileURLToPath } from "node:url";
 import { build } from "./build.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PORT = Number(process.argv[2]) || 3000;
+const argv = process.argv.slice(2);
+const PORT = Number(argv[0]) || 3000;
 
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -33,7 +39,8 @@ const TYPES = {
   ".svg": "image/svg+xml", ".dds": "application/octet-stream", ".wtproj": "application/json",
 };
 
-const ARTIFACT = path.join(ROOT, "wt_skin_studio.html");
+const ARTIFACT = argv.includes("--artifact") ? path.resolve(argv[argv.indexOf("--artifact") + 1]) : path.join(ROOT, "wt_skin_studio.html");
+let drifted = false;                       // said once per change of state, not on every reload
 
 http.createServer((req, res) => {
   // "/" is the product. Everything else resolves under ROOT, and must stay under it.
@@ -51,12 +58,17 @@ http.createServer((req, res) => {
          .end("build failed — the page below src/ did not compile:\n\n" + (err.stack || err.message));
       return;
     }
-    // Served from the build itself. `build()` returns the page and writes nothing, and this used to
-    // call it only as a compile check and then read the artifact off disk — so the preview showed
-    // whatever `npm run build` last wrote, not src/. It is written back when it differs, which is
-    // the same idempotent write `npm run build` makes, so the tree and the preview agree.
-    try { if (!fs.existsSync(ARTIFACT) || fs.readFileSync(ARTIFACT, "utf8") !== html) fs.writeFileSync(ARTIFACT, html); }
-    catch (err) { console.error("could not write wt_skin_studio.html (the preview is still current): " + err.message); }
+    // Served from the build itself, from memory: `build()` returns the page and writes nothing. This
+    // used to read the artifact off disk (so the preview showed whatever `npm run build` last wrote,
+    // not src/), and then to write it back when it differed — see the header for what that cost.
+    let differs;
+    try { differs = !fs.existsSync(ARTIFACT) || fs.readFileSync(ARTIFACT, "utf8") !== html; }
+    catch (err) { differs = true; }
+    if (differs !== drifted) {
+      drifted = differs;
+      console.log(differs ? "note: " + path.basename(ARTIFACT) + " on disk differs from the build of src/ being served — run `npm run build` to write it (t41 fails until then)"
+                          : "note: " + path.basename(ARTIFACT) + " on disk matches the build again");
+    }
     res.writeHead(200, { "content-type": TYPES[".html"], "cache-control": "no-store" }).end(html);
     return;
   }

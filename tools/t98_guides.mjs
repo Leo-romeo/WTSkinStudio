@@ -28,7 +28,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\\/g, "/").r
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b);
 };
@@ -270,7 +270,7 @@ const BODY = `async function(){
 
 // A window of its own size: the default headless one leaves the 2-D view 281 px tall, and a point off
 // the canvas reads back as black rather than as the thing that was drawn there.
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 90000, keep: argv.includes("--keep"),
+const r = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep"),
   chromeArgs: ["--window-size=1280,960"] });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;

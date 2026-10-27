@@ -217,6 +217,14 @@ const Relief = {
   // The image the height is read from: the map itself, or the height derived from a normal map.
   // `holder` is whatever carries `heightMap` — a decal, its image content, or a projection.
   heightImage(holder, surf){
+    // A map this app generated, for an image the decal no longer has (or read back from a file, which
+    // keeps no note of its source): made again from the image it has now. The same result where the
+    // image is the same, since the estimator is deterministic.
+    const gen = Relief.genOf(surf);
+    if (gen != null && holder && holder.heightMap && holder.bmp && holder.heightMap._genOf !== holder.bmp) {
+      const c = Relief.genCanvas(holder.bmp, gen);
+      if (c) holder.heightMap = c;
+    }
     const hm = holder && holder.heightMap, from = Relief.heightFrom(surf);
     if (!hm || from === "depth") return hm || null;
     let c = Relief._nm.get(hm);
@@ -482,6 +490,69 @@ const Relief = {
     }
     g.putImageData(img, 0, 0);
     return c;
+  },
+  // ---- A height made from the decal's own image (ROADMAP 4.19 (6)) ----
+  // The owner's "later": no file at all. 4.19's own ranking says what this is worth and what it is
+  // not — a simple, honest estimator, not a depth model (one would have to ship weights inside the
+  // page, which §0.1 rules out). Its steps:
+  //   1. each texel's alpha times half again its luma — any ink stands above the transparent surface,
+  //      and light ink higher than dark (Invert, the Look's own, turns it over). Luma × alpha alone,
+  //      the first version, put black ink level with the surround, so a black stencil had nothing
+  //      to raise (review, 2026-10-23);
+  //   2. softened by two box blurs of radius `soften` (≈ a Gaussian of σ ≈ soften · 0.8), so a hard
+  //      ink edge becomes a slope the emboss can light rather than a one-texel cliff;
+  //   3. stretched so its lowest and highest texels are 0 and 255 — the Look's Emboss is the
+  //      strength, so the map's own contrast should not be a second, hidden one.
+  // That is good for lettering, stencils, roundels and anything printed; it is wrong wherever a dark
+  // colour is not a hollow, which is why it is a starting point with a preview, not an answer.
+  // Bytes in (straight RGBA), bytes out (grey, opaque), or null when the image has no tone to read —
+  // one flat colour, or nothing covered.
+  GEN_MAX: 1024,
+  GEN_SOFT: 2,
+  // The softening a Look's generated map was made with, or null for a map the user loaded — read
+  // from a file, so only a number in the slider's range counts.
+  genOf(surf){ const v = surf && surf.heightGen; return typeof v === "number" && v >= 0 && v <= 16 ? Math.round(v) : null; },
+  // The map from a bitmap, as a canvas at no more than GEN_MAX on its longer side, remembering which
+  // bitmap it was made from: when that image changes (a text re-edit, the decal editor's Use) the
+  // map is made again from the new one the next time it is read (`heightImage`), rather than kept
+  // for an image it no longer matches. Null where `generate` finds nothing to read.
+  genCanvas(src, soften){
+    const k = Math.min(1, Relief.GEN_MAX / Math.max(src.width, src.height));
+    const w = Math.max(1, Math.round(src.width * k)), h = Math.max(1, Math.round(src.height * k));
+    const c = mkCanvas(w, h), g = ctx2d(c);
+    g.imageSmoothingQuality = "high";
+    g.drawImage(src, 0, 0, w, h);
+    const out = Relief.generate(g.getImageData(0, 0, w, h).data, w, h, soften);
+    if (!out) return null;
+    const img = g.createImageData(w, h);
+    img.data.set(out);
+    g.putImageData(img, 0, 0);
+    c._genOf = src;
+    return c;
+  },
+  generate(px, w, h, soften){
+    const n = w * h, V = new Float32Array(n);
+    let v0 = Infinity, v1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const v = V[i] = (128 + (px[i*4] * .2126 + px[i*4+1] * .7152 + px[i*4+2] * .0722) / 2) * (px[i*4+3] / 255);
+      if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }
+    // Decided on the tone BEFORE softening: the blur pulls an opaque image's border down toward the
+    // surface outside it, so a flat picture would come out a soft-edged dome — a bevel, which is
+    // Bevelled body's job, and nothing read from the image.
+    if (!(v1 - v0 > .5)) return null;
+    // At most a quarter of the shorter side: a window as wide as the image averages every row to one
+    // value, and a 16² mark at Soften 16 came out flat and was refused (review, 2026-10-23).
+    const r = Math.max(0, Math.min(32, Math.floor(Math.min(w, h) / 4), Math.round(+soften) || 0));
+    const B = r ? Relief.boxBlur(Relief.boxBlur(V, w, h, r), w, h, r) : V;
+    let lo = Infinity, hi = -Infinity;
+    // Over every texel, the transparent ones too: they are the surface, height 0, and a one-colour
+    // mark on a transparent ground — the commonest decal there is — has its range from them.
+    for (let i = 0; i < n; i++) { if (B[i] < lo) lo = B[i]; if (B[i] > hi) hi = B[i]; }
+    if (!(hi - lo > .5)) return null;
+    const out = new Uint8ClampedArray(n * 4), k = 255 / (hi - lo);
+    for (let i = 0; i < n; i++) { const v = Math.round((B[i] - lo) * k); out[i*4] = out[i*4+1] = out[i*4+2] = v; out[i*4+3] = 255; }
+    return out;
   },
   // A separable box blur of radius `r` with running sums, so its cost is O(n) whatever `r` is.
   // Outside the array counts as 0 — the surface around the decal — and the divisor is the full

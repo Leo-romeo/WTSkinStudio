@@ -77,9 +77,9 @@ async function grpDecompress(r){
   const cSz = r.u24(), method = r.u8();
   const data = r.read(cSz);
   if (method === 0x00) return data;
-  if (method === 0x40) return zstdDec(data);
+  if (method === 0x40) return Zstd.zstdDec(data);
   if (method === 0x60) return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
-  if (method === 0x80) { const dv = new DataView(data.buffer, data.byteOffset, data.byteLength); const rawSize = dv.getUint32(0, true); const ex = await ensureOodle(); return oodleDecompress(ex, data.subarray(4), rawSize); }
+  if (method === 0x80) { const dv = new DataView(data.buffer, data.byteOffset, data.byteLength); const rawSize = dv.getUint32(0, true); const ex = await Oodle.ensureOodle(); return Oodle.oodleDecompress(ex, data.subarray(4), rawSize); }
   throw new Error("model uses compression 0x" + method.toString(16));
 }
 // vertex-format table (mesh.py FORMATS): format → stride → field layout
@@ -364,7 +364,7 @@ function buildDynModelGeometry(dm, lodId){
       const faces = vdEntry.vd.faces;
       const curFace = Math.floor(elem.startI / 3);
       const g = { matIndex: Number(elem.mat), faces: [] };
-      for (let i = curFace; i < curFace + elem.numFace; i++) { const f = faces[i]; if (!f) continue;
+      for (let i = curFace, end = Math.min(curFace + elem.numFace, faces.length); i < end; i++) { const f = faces[i]; if (!f) continue;   // bounded: 1.21 (2)
         g.faces.push([f[0]+indiceOffset, f[1]+indiceOffset, f[2]+indiceOffset]); }
       obj.groups.push(g);
     }

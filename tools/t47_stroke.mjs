@@ -156,6 +156,48 @@ const BODY = `async function(){
   out.ms.firstFrame = firstFrame;
   out.ms.wholeStroke = whole;
 
+  // The same strokes with level content on the sheet (ROADMAP 4.58 (b)): a far-only layer gives the
+  // 3-D view a chain of its own, whose restart is a whole-sheet walk — built at idle once the edits
+  // stop, never inside a frame of the stroke (docs/MIP_LEVELS.md §5).
+  big.layers.unshift(LayerNode.of({ type: "fill", name: "far only", color: "#0000ff", opacity: 1, blend: "normal", visible: true, levels: Levels.far(3) }));
+  // A structural change is a whole-sheet pass and the first stroke after one pays to write into
+  // canvases it read whole (~70–150 ms here, with or without level content) — warm past it, as above.
+  // Between the strokes the levels are brought up to date, as they are when the user pauses; that
+  // update must not make the next stroke pay the same again (it did while it walked the whole sheet).
+  scheduleComposite(big);
+  await LevelView.settle(); sync(big.composite);
+  paint(100, 3600, 200); flushComposites(); await LevelView.settle(); renderer.initTexture(big.tex);
+  paint(100, 3800, 200); flushComposites(); await LevelView.settle(); renderer.initTexture(big.tex); sync(big.composite);
+  var lvFirst = [], lvWhole = [], lvIdle = [], lvIn = 0, lvAfter = 0;
+  for (var n3 = 0; n3 < 4; n3++) {
+    var y3 = 700 + n3 * 500;
+    await LevelView.settle(); sync(big.composite);
+    var b3 = LevelView.stats.builds;
+    var a3 = performance.now();
+    beginStroke(false, false);
+    for (var i3 = 0; i3 < 5; i3++) stampAt(200 + i3 * 18, y3, 0, null);
+    refreshStrokeView();
+    sync(stroke.t.canvas);
+    lvFirst.push(+(performance.now() - a3).toFixed(1));
+    for (var f3 = 0; f3 < 8; f3++) { for (var j3 = 0; j3 < 5; j3++) stampAt(300 + f3 * 90 + j3 * 18, y3, 0, null); refreshStrokeView(); }
+    endStroke(); flushComposites(); sync(big.composite);
+    lvWhole.push(+(performance.now() - a3).toFixed(1));
+    lvIn += LevelView.stats.builds - b3;
+    // the pause after the stroke: the levels brought up to date, and the frame that draws them
+    var i3 = performance.now();
+    await LevelView.settle();
+    renderer.initTexture(big.tex); sync(big.composite);
+    lvIdle.push(+(performance.now() - i3).toFixed(1));
+    lvAfter += LevelView.stats.builds - b3;
+  }
+  out.ms.lvFirst = lvFirst; out.ms.lvWhole = lvWhole; out.ms.lvIdle = lvIdle;
+  out.correct.lvChain = (big.tex.mipmaps || []).length === 13;
+  out.correct.lvNoBuildInStroke = lvIn === 0;
+  out.correct.lvBuiltAfter = lvAfter === 4;
+  // and back as it was, warmed past the structural change again for what follows
+  big.layers.shift(); scheduleComposite(big); await LevelView.settle();
+  paint(100, 3900, 200); flushComposites(); await LevelView.settle(); sync(big.composite);
+
   // the reported case: first stroke on a layer that did not exist a moment ago
   App.activeLayer = null;
   sync(big.composite);
@@ -322,6 +364,26 @@ const BODY = `async function(){
   out.rec.symmetryIsBool = rep.context ? typeof rep.context.symmetry === "boolean" : false;
   out.rec.feltFieldEmpty = rep.howItFelt === "";
   try { out.rec.jsonBytes = JSON.stringify(rep).length; } catch (e) { out.rec.jsonThrew = String(e && e.message); }
+  // Where the time went (recorder note 4, 2026-10-22): every dab is a timed phase, putting the stroke
+  // down is one ("end"), the brush's size and spacing ride on each stroke, and the report opens with a
+  // sentence per stroke. Rec.summary and Rec.whose are driven with numbers whose answer is known, since
+  // a test machine's timings are not.
+  var t0s = rep.strokes[0] || {}, tm = t0s.time || {};
+  out.rec.phases = { dabN: tm.dab ? tm.dab.n : -1, end: !!tm.end, spacing: t0s.spacing, size: t0s.size,
+                     summary: rep.summary && rep.summary.length, line: rep.summary && rep.summary[0] };
+  var sumLine = Rec.summary([{ id: 1, where: "3d", moves: 3, size: 86, spacing: .05, ms: 2000,
+      time: { move: { ms: 900, n: 3, max: 500 }, ray: { ms: 150, n: 30, max: 9 }, dab: { ms: 700, n: 100, max: 20 } } }],
+    [{ t: 1, gap: 400, longtask: true, stroke: 1 }, { t: 2, gap: 300, longtask: true, stroke: 1 },
+     { t: 5, gap: 410, stroke: 1 }, { t: 9, gap: 120, longtask: true, stroke: null, after: 1 }])[0];
+  out.rec.sumLine = sumLine;
+  // Stroke 7 ran 500 → 1000 ms. A long task that BEGAN at 900 is reported after the stroke closed,
+  // and is still the stroke's; one beginning at 1500 followed it; one past AFTER_MS is nobody's.
+  var strokesWas = Rec.strokes, curWas = Rec.cur; Rec.strokes = [{ id: 7, t: 500, ms: 500 }]; Rec.cur = null;
+  var w1 = Rec.whose({ t: 900, longtask: true }), w2 = Rec.whose({ t: 1500 }), w3 = Rec.whose({ t: 1000 + Rec.AFTER_MS + 1 });
+  var w4 = Rec.whose({ t: 1600 }, 950);                                // a rAF gap ending at 1600 that began at 950
+  out.rec.after = [w1.stroke === 7 && w1.after === undefined, w2.stroke === null && w2.after === 7,
+                   w3.stroke === null && w3.after === undefined, w4.stroke === 7];
+  Rec.strokes = strokesWas; Rec.cur = curWas;
   // and off means off: nothing accumulates after a stop
   beginStroke(false, false); stampAt(1600, 1400, 0, null); endStroke();
   out.rec.quietAfterStop = Rec.strokes.length === rep.strokes.length;
@@ -466,6 +528,12 @@ console.log(`  one flick across the sheet    ${ms.flick} ms`);
 // operation, which costs tens of milliseconds, not a couple.
 R.is(worst(ms.firstFrame) < 12, `the first frame of a stroke stays under 12 ms — worst ${worst(ms.firstFrame)} ms (it was 47 before the fix)`);
 R.is(worst(ms.wholeStroke) < 60, `a whole 9-frame stroke stays under 60 ms — worst ${worst(ms.wholeStroke)} ms`);
+R.is(worst(ms.lvFirst) < 12 && worst(ms.lvWhole) < 60,
+  `with a far-only layer on the sheet the same strokes stay under 12 ms and 60 ms — worst ${worst(ms.lvFirst)} and ${worst(ms.lvWhole)} ms (ROADMAP 4.58 (b))`);
+console.log(`  the pause after it: levels brought up to date and drawn  ${ms.lvIdle.join(", ")} ms`);
+R.is(worst(ms.lvIdle) < 50, `and the pause after each costs the stroke's rectangle, not the sheet — worst ${worst(ms.lvIdle)} ms (a whole-sheet walk measured 151–195, a whole re-upload 94–131)`);
+R.is(c.lvChain && c.lvNoBuildInStroke && c.lvBuiltAfter,
+  `the sheet is drawn from its own 13 levels, none rebuilt inside a stroke, and they follow once each stroke stops (${c.lvChain}, ${c.lvNoBuildInStroke}, ${c.lvBuiltAfter})`);
 // What is left here is the layer's own canvas: a paint layer is sheet-sized, so creating one at
 // 4096² allocates 67 MB and there is no way round that short of not having the layer. ~25 ms is
 // one dropped frame at the moment you start painting, against ~200 ms before.
@@ -522,6 +590,12 @@ R.is(rec.symmetryIsBool, "symmetry is a boolean — symEnabled() returns the mod
 R.is(!rec.jsonThrew && rec.jsonBytes > 0, `and the whole report serialises — ${rec.jsonThrew || rec.jsonBytes + " bytes"}`);
 R.is(rec.feltFieldEmpty, "howItFelt is left empty, for the half no instrument can record");
 R.is(rec.quietAfterStop, "after stopping, painting records nothing");
+R.is(rec.phases.dabN === 6 && rec.phases.end, `each dab is a timed phase of its stroke, and so is putting it down — ${JSON.stringify(rec.phases)}`);
+R.is(rec.phases.spacing === .35 && rec.phases.size === 48, `the brush's size and spacing ride on each stroke, not only on the context — ${rec.phases.size}, ${rec.phases.spacing}`);
+R.is(rec.phases.summary === 2 && /^stroke 1 \(2d, .*spacing 35 %.*dab /.test(rec.phases.line || ""), `the report opens with a line per stroke — ${rec.phases.line}`);
+R.is(/blocked 700 ms of 2\.0 s, worst move 500 ms — dab 700 ms \(100 × 7\.00 ms\), ray 150 ms/.test(rec.sumLine || "") && /120 ms blocked after it ended/.test(rec.sumLine || ""),
+  `the line sums long tasks only, puts the slowest phase first and counts what followed the stroke — ${rec.sumLine}`);
+R.is(rec.after.every(Boolean), `a stall is the stroke's it BEGAN in, even reported after the stroke closed; one just after is put down to it, one 2 s later to nobody — ${JSON.stringify(rec.after)}`);
 R.is(rec.leaves === 3 && rec.nodes === 2,
   `a slot's layers are counted as leaves — a group of two plus one loose layer is ${rec.leaves}, with ${rec.nodes} top-level nodes beside it`);
 R.is(rec.brushTriple === rec.brushTripleLive && !/undefined/.test(rec.brushTriple),

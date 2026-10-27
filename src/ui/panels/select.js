@@ -116,13 +116,14 @@ const SelectUI = {
   wand: null,
   tol(){ const e = $("selTol"); return e ? Math.max(0, Math.min(255, +e.value || 0)) : 32; },
   contig(){ const e = $("selContig"); return !e || e.checked; },
+  edge(){ const e = $("selEdge"); return !e || e.checked; },
   pickWand(s, px, py, add, sub){
-    const op = sub ? "sub" : add ? "add" : "replace", tol = SelectUI.tol(), contig = SelectUI.contig();
-    const run = () => SelectUI.runWand(s, px, py, op, tol, contig);
+    const op = sub ? "sub" : add ? "add" : "replace", tol = SelectUI.tol(), contig = SelectUI.contig(), edge = SelectUI.edge();
+    const run = () => SelectUI.runWand(s, px, py, op, tol, contig, edge);
     return (SelectUI.wand = (SelectUI.wand || Promise.resolve()).then(run)
       .catch(err => reportFailure("Selecting with the magic wand", err, "wand")));
   },
-  async runWand(s, px, py, op, tol, contig){
+  async runWand(s, px, py, op, tol, contig, edge){
     if (App.activeSlot !== s || !s.composite) {              // its texture was switched away while it waited
       setStatus("That wand click was on another texture — nothing was selected; click again on this one", "err");
       return;
@@ -133,7 +134,7 @@ const SelectUI = {
       // tool reads the sheet the same way, for the same reason)
       flushComposites();
       const S = Marquee.dims(s.composite.width, s.composite.height);
-      const res = await Marquee.fromColourAsync(Draw2D.shownRows(s, S), px, py, tol, contig, op, bar);
+      const res = await Marquee.fromColourAsync(Draw2D.shownRows(s, S), px, py, tol, contig, op, bar, edge);
       if (!res) {
         setStatus(bar.cancelled() ? "Stopped the wand — the selection is as it was"
           : "The texture changed while the wand was reading it — nothing was selected; click again", "err");
@@ -345,7 +346,8 @@ const SelectUI = {
     // None with Shift or Alt held either (4.50 (9)): those start a rectangle to ADD or TAKE AWAY,
     // which is the whole of what the two keys mean everywhere else in the app.
     const op = SelectUI.opOf(e);
-    const id = (Marquee.shape() || op !== "replace") ? null : Marquee.hit(Marquee.rect(), p.x, p.y, SelectUI.tpp());
+    // Nor while it is hidden (3.39 (3)): a grab of something not drawn would move it unseen.
+    const id = (Marquee.shape() || op !== "replace" || !Marquee.shown) ? null : Marquee.hit(Marquee.rect(), p.x, p.y, SelectUI.tpp());
     // A new rectangle starts ON a guide when the press is near one (4.50 (15)); a move or a resize
     // keeps the raw press, which is only ever a grab offset.
     const o = id ? p : GuidesUI.snapPt(e, p.x, p.y);
@@ -434,7 +436,7 @@ const SelectUI = {
   cursor(p){
     if (!cnv2) return;
     if (!SelectUI.on) { cnv2.style.cursor = ""; return; }
-    const id = (p && !Marquee.shape() && SelectUI.kind !== "lasso") ? Marquee.hit(Marquee.rect(), p.x, p.y, SelectUI.tpp()) : null;
+    const id = (p && Marquee.shown && !Marquee.shape() && SelectUI.kind !== "lasso") ? Marquee.hit(Marquee.rect(), p.x, p.y, SelectUI.tpp()) : null;
     cnv2.style.cursor = (SelectUI.d && !SelectUI.d.band && SelectUI.CURSORS[SelectUI.d.id]) || SelectUI.CURSORS[id] ||
       (SelectUI.picksClick() ? "cell" : "crosshair");
   },
@@ -480,7 +482,8 @@ const SelectUI = {
   },
   drawSel(g, view){
     const r = Marquee.rect();
-    if (!r) return;
+    // Hidden with H (ROADMAP 3.39 (3)): nothing of it is drawn, and the panel says so.
+    if (!r || !Marquee.shown) return;
     const W = g.canvas.width, H = g.canvas.height;
     const x = r.x * view.sc + view.ox, y = r.y * view.sc + view.oy;
     const w = r.w * view.sc, h = r.h * view.sc;
@@ -504,13 +507,12 @@ const SelectUI = {
     // An island selection is a shape inside that box, so the box alone would not say what is
     // selected. The tint is the STENCIL every verb is about to use, blitted — not an outline
     // re-derived from the boundary edges, which could show a shape the tools do not honour. It is
-    // pre-coloured (see Marquee.setIslands), so this is one drawImage per frame and no scratch.
+    // pre-drawn as a rim and a faint wash (`Marquee.outline`, 3.39 (1)) with its alphas in it, so
+    // this is one drawImage per frame and no scratch.
     const tint = Marquee.rect() && Marquee.tint;
     if (tint) {
       const sh = Marquee.sheet();
-      g.globalAlpha = .32;
       g.drawImage(tint, view.ox, view.oy, sh.W * view.sc, sh.H * view.sc);
-      g.globalAlpha = 1;
     }
     // Two passes so the outline reads on both a white sheet and a black one.
     g.lineWidth = 3; g.strokeStyle = "rgba(8,10,14,.75)"; g.setLineDash([]);
@@ -613,8 +615,20 @@ const SelectUI = {
     const inv = $("btnSelInvert"); if (inv) inv.disabled = SelectUI.on;
     const none = $("btnSelNone"); if (none) none.disabled = SelectUI.on ? !r : !np;   // the live grain's own emptiness
     const all = $("btnSelAll"); if (all) all.disabled = false;
+    // 3.39 (3): the overlay can be put away, and a hidden one is said here for as long as it is —
+    // the status line's word on the toggle is gone at the next message.
+    const sb = $("btnSelShow");
+    if (sb) { sb.textContent = Marquee.shown ? "Hide" : "Show"; sb.classList.toggle("active", !Marquee.shown); }
     const info = $("selInfo");
-    if (info) info.textContent = SelectUI.infoText(r, n);
+    if (info) info.textContent = SelectUI.infoText(r, n) +
+      (r && !Marquee.shown ? " Hidden — H shows it; the brush still keeps inside it." : "");
+  },
+  // H and the panel's Hide / Show button.
+  toggleShown(){
+    Marquee.setShown(!Marquee.shown);
+    setStatus(Marquee.shown ? "Selection outline shown again"
+      : Marquee.rect() ? "Selection hidden — it still limits the brush and the Fill / Clear / Crop / Copy buttons. H shows it again"
+      : "Selection and decal outlines hidden — H shows them again", "ok");
   },
   // What to do next with the kind in hand, when nothing is selected yet.
   HINTS: {
@@ -663,6 +677,7 @@ $("btnSelFromMask").onclick = () => Marquee.fromMask();
 // The three verbs of the live grain (3.30): Ctrl+A and Esc stay the AREA's keys, so those two
 // still reach for the tool; the buttons follow the panel's own label.
 $("btnSelAll").onclick = () => { if (SelectUI.on) Marquee.act("select all", () => Marquee.all()); else selectAllParts(); };
+$("btnSelShow").onclick = () => SelectUI.toggleShown();
 $("btnSelNone").onclick = () => { if (SelectUI.on) Marquee.act("clear selection", () => Marquee.none()); else partAction("clear selection", () => { App.selParts.clear(); App.selAnchor = null; }); };
 $("btnSelInvert").onclick = () => { if (!SelectUI.on) invertPartSelection(); };
 $("btnSelFill").onclick = () => Marquee.fill();

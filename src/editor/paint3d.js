@@ -54,8 +54,9 @@ function faceTexelDensity(hit, tw, th){
 //
 // `alone`, a world-space direction, lays the dab on its own facing that way on the model — the shape
 // tool's Stamp along on the model (6.1b), whose stamps are spaced by the path and must not be joined
-// by the line stampAt would otherwise walk from the channel's last dab.
-function stamp3d(hit, ch, laid, alone){
+// by the line stampAt would otherwise walk from the channel's last dab. `run` is how far along the
+// path it is, in texels, for Colour along (stampAt's opt.run).
+function stamp3d(hit, ch, laid, alone, run){
   const tc = stroke.t.canvas;
   const px = hit.uv.x * tc.width, py = (1 - hit.uv.y) * tc.height;
   const prev = stroke.hits[ch];
@@ -77,7 +78,7 @@ function stamp3d(hit, ch, laid, alone){
     return Pen.faceHeading([z.x - a.x, z.y - a.y, z.z - a.z], at(f.a), at(f.b), at(f.c), uv(f.a), uv(f.b), uv(f.c), tc.width, tc.height);
   };
   let opt = null;
-  if (alone) opt = { jump: true, ang: alone.isVector3 ? headOn(hit.point.clone().sub(alone), hit.point) : null };
+  if (alone) opt = { jump: true, ang: alone.isVector3 ? headOn(hit.point.clone().sub(alone), hit.point) : null, run };
   else if (stroke.line) opt = { line: true };       // Shift+click: the user asked for the line
   else if (prev) {
     const d3 = prev.p.distanceTo(hit.point);
@@ -156,7 +157,9 @@ function paint3dStrokeTo(pts, maxSteps){
     const ev = { clientX: at[i].x, clientY: at[i].y };
     stroke.p = at[i].p;
     recStrokeCount("rays");
+    const tr = Rec.clock();
     const hit = ray3d(ev);
+    Rec.span("ray", tr);
     if (!hit || !hit.uv) continue;
     recStrokeCount("hits");
     const before = stroke.hits[0], laid = [];                 // the channels stamped this sub-step
@@ -300,9 +303,14 @@ cnv3.addEventListener("pointerdown", e => {
   if (App.paint3d && e.button === 0 && !e.altKey && App.brush.tool !== "none") {
     const hit = ray3d(e);
     if (hit && hit.uv) {
-      if (beginStroke(false, true)) {                          // mask3d: keep paint on the parts touched
+      if (beginStroke(false, true, true)) {                    // mask3d: keep paint on the parts touched
         // The pressure the first dab is laid at, and whether a pen is driving this (ROADMAP 4.50 (4)).
         if (Pen.begin(stroke, e)) recStrokeFlag("pen");
+        const from = e.shiftKey && App.activeSlot && App.activeSlot._last3d;
+        // The projected brush takes the stroke when its switch is on and it can (editor/paint-proj.js,
+        // ROADMAP 1.19 (a)); otherwise everything below is the UV-space stroke it always was.
+        if (ProjBrush.start(e, hit, from)) { c3drag = { paint: true }; return; }
+        if (Pen.cells(App.brush)) { ProjBrush.drop(e, from); return; }   // a pattern is never laid as plain dabs (4.55)
         ensureStrokePart(hit.object.name);
         // A straight line in the 3-D view has to be straight ON THE MODEL. Interpolating between
         // the two points in texture space draws something straight on the sheet and arbitrary on
@@ -311,10 +319,11 @@ cnv3.addEventListener("pointerdown", e => {
         // not there at all. The line is therefore walked across the SCREEN — from where the last
         // stroke ended, projected with the camera as it is now — and every step is raycast, so it
         // follows the surface, wraps over curvature, and lands on the right islands.
-        const from = e.shiftKey && App.activeSlot && App.activeSlot._last3d;
         if (from) {
           stroke.screen = worldToScreen(from);
+          const t0 = Rec.clock();
           paint3dStrokeTo([{ x: e.clientX, y: e.clientY, p: stroke.p }], PAINT_LINE_STEPS);
+          Rec.span("move", t0);
         } else {
           // No 3-D anchor (the previous stroke was drawn in the 2D view): fall back to the
           // texture-space line, which is what that stroke was in.
@@ -378,7 +387,11 @@ cnv3.addEventListener("pointermove", e => {
     // Every sample the move carries, through the Smoothing string (ROADMAP 4.50 (4)). With the string
     // on, the paint is going where the brush end is, not under the pointer — so that is where the
     // ring goes.
-    if (stroke) paint3dStrokeTo(Pen.follow(stroke, e, App.brush.lazy));
+    if (stroke) {
+      const t0 = Rec.clock(), pts = Pen.follow(stroke, e, App.brush.lazy);
+      if (stroke.pj) ProjBrush.to(pts); else paint3dStrokeTo(pts);
+      Rec.span("move", t0);
+    }
     updateBrushRing(stroke && App.brush.lazy > 0 && stroke.string ? { clientX: stroke.string.x, clientY: stroke.string.y } : e);
     return;
   }
@@ -531,6 +544,9 @@ cnv3.addEventListener("wheel", e => {
   if (e.ctrlKey) { growSelection(e.deltaY < 0 ? 1 : -1); return; }
   if (e.altKey) { adjustBrushSize(e.deltaY < 0 ? 6 : -6); return; }
   if (cam.fly) { cam.flySpeed = Math.max(.2, cam.flySpeed * (e.deltaY > 0 ? 1 / 1.25 : 1.25)); setStatus("Fly speed: " + cam.flySpeed.toFixed(1)); return; }
+  // A projected stroke's camera is fixed from its first dab (editor/paint-proj.js): a zoom under it
+  // would put the rest of the stroke where the old view had the pointer.
+  if (stroke && stroke.pj) return;
   cam.dist *= e.deltaY > 0 ? 1.12 : 1 / 1.12;
   refreshBrushCursor();                // the footprint under the cursor changes as the view zooms
 }, { passive: false });
@@ -647,6 +663,28 @@ function drawTexturedTri(g, img, src, dst){
 // beating the live selection, hidden and protected parts, the dry run agreeing with the real one,
 // the box, and a tiled UV taking paint on every repeat.
 const Project = {
+  // ---- a posed part (fix plan 2026-10-23, step 8) ----
+  // A pose moves a part's MESH, not its arrays (`PoseApply` sets `mesh.matrix`; the wt-geometry skill),
+  // and every projector pass reads the arrays — this one and the GPU's (`projDrawGL`, `projDepthMap`) —
+  // so a lowered flap took its decal at the rest pose, or none. The beam is carried into the part's own
+  // frame instead: the inverse of its mesh's world matrix applied to the beam's point and its three
+  // directions. A pose is rigid, so every dot product a pass takes — across, along, depth and facing —
+  // is the same there as in the world, and no shader changes. An unposed part's matrix is the identity
+  // and keeps the beam itself, to the byte.
+  I4: new THREE.Matrix4(),
+  local(gd, basis){
+    const m = App.meshes && App.meshes.get(gd.name), M = m && m.matrixWorld;
+    if (!M || M.equals(Project.I4)) return basis;
+    const inv = M.clone().invert(), R = new THREE.Matrix3().setFromMatrix4(inv);
+    const dir = v => new THREE.Vector3(v.x, v.y, v.z).applyMatrix3(R).normalize();
+    return { p: new THREE.Vector3(basis.p.x, basis.p.y, basis.p.z).applyMatrix4(inv), n: dir(basis.n), t1: dir(basis.t1), t2: dir(basis.t2), posed: M };
+  },
+  // Whether the beam's point, carried into this part's frame, is within `reach` of its box.
+  near(gd, p, reach){
+    const q = Project.local(gd, { p, n: p, t1: p, t2: p }).p, bb = gdBounds(gd);
+    return !(q.x < bb.x0 - reach || q.x > bb.x1 + reach || q.y < bb.y0 - reach || q.y > bb.y1 + reach ||
+             q.z < bb.z0 - reach || q.z > bb.z1 + reach);
+  },
   // What the beam may touch on this sheet: the right slot, visible, not shut out, and inside the
   // part scope. The layer's OWN scope wins over the live selection — re-projecting a week later
   // must not change shape because something else happens to be selected.
@@ -662,9 +700,7 @@ const Project = {
       if (sel && !sel.has(gd.name)) continue;
       if (App.protectedParts.has(gd.name)) continue;
       // whole-mesh reject: dragging a decal must not walk 300k triangles per frame
-      const bb = gdBounds(gd), p = cx.p, reach = cx.reach;
-      if (p.x < bb.x0 - reach || p.x > bb.x1 + reach || p.y < bb.y0 - reach || p.y > bb.y1 + reach ||
-          p.z < bb.z0 - reach || p.z > bb.z1 + reach) continue;
+      if (!Project.near(gd, cx.p, cx.reach)) continue;
       out.push(gd);
     }
     return out;
@@ -756,6 +792,8 @@ function projectInto(canvas, L, basis, halfW, halfH, slot){
   };
   let drawn = 0;
   for (const gd of Project.targets(cx)) {
+    // A posed part is measured in its own frame, the beam carried into it (`Project.local`).
+    Object.assign(cx, Project.local(gd, basis));
     const pos = gd.position, uv = gd.uv, nrm = gd.normal;
     const triCount = pos.length / 9;
     for (let t = 0; t < triCount; t++) {

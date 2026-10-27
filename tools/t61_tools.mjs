@@ -143,7 +143,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 400), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:" + String.fromCharCode(10) + o.__threw); process.exit(1); }
@@ -155,7 +155,7 @@ const resolved = o.pairs.filter(p => p.mode);
 const refused = o.pairs.filter(p => p.err);
 console.log(`   ${o.pairs.length} pairs · ${resolved.length} resolve · ${refused.length} refuse`);
 for (const p of refused.slice(0, 4)) console.log(`     ${p.tool} x ${p.ch} x ${p.target}: ${p.err}`);
-R.is(o.pairs.length === 60, `all 6 tools x 5 channels x 2 targets were walked (${o.pairs.length})`);
+R.is(o.pairs.length === 70, `all 7 tools x 5 channels x 2 targets were walked (${o.pairs.length})`);
 R.is(bad.length === 0,
   bad.length ? `silent pairs — neither a mode nor a message: ${bad.map(p => p.tool + "/" + p.ch + "/" + p.target).join(", ")}`
              : "every pair answers with either a mode or a sentence — none is silent, which is the whole point of splitting the axes");
@@ -168,14 +168,14 @@ R.is(refused.every(p => p.keys === "err") && resolved.every(p => p.keys === "mod
 // The shape of the space, stated rather than counted: it is what changed, so it is what a
 // regression would move.
 const modes = new Set(resolved.map(p => p.mode));
-R.is(modes.size === 11 && [...modes].sort().join(",") === "clone,cloneN,color,erase,flatten,height,mask,metal,none,smooth,wear",
-  `the resolving pairs cover the nine legacy modes and the Clone's two, and no twelfth (${[...modes].sort().join(",")})`);
+R.is(modes.size === 12 && [...modes].sort().join(",") === "clone,cloneN,color,erase,flatten,height,mask,metal,none,retouch,smooth,wear",
+  `the resolving pairs cover the nine legacy modes, the Clone's two and the Retouch brush's one (4.50 (11)), and no thirteenth (${[...modes].sort().join(",")})`);
 R.is(o.pairs.filter(p => p.tool === "none").every(p => p.mode === "none"),
   "no tool resolves everywhere — painting being off is not an error to report on every channel");
 R.is(o.pairs.filter(p => p.tool === "brush" && p.target === "mask").every(p => p.mode === "mask") &&
      o.pairs.filter(p => p.tool === "brush" && p.target === "mask").length === 5,
   "the Brush reaches a mask on every one of the five channels — the mask is a target, not a channel of its own");
-for (const t of ["eraser", "height", "flatten"])
+for (const t of ["eraser", "height", "flatten", "retouch"])
   R.is(o.pairs.filter(p => p.tool === t && p.target === "mask").every(p => p.err && /mask/.test(p.err)),
     `${t} on a mask refuses and says why (${(o.pairs.find(p => p.tool === t && p.target === "mask") || {}).err})`);
 R.is(o.bogus.every(x => x.err && !x.mode), "an unknown tool, channel or target is refused by name rather than assumed");
@@ -184,7 +184,7 @@ console.log("\n=== the legacy nine round-trip through the axes ===");
 for (const x of o.round) console.log(`   ${x.mode.padEnd(8)} -> ${x.tool} / ${x.chan} / ${x.target} -> ${x.back}`);
 R.is(o.round.every(x => x.back === x.mode),
   "every mode maps to a point and back to itself — prefs, the recorder and BrushTools all key off these strings, and a point naming itself something else would move a user's stored settings onto a different tool");
-R.is(o.round.length === 11, `all eleven (${o.round.length})`);
+R.is(o.round.length === 12, `all twelve (${o.round.length})`);
 
 console.log("\n=== App.brush.mode is a view of the three fields ===");
 console.log("   " + JSON.stringify(o.axes));

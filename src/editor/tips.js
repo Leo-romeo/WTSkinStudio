@@ -339,6 +339,61 @@ const Tips = {
     return { id: r.id, name: String(r.name || "Tip").slice(0, 60), w, h, cov, sum: Tips.sum(cov, w, h) };
   },
 
+  // ---- the cursor's outline (ROADMAP 3.41 (2)) ----
+  // A tip's coverage traced where it crosses half its peak — the outline Photoshop draws for a sampled
+  // tip — as segments [x0, y0, x1, y1, …] about the tip's centre, its longer side spanning −1 … 1 and y
+  // down, so a cursor draws it at any size by scaling by half that size. Traced once per tip and
+  // cached: a built-in at OUTLINE texels a side (its shape does not depend on its size), a loaded image
+  // at its own. The Round and the Square are drawn as their circle and square instead: Hardness
+  // feathers them, and at half a soft one would read smaller than its Size.
+  OUTLINE: 128,
+  _outline: new Map(),
+  outline(T){
+    let o = Tips._outline.get(T.key);
+    if (o) return o;
+    o = T.cov ? Tips.trace(T.cov, T.w, T.h) : Tips.trace(Tips.make(T.id, Tips.OUTLINE, 1), Tips.OUTLINE, Tips.OUTLINE);
+    if (Tips._outline.size >= 32) Tips._outline.clear();            // a tip edited over and over
+    Tips._outline.set(T.key, o);
+    return o;
+  },
+  // Marching squares over the texel centres of `cov` (W × H bytes), zero outside, at half its peak.
+  // Cell corners a, b, c, d run clockwise from the top left; a saddle is split by the cell's mean.
+  trace(cov, W, H){
+    let peak = 0;
+    for (let i = 0; i < cov.length; i++) if (cov[i] > peak) peak = cov[i];
+    if (!peak) return new Float32Array(0);
+    const t = peak / 2, out = [], M = Math.max(W, H) / 2, ox = W / 2 - .5, oy = H / 2 - .5;
+    const at = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : cov[y * W + x];
+    const P = (x0, y0, p, x1, y1, q) => { const f = (t - p) / (q - p); return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f]; };
+    const seg = (u, v) => out.push((u[0] - ox) / M, (u[1] - oy) / M, (v[0] - ox) / M, (v[1] - oy) / M);
+    for (let y = -1; y < H; y++) for (let x = -1; x < W; x++) {
+      const a = at(x, y), b = at(x + 1, y), c = at(x + 1, y + 1), d = at(x, y + 1);
+      const k = (a > t ? 8 : 0) | (b > t ? 4 : 0) | (c > t ? 2 : 0) | (d > t ? 1 : 0);
+      if (k === 0 || k === 15) continue;
+      const T = () => P(x, y, a, x + 1, y, b), R = () => P(x + 1, y, b, x + 1, y + 1, c);
+      const B = () => P(x, y + 1, d, x + 1, y + 1, c), L = () => P(x, y, a, x, y + 1, d);
+      const mid = (a + b + c + d) / 4 > t;
+      switch (k) {
+        case 1: case 14: seg(L(), B()); break;
+        case 2: case 13: seg(B(), R()); break;
+        case 3: case 12: seg(L(), R()); break;
+        case 4: case 11: seg(T(), R()); break;
+        case 6: case 9: seg(T(), B()); break;
+        case 7: case 8: seg(L(), T()); break;
+        case 5: if (mid) { seg(L(), T()); seg(B(), R()); } else { seg(T(), R()); seg(L(), B()); } break;
+        case 10: if (mid) { seg(T(), R()); seg(L(), B()); } else { seg(L(), T()); seg(B(), R()); } break;
+      }
+    }
+    return new Float32Array(out);
+  },
+  // Which way a cursor shows the tip turned: its Angle, and — mid-stroke, with Follow on — the way the
+  // stroke is heading (`head`, radians in the frame the dabs are drawn in), as `Pen.dab` turns a dab;
+  // never its jitter, which is per dab. A round tip does not turn.
+  cursorTurn(T, b, head){
+    if (!T.turns) return 0;
+    return (+b.angle || 0) * Math.PI / 180 + (b.follow && head != null ? head : 0);
+  },
+
   // ---- the library: the tips a user has loaded ----
   // In memory for the stamp, which is synchronous; in IndexedDB for the next visit, as `tipIndex`
   // plus a `tip:<id>` each — the decal library's arrangement; in a settings export as base64.
@@ -484,14 +539,24 @@ const Tips = {
   },
   // The same dab cut to a stencil — the painted part(s) of a masked stroke: laid into a scratch its
   // reach `D` across, cut `destination-in` by the stencil's window over it (`mk` scales sheet texels
-  // to the stencil's), and drawn into `g` at (x, y).
-  layIn(g, stamp, x, y, sz, turn, D, mask, mk){
+  // to the stencil's), and drawn into `g` at (x, y). With `tint` (bytes) the dab is recoloured there
+  // too, `source-in`, keeping its coverage — the colour along the stroke (ROADMAP 4.56), which varies
+  // per dab where the stamp is made once per stroke. Either may be absent. A tinted dab costs the
+  // masked dab's three draws, and only a brush whose colour cycles pays them.
+  layIn(g, stamp, x, y, sz, turn, D, mask, mk, tint){
     const tmp = stampClipBuf(Math.ceil(D) + 1), tg = ctx2d(tmp);
     tg.clearRect(0, 0, tmp.width, tmp.height);
     tg.globalCompositeOperation = "source-over"; tg.globalAlpha = 1;
     Tips.lay(tg, stamp, D / 2, D / 2, sz, turn);
-    tg.globalCompositeOperation = "destination-in";
-    tg.drawImage(mask, (x - D / 2) * mk.x, (y - D / 2) * mk.y, D * mk.x, D * mk.y, 0, 0, D, D);
+    if (mask) {
+      tg.globalCompositeOperation = "destination-in";
+      tg.drawImage(mask, (x - D / 2) * mk.x, (y - D / 2) * mk.y, D * mk.x, D * mk.y, 0, 0, D, D);
+    }
+    if (tint) {
+      tg.globalCompositeOperation = "source-in";
+      tg.fillStyle = "rgb(" + tint[0] + "," + tint[1] + "," + tint[2] + ")";
+      tg.fillRect(0, 0, Math.ceil(D) + 1, Math.ceil(D) + 1);
+    }
     tg.globalCompositeOperation = "source-over";
     g.drawImage(tmp, 0, 0, D, D, x - D / 2, y - D / 2, D, D);
   },

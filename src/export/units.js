@@ -101,19 +101,14 @@ function renderUnitList(){
   const n = list.filter(u => u.on).length;
   $("unitCount").textContent = n + " of " + list.length;
   refreshVehicleIdLock();
-  if (anyOther) {
-    const h = document.createElement("div");
-    h.className = "hint";
-    h.textContent = "“other model” entries share the name but fly a different aircraft with its own textures — " +
-      "a skin painted here cannot cover them, so they are left off. Tick one only if you know the two share a sheet.";
-    el.appendChild(h);
-  }
-  if (anyWeak) {
-    const h = document.createElement("div");
-    h.className = "hint";
-    h.textContent = "“related” entries share part of the name but may be a different vehicle — tick only the ones you mean.";
-    el.appendChild(h);
-  }
+  // One line each, the whole note in its tooltip (ROADMAP 3.44).
+  if (anyOther)
+    el.appendChild(Tip.make("div", "hint", "“other model”: its own textures, so it is left off.",
+      "“other model” entries share the name but fly a different aircraft with its own textures — " +
+      "a skin painted here cannot cover them, so they are left off. Tick one only if you know the two share a sheet."));
+  if (anyWeak)
+    el.appendChild(Tip.make("div", "hint", "“related”: tick only the ones you mean.",
+      "“related” entries share part of the name but may be a different vehicle — tick only the ones you mean."));
   updateExportWarnings();
 }
 function selectedUnits(){

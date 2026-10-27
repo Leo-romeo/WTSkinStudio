@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 const HTML = fileURLToPath(new URL("../wt_skin_studio.html", import.meta.url)).replace(/\\/g, "/");
 const src = fs.readFileSync(HTML, "utf8");
 const section = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   return src.slice(a + 1, b);
 };
 // pull a top-level `function NAME(...){...}` (or `const NAME = ...;`) out of the page by name
@@ -62,7 +62,7 @@ const model = process.argv[2] || "fa_18e_block_2";
 // shim, which is what stood here until 2026-09-20 and had been broken since the page stopped
 // carrying RAD's blob.
 installOodle(src);
-globalThis.zstdDec = A.zstdDec;
+globalThis.Zstd = { zstdDec: A.zstdDec };   // the sections reach it as Zstd.zstdDec (ROADMAP 2.3)
 const M = new Function(section("MODEL") + "\nreturn { loadDynModelBytes, buildDynModelGeometry };")();
 const ref = grp.dyn.get(model);
 if (!ref) { console.log("\n" + model + " not in any .grp — skipping the model part"); process.exit(bad ? 1 : 0); }

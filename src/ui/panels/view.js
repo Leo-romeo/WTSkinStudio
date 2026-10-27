@@ -123,7 +123,71 @@ $("optMaskGrow").oninput = e => {
   $("optMaskGrowVal").textContent = MASK_GROW + " px";
   for (const s of App.slots.values()) { s._partMaskCache = null; scheduleComposite(s); }
 };
-$("btnShot").onclick = () => Shot.take();                     // ROADMAP 4.37
+$("btnShot").onclick = async () => { if (await Shot.take() === "market") ShotFrame.show(); };   // ROADMAP 4.37
+// ---- The Market preview's frame (ROADMAP 4.50 (13)) ----
+// "A Market preview (16:9) screenshot preset with a framing overlay." The 3-D view is whatever shape
+// the window makes it, so a 16:9 picture of it is a crop, and a crop you cannot see is a guess. The
+// frame is the largest 16:9 box centred in the view, with the rest dimmed; the view stays live under
+// it — orbit, pan and zoom as usual — and *Take* renders exactly that box (`Shot.render`'s `frame`,
+// a camera view offset), so the file holds what the box held. Not modal, so the camera can be set
+// while it is up; Cancel takes it down. Not Esc: a capture-phase Esc took the key from every dialog,
+// menu and editor opened while the frame was up, and one Esc closed the guide and the frame together
+// (review of 4.50 (13)) — the frame is a mode with its own button, the way the shape tool's is.
+const ShotFrame = {
+  el: null, box: null, ro: null,
+  rect(){
+    const wrap = $("view3dwrap"), vw = Math.max(1, wrap.clientWidth), vh = Math.max(1, wrap.clientHeight);
+    const w = Math.min(vw, vh * 16 / 9), h = w * 9 / 16;
+    return { vw, vh, x: (vw - w) / 2, y: (vh - h) / 2, w, h };
+  },
+  show(){
+    if (ShotFrame.el) return;
+    if (!$("view3dwrap").clientWidth) { setStatus("Show the 3-D view (3D or Split) to frame a Market preview — it is a picture of the model", "err"); return; }
+    const host = document.createElement("div");
+    host.id = "shotFrame";
+    host.style.cssText = "position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:6";
+    const box = document.createElement("div");
+    box.style.cssText = "position:absolute; outline:2px solid " + Marquee.ACCENT + "; box-shadow:0 0 0 100vmax rgba(8,10,14,.55)";
+    const bar = document.createElement("div");
+    bar.style.cssText = "position:absolute; left:50%; bottom:8px; transform:translateX(-50%); display:flex; gap:6px; align-items:center;" +
+      " pointer-events:auto; background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:4px 8px; white-space:nowrap";
+    const say = document.createElement("span");
+    say.className = "hint"; say.style.margin = "0";
+    say.textContent = "Market preview " + Shot.MARKET.w + " × " + Shot.MARKET.h + " — frame the vehicle in the box";
+    const take = document.createElement("button");
+    take.className = "primary"; take.id = "btnShotFrameTake"; take.textContent = "Take";
+    take.title = "Render what the box shows at " + Shot.MARKET.w + " × " + Shot.MARKET.h + ", on the view's background, as a PNG";
+    take.onclick = () => ShotFrame.take();
+    const no = document.createElement("button");
+    no.id = "btnShotFrameCancel"; no.textContent = "Cancel"; no.title = "Take the frame down without a picture";
+    no.onclick = () => ShotFrame.hide();
+    bar.append(say, take, no);
+    box.appendChild(bar);
+    host.appendChild(box);
+    $("view3dwrap").appendChild(host);
+    ShotFrame.el = host; ShotFrame.box = box;
+    ShotFrame.place();
+    ShotFrame.ro = new ResizeObserver(() => ShotFrame.place());
+    ShotFrame.ro.observe($("view3dwrap"));
+    setStatus("Frame the vehicle in the 16:9 box — orbit and zoom as usual — then Take", "ok");
+  },
+  place(){
+    if (!ShotFrame.box) return;
+    const B = ShotFrame.rect(), st = ShotFrame.box.style;
+    st.left = B.x + "px"; st.top = B.y + "px"; st.width = B.w + "px"; st.height = B.h + "px";
+  },
+  hide(){
+    if (!ShotFrame.el) return;
+    ShotFrame.ro.disconnect();
+    ShotFrame.el.remove();
+    ShotFrame.el = ShotFrame.box = ShotFrame.ro = null;
+  },
+  async take(){
+    const B = ShotFrame.rect();
+    ShotFrame.hide();
+    return Shot.market(B);
+  },
+};
 $("optBg").onchange = e => { setBackground(e.target.value); if (e.target.value === "#custom") $("optBgCustom").click(); };
 $("optBgCustom").oninput = () => { $("optBg").value = "#custom"; setBackground("#custom"); };
 $("lightAz").oninput = () => { $("lightFollow").checked = false; App.lightFollow = false; $("lightAzVal").textContent = $("lightAz").value + "°"; applyLightDir(); };

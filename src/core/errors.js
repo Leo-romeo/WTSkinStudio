@@ -66,3 +66,45 @@ function brokenThumb(c, err, what){
   return c;
 }
 /*==ENDERRORS==*/
+
+// ---------- What nothing caught ----------
+// An exception thrown in a click handler, a timer or a frame callback, and a promise nobody awaited,
+// went to the console and nowhere else: the button did nothing and the user was told nothing.
+// (docs/AGENT_ACCESS.md §11 found the gap, 2026-10-17.) Each now goes through reportFailure like
+// every other failure, so it is on the status line and in Messages. The key is where it happened
+// plus what it says, so an error thrown on every pointermove says its piece once.
+//
+// WHERE is in the message, because what a user copies out of Messages may be the only report the
+// author ever sees. It reads `src/<file>:<line>:<col>`: every inlined script carries a `//# sourceURL`
+// naming its file (tools/build.mjs), and a pool's worker one naming the pool (workers/pool.js). For
+// a throw that is the event's own location. A rejection carries only its reason, and the first frame
+// of that reason's stack that has a position is where the error was made.
+//
+// It never calls preventDefault(). A listener that does silences the console's own "Uncaught" entry
+// (measured 2026-10-17 on Chrome 155). The console is where a developer reads the whole stack, and
+// it is where tools/headless.mjs's trap, the one t31_boot fails on at load, has to see the error.
+//
+// Two things are not failures and are not reported. An AbortError is a cancel, which every caller
+// here already treats as silent (export/pipeline.js, game/skins.js, ui/welcome.js). "ResizeObserver
+// loop …" is the browser saying it moved some resize notifications to the next frame; it arrives as
+// an ErrorEvent with no error in it.
+//
+// Registered as this script runs, not at the end of boot. setStatus and StatusLog (ui/dom.js) are
+// already up, so a module after this one that throws while the page loads is reported too. It sits
+// outside the ERRORS section, so a lift of that section stays free of `window`.
+// tools/t142_uncaught.mjs holds all of it.
+(function trapUncaught(){
+  const frame = err => {
+    const m = /\n\s*at (?:[^\n]*?\()?([^\s()]+):(\d+):(\d+)\)?/.exec(String((err && err.stack) || ""));
+    return m ? m[1] + ":" + m[2] + ":" + m[3] : "";
+  };
+  const say = (err, where) => {
+    if (err && err.name === "AbortError") return;
+    reportFailure("Unexpected error" + (where ? " at " + where : ""), err, "uncaught " + where + " " + errText(err));
+  };
+  window.addEventListener("error", e => {
+    if (e.error == null && /^ResizeObserver loop/.test(e.message || "")) return;
+    say(e.error != null ? e.error : e.message, e.filename ? e.filename + ":" + e.lineno + ":" + e.colno : frame(e.error));
+  });
+  window.addEventListener("unhandledrejection", e => say(e.reason, frame(e.reason)));
+})();

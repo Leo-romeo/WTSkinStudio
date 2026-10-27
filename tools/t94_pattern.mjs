@@ -58,7 +58,7 @@ const argv = process.argv.slice(2);
 const R = makeReport();
 const src = fs.readFileSync(ROOT + "/wt_skin_studio.html", "utf8");
 const sectionOf = n => {
-  const a = src.indexOf("\n/*==" + n + "==*/"), b = src.indexOf("\n/*==END" + n + "==*/");
+  const a = src.search(new RegExp("[\\n>]/\\*==" + n + "==\\*/")), b = src.indexOf("\n/*==END" + n + "==*/");
   if (a < 0 || b < 0) throw new Error("no " + n + " section in the page");
   return src.slice(a + 1, b).replace(/^"use strict";$/m, "");
 };
@@ -510,8 +510,11 @@ const BODY = `async function(){
   }
   out.bar = { upAt: upAt, seen: seen, running: res === null };
   $("progCancel").onclick();
-  while (res === null) await new Promise(function(r){ setTimeout(r, 10); });
-  out.cancel = { cancelled: res instanceof Cancelled, landed: ticks };
+  // A deadline of its own (the 2026-10-22 scan's (6)): a regression where Cancel never lands used to
+  // spin here until the whole suite was killed. Now it is this check failing, in words, after 20 s.
+  var tc = performance.now();
+  while (res === null && performance.now() - tc < 20000) await new Promise(function(r){ setTimeout(r, 10); });
+  out.cancel = { cancelled: res instanceof Cancelled, landed: ticks, hung: res === null };
   bar.end();
   out.cancel.closed = !Prog.active;
   // the bar belongs to the content: the next evaluation inside 250 ms keeps it, and it goes after
@@ -766,7 +769,7 @@ const BODY = `async function(){
   return out;
 }`;
 
-const run = await evalInPage({ browser, expr: pageExpr(BODY, 400), timeoutMs: 180000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, expr: pageExpr(BODY), timeoutMs: 180000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
@@ -794,7 +797,9 @@ if (r.mode === "none") {
   R.is(r.bar.running && r.bar.upAt >= 195 && r.bar.seen && r.bar.seen.label === "Working out a test noise…" && r.bar.seen.frac >= 0,
     `a slow one does once it has run 200 ms (up at ${r.bar.upAt.toFixed(0)} ms) — labelled, and determinate while it runs (${r.bar.seen ? (r.bar.seen.frac * 100).toFixed(0) + " % at " + r.bar.seen.at.toFixed(0) + " ms" : "never"})`);
   R.is(r.opensAt.up && Math.abs(r.opensAt.frac - 3 / 8) < 1e-9 && r.opensAt.closed, `bands that land before the bar comes up count: it opens at their fraction (${(r.opensAt.frac * 100).toFixed(1)} %), not indeterminate`);
-  R.is(r.cancel.cancelled && r.cancel.landed < r.bands && r.cancel.closed, `Cancel stops it as a cancel after ${r.cancel.landed} of ${r.bands} bands, and the bar goes`);
+  R.is(r.cancel.cancelled && r.cancel.landed < r.bands && r.cancel.closed, r.cancel.hung
+    ? "Cancel never landed: the evaluation was still running 20 s after it was pressed"
+    : `Cancel stops it as a cancel after ${r.cancel.landed} of ${r.bands} bands, and the bar goes`);
   R.is(r.sticky.up && r.sticky.kept && r.sticky.closed, "the bar belongs to the content: its next evaluation inside 250 ms keeps it, and it goes after");
   R.is(r.cancelLatch.reports === 0 && r.cancelLatch.why === "cancelled" && r.cancelLatch.sheet && r.cancelLatch.settle,
     "a cancelled record is latched but not reported, the layer keeps its sheet, and an export waiting on it is told it was cancelled");

@@ -33,7 +33,7 @@ async function ensureAces(dir){
     const nmFile = files.find(f => /(^|\/)\??nm$/.test(f.name));
     if (!dictFile) throw new Error("no zstd dictionary in aces.vromfs.bin");
     if (!nmFile) throw new Error("no shared name map in aces.vromfs.bin");
-    AcesDB.ddict = zstdDict(dictFile.data, dictFile.name);
+    AcesDB.ddict = Zstd.zstdDict(dictFile.data, dictFile.name);
     AcesDB.names = vromfsNameMap(nmFile.data);
     AcesDB.files = files;
     AcesDB.byName = new Map(files.map(f => [acesKey(f.name), f]));

@@ -42,10 +42,11 @@ const Stack = {
     const ctx = { put, heights: new Map() };
     const sizes = {};
     for (const ch of CHANNELS.map(c => c.id)) { const b = chanBase(slot, ch); if (b) sizes[ch] = [b.width, b.height]; }
-    const meta = { app: "wt-skin-studio", kind: Stack.KIND, version: PROJ_VERSION, name: node.name || "stack",
+    const meta = { app: "wt-skin-studio", kind: Stack.KIND, version: ProjNode.PLAIN, name: node.name || "stack",
                    vehicle: App.vehicleKey || App.objName || null, slot: slot.id,
                    sheet: [slot.composite.width, slot.composite.height], sizes,
                    node: await ProjNode.save(node, ctx) };
+    if (ctx.version) meta.version = ctx.version;            // it holds a path layer or level content (core/project.js, PROJ_VERSION)
     for (const [f, b] of await TextDecal.fontFiles(meta, TextDecal.fontIds([node]))) zip.file(f, b);   // its text stays editable (4.50 (3))
     zip.file("stack.json", JSON.stringify(meta));
     return zip.generateAsync({ type: "blob", compression: "DEFLATE" });
@@ -103,6 +104,7 @@ const Stack = {
           n.chans[ch] = flat; rep.flattened++;
           continue;
         }
+        if (c.kind === "paint" && c.shape) PathLayer.fit(c, base.width, base.height);   // a path layer's recipe goes with it (4.52 (3))
         if (c.kind === "paint" && c.canvas) c.canvas = fit(c.canvas, base.width, base.height);
         if (c.kind === "image" && c.scale != null && sw !== W) c.scale = c.scale * (W / sw);
       }

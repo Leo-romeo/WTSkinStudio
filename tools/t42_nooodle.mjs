@@ -14,7 +14,7 @@
 // OBJ/DDS path is the permanent escape hatch — is what makes the second one a limitation instead
 // of a broken app.
 //
-// This runs the no-Oodle page in a real browser, because that is the only place `oodleAvailable()`,
+// This runs the no-Oodle page in a real browser, because that is the only place `Oodle.oodleAvailable()`,
 // the decode pool's `ops` plumbing and the entry-listing UI all exist at once.
 //
 // Usage: node tools/t42_nooodle.mjs [--keep] [--chrome <path>]
@@ -38,7 +38,7 @@ console.log("=== the decoder is gone from the bytes ===");
 // check that cannot be satisfied by an empty const sitting next to a leftover copy. (Until
 // 2026-09-14 this searched for ooz's blob, which the default build carried; the default build now
 // carries no WASM Oodle blob at all, so the thing that has to be gone is the WTLZ section.)
-R.is(full.includes("\n/*==WTLZ==*/") && /\nconst WTLZ = \(function\(\)\{/.test(full), "the decoder IS in the normal build, so the search means something");
+R.is(/[\n>]\/\*==WTLZ==\*\//.test(full) && /\nconst WTLZ = \(function\(\)\{/.test(full), "the decoder IS in the normal build, so the search means something");
 R.is(!pub.includes("/*==WTLZ==*/") && !/const WTLZ = /.test(pub), "but not in the --no-oodle build");
 R.is(/const OODLE_WASM_B64 = "";/.test(pub) && /const OODLE_IMPL = "";/.test(pub), "which declares the slot empty rather than dropping the bindings");
 const savedKB = Math.round((full.length - pub.length) / 1024);
@@ -52,15 +52,15 @@ R.is(/const ZSTD_WASM_B64 = "[A-Za-z0-9+/]{64}/.test(pub), "the zstd blob, which
 
 const BODY = `async function(){
   var out = {};
-  out.oodle = oodleAvailable();
-  out.zstd = zstdAvailable();
+  out.oodle = Oodle.oodleAvailable();
+  out.zstd = Zstd.zstdAvailable();
 
   // zstd is not merely "available": its module has to instantiate, or the build that is allowed
   // to ship it would still read none of the game's zstd-compressed entries.
-  try { out.zstdModule = !!zstdInit(); } catch (e) { out.zstdErr = String(e && e.message); }
+  try { out.zstdModule = !!Zstd.zstdInit(); } catch (e) { out.zstdErr = String(e && e.message); }
 
   // The decoder must refuse by name, not throw something opaque or hang.
-  try { await ensureOodle(); out.oodleThrew = "(did not throw)"; }
+  try { await Oodle.ensureOodle(); out.oodleThrew = "(did not throw)"; }
   catch (e) { out.oodleThrew = e.message; }
 
   // The same refusal has to survive the trip into a worker: the pool passes the blob's VALUE
@@ -76,15 +76,15 @@ const BODY = `async function(){
   // from an install so the test needs no game files.
   var mk = function(comp, fmt){ return { name: "hull_c*", stem: "hull_c", tier: "base", size: 4096,
     fmt: fmt, w: 512, h: 512, compName: comp,
-    supported: (fmt === "DXT5") && (comp === "raw" || comp === "zstd" || comp === "zlib" || (comp === "oodle" && oodleAvailable())) };
+    supported: (fmt === "DXT5") && (comp === "raw" || comp === "zstd" || comp === "zlib" || (comp === "oodle" && Oodle.oodleAvailable())) };
   };
   var oo = mk("oodle", "DXT5"), zs = mk("zstd", "DXT5"), odd = mk("zstd", "WEIRD");
   out.oodleSupported = oo.supported;
   out.zstdSupported = zs.supported;
-  out.reasonOodle = entryBlockReason(oo);
-  out.reasonZstd = entryBlockReason(zs);
-  out.reasonFmt = entryBlockReason(odd);
-  out.reasonNoData = entryBlockReason(Object.assign({}, oo, { size: 0 }));
+  out.reasonOodle = Oodle.entryBlockReason(oo);
+  out.reasonZstd = Oodle.entryBlockReason(zs);
+  out.reasonFmt = Oodle.entryBlockReason(odd);
+  out.reasonNoData = Oodle.entryBlockReason(Object.assign({}, oo, { size: 0 }));
 
   // and the row it produces is dimmed, tagged and has no buttons to press
   var row = textureRow({ stem: "hull_c", tiers: { base: oo } }, "auto");
@@ -121,19 +121,19 @@ const BODY = `async function(){
   GameDB.vehicleRows = keep.rows; GameUnits.loaded = keep.loaded; GameUnits.list = keep.list;
 
   // the manual path — the permanent escape hatch — is untouched
-  out.manual = typeof parseDDS === "function" && typeof parseOBJ === "function";
+  out.manual = typeof DDS.parseDDS === "function" && typeof parseOBJ === "function";
   return out;
 }`;
 
-const run = await evalInPage({ browser, html: pub, expr: pageExpr(BODY, 700), timeoutMs: 90000, keep: argv.includes("--keep") });
+const run = await evalInPage({ browser, html: pub, expr: pageExpr(BODY), timeoutMs: 90000, keep: argv.includes("--keep") });
 if (!run.ok) { console.log("FAIL: " + run.reason); process.exit(1); }
 const r = run.result;
 if (r.__threw) { console.log("FAIL: the test body threw\n" + r.__threw); process.exit(1); }
 const J = v => JSON.stringify(v);
 
 console.log("\n=== what the page reports about itself ===");
-R.is(r.oodle === false, "oodleAvailable() is false");
-R.is(r.zstd === true, "zstdAvailable() is still true");
+R.is(r.oodle === false, "Oodle.oodleAvailable() is false");
+R.is(r.zstd === true, "Zstd.zstdAvailable() is still true");
 R.is(r.zstdModule === true, `and the zstd WASM module really instantiates${r.zstdErr ? " — " + r.zstdErr : ""}`);
 
 console.log("\n=== it refuses by name, on both threads ===");

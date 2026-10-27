@@ -56,6 +56,9 @@ const BODY = `function(){
     if (Array.isArray(v)) return v.concat(["#123456"]);
     // A plain object row (brush.tools) — add a key rather than replace the value, so a row that
     // MERGES rather than assigns is still seen to have moved.
+    // brush.pattern (ROADMAP 4.55) is a RECORD, clamped to its own fields (Procedural.brushPatClone),
+    // so a key it does not have is dropped by design: move a field it does have.
+    if (v && typeof v === "object" && "kind" in v && "border" in v) return Object.assign({}, v, { kind: v.kind === "hex" ? "square" : "hex", size: v.size === .5 ? .25 : .5 });
     if (v && typeof v === "object") { var c = Object.assign({}, v); c.t55tool = { size: 7, value: 9 }; return c; }
     if (typeof v === "string") {
       if (/^#[0-9a-f]{6}$/i.test(v)) return v === "#123456" ? "#654321" : "#123456";
@@ -64,9 +67,12 @@ const BODY = `function(){
       // both an axis and a view mode), and picking the wrong one would set a row to an option its
       // own control does not have, which passes quietly and tests nothing.
       // brushTip (ROADMAP 4.50 (10)) holds the tips; an id that names no tip is refused to Round.
-      // gameSort (ROADMAP 3.5) is the one search control's sort, over both lists.
+      // gameSort (ROADMAP 3.5) is the one search control's sort, over both lists. brushCycle (ROADMAP
+      // 4.56) is the colour along the stroke: Off, Hue and the holo presets. swLib (4.50 (12)) is the
+      // swatch library shown.
       ["optBg", "expPreset", "expAlpha", "expMode", "expCamoBase", "symAxis", "gameQuality", "gameSort",
-       "expAlbFmt", "expNrmFmt", "symPlaneVis", "optUndoBudget", "brushTip"].forEach(function(id){
+       "expAlbFmt", "expNrmFmt", "symPlaneVis", "optUndoBudget", "brushTip", "brushCycle", "brushRetouch", "brushRange",
+       "swLib"].forEach(function(id){
         var e = document.getElementById(id);
         if (e && e.value === v && !el) el = e;
       });
@@ -120,6 +126,28 @@ const BODY = `function(){
   applyPrefs({ v: 1, expAlpha: other(safeAlpha), camoBase: other(safeCamo), exp: 137 });
   out.gate = { alpha: $("expAlpha").value === safeAlpha, camo: $("expCamoBase").value === safeCamo,
     othersStillApplied: +$("optLight").value === 137 };
+  // …and a v2 file restores them: a sinceV row is gated on its own version. Gated on the build's
+  // instead, every later version bump would reset both for everyone, again.
+  resetPrefs();
+  var alpha2 = other(safeAlpha), camo2 = other(safeCamo);
+  applyPrefs({ v: 2, expAlpha: alpha2, camoBase: camo2 });
+  out.gateV2 = { alpha: $("expAlpha").value === alpha2, camo: $("expCamoBase").value === camo2 };
+
+  // ---- 2026-10-22: a Spacing of 35 stored before v3 was the old default, not a choice ----
+  resetPrefs();
+  applyPrefs({ v: 2, brush: { mode: "color", spacing: .35,
+    tools: { wear: { spacing: .35 }, metal: { spacing: .6 }, height: { spacing: .35 } } } });
+  out.spacing = { inHand: App.brush.spacing, slider: +$("brushSpacing").value, wear: BrushTools.row("wear").spacing,
+    metal: BrushTools.row("metal").spacing, height: BrushTools.row("height").spacing };
+  resetPrefs();
+  applyPrefs({ v: 3, brush: { mode: "color", spacing: .35, tools: { wear: { spacing: .35 } } } });
+  out.spacingV3 = { inHand: App.brush.spacing, wear: BrushTools.row("wear").spacing };
+
+  // ---- 2026-10-22: Mipmaps ticked in a file before v4 was the old default, not a choice ----
+  var mipsAfter = function(blob){ resetPrefs(); applyPrefs(blob); return $("optMips").checked; };
+  out.mips = { fresh: (resetPrefs(), $("optMips").checked), v3on: mipsAfter({ v: 3, mips: true }),
+    v3off: mipsAfter({ v: 3, mips: false }), v4on: mipsAfter({ v: 4, mips: true }), v4off: mipsAfter({ v: 4, mips: false }) };
+  resetPrefs();
 
   // ---- import refuses a file from a newer build rather than half-applying it ----
   resetPrefs();
@@ -293,7 +321,7 @@ const BODY = `function(){
   return out;
 }`;
 
-const r = await evalInPage({ browser, expr: pageExpr(BODY, 500), keep: argv.includes("--keep") });
+const r = await evalInPage({ browser, expr: pageExpr(BODY), keep: argv.includes("--keep") });
 if (!r.ok) { console.log("FAILED to evaluate: " + JSON.stringify(r).slice(0, 400)); process.exit(1); }
 const o = r.result;
 if (o.__threw) { console.log("threw in page:\n" + o.__threw); process.exit(1); }
@@ -339,7 +367,7 @@ R.is(T.backColourSize === 80,
 
 console.log("\n=== the stored file is the shape existing installs already hold ===");
 console.log(`   v${o.shape.v}  brush=${o.shape.brush} (${o.shape.brushKeys})  sym=${o.shape.sym}  light=${o.shape.light}`);
-R.is(o.shape.v === 2, `the version is still 2 — this refactor is not a migration (${o.shape.v})`);
+R.is(o.shape.v === 5, `the version is 5, since 2026-10-24's projected-brush migration (4 was 2026-10-22's Mipmaps one, 3 that day's Spacing one) — and nothing else about the shape moved (${o.shape.v})`);
 R.is(o.shape.brush === "object" && o.shape.sym === "object" && o.shape.light === "object",
   "brush / sym / light are still nested objects, so an existing prefs blob still loads");
 
@@ -347,6 +375,28 @@ console.log("\n=== the pre-v2 gate still refuses the two unsafe values ===");
 R.is(o.gate.alpha, "a v1 file cannot restore expAlpha — it is what shipped alpha 255 and lost the coverage mask");
 R.is(o.gate.camo, "nor camoBase — it is what repainted every texel the skin does not fully cover");
 R.is(o.gate.othersStillApplied, "while everything else in that file is still honoured");
+R.is(o.gateV2.alpha && o.gateV2.camo,
+  "and a v2 file restores both — a sinceV row is gated on its own version, or every version bump would reset them again");
+
+console.log("\n=== a Spacing of 35 stored before v3 was the old default, not a choice (2026-10-22) ===");
+{
+  const S = o.spacing, S3 = o.spacingV3, eq = (a, b) => Math.abs(a - b) < 1e-9;
+  console.log(`   a v2 file: in hand ${S.inHand} (slider ${S.slider}), wear ${S.wear}, metal ${S.metal}, Panel line ${S.height} · a v3 file: in hand ${S3.inHand}, wear ${S3.wear}`);
+  R.is(eq(S.inHand, .15) && S.slider === 15 && eq(S.wear, .15),
+    "a pre-v3 35 becomes the new default — in hand, with the slider saying so, and in another tool's row");
+  R.is(eq(S.metal, .6), "a spacing the user chose is kept");
+  R.is(eq(S.height, .35), "and Panel line, whose own default is still 35, keeps it");
+  R.is(eq(S3.inHand, .35) && eq(S3.wear, .35), "while a v3 file's 35 was chosen, and is restored as one");
+}
+
+console.log("\n=== Mipmaps are off by default, and a tick stored before v4 was that old default (2026-10-22) ===");
+{
+  const M = o.mips || {};
+  console.log(`   ${JSON.stringify(M)}`);
+  R.is(M.fresh === false, "a fresh profile exports without mipmaps (ROADMAP 3.42 (4))");
+  R.is(M.v3on === false && M.v3off === false, "a pre-v4 file's tick is the old default and goes off; its untick stays off");
+  R.is(M.v4on === true && M.v4off === false, "while a v4 file's tick was chosen, and is restored as one");
+}
 
 console.log("\n=== a section reset is a section reset ===");
 R.is(o.section.brushBack === 0, `the brush section went back to its defaults (${o.section.brushBack} still differ)`);

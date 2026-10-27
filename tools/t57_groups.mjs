@@ -808,6 +808,59 @@ const BODY = `async function(){
   }
   out.v5 = o20;
 
+  // ---- 21. format 7: level content (ROADMAP 4.58) — written only when there is some, and gated ----
+  // A node limited to some mip levels is three numbers, no pixels. A version 6 build would show such
+  // a file with every far-only layer drawn up close and re-save it without the ranges, so a file
+  // holding one says 7 and an older build's gate refuses it; a file without says 5 as before, and
+  // this build reads 5, 6 and 7. The oracle for the round trip is the sheet AT A LEVEL, built by the
+  // walk before the save and after the load — a reader that dropped the range would draw the far
+  // layer at level 0 and lose it nowhere else, so level 0 and level 3 are both compared.
+  var o21 = {};
+  var lv = mkSlot(); lv.id = "t57lv";
+  var farL = fill("#ff0000", null, { name: "far mark" }); farL.levels = Levels.far(3);
+  var nearG = { type: "group", name: "near look", visible: true, opacity: 1, blend: "normal", collapsed: false,
+                levels: Levels.make(0, 2, 1), children: [fill("#00ff00", null, { name: "near fill" })] };
+  lv.layers = [fill("#0000ff", null, { name: "base fill" }), nearG, farL];
+  App.slots = new Map([["t57lv", lv]]); App.activeSlot = lv; App.activeLayer = null;
+  var atLv = function(k){ var c = Composite.at(lv, "color", k); var s = sheet(c); c.width = c.height = 0; return s; };
+  var before = [atLv(0), atLv(2), atLv(3)];
+  var lblob = null;
+  URL.createObjectURL = function(b){ lblob = b; return "blob:stub"; };
+  HTMLAnchorElement.prototype.click = function(){};
+  try { await saveProject(); } finally { URL.createObjectURL = realCOU; HTMLAnchorElement.prototype.click = realClick; }
+  var lz = await JSZip.loadAsync(await lblob.arrayBuffer());
+  var lmeta = JSON.parse(await lz.file("project.json").async("string"));
+  o21.version = lmeta.version;
+  o21.written = lmeta.slots[0].layers.map(function(m){ return m.levels ? JSON.stringify(m.levels) : "-"; }).join(" ");
+  lv.layers = [];
+  document.getElementById("status").textContent = "";
+  await loadProject(lblob);
+  o21.read = lv.layers.map(function(n){ return n.levels ? JSON.stringify(n.levels) : "-"; }).join(" ");
+  var after = [atLv(0), atLv(2), atLv(3)];
+  o21.same = before.map(function(s, i){ return s === after[i]; }).join(",");
+  o21.differ = before[0] !== before[3] && before[0] !== before[2];
+  // The gate, both ways: this build reads 7 (and 8, t169) and refuses 9; a version 6 build's gate refuses 7.
+  o21.gate = { reads7: ProjectFile.tooNew({ version: 7 }), refuses8: ProjectFile.tooNew({ version: 9 }), v6refuses7: ProjectFile.tooNew({ version: 7 }, 6),
+               v6reads6: ProjectFile.tooNew({ version: 6 }, 6) };
+  App.pendingProject = { meta: { version: lmeta.version, slots: [] }, zip: null };
+  document.getElementById("status").textContent = "";
+  var keepPV = ProjectFile.tooNew;
+  ProjectFile.tooNew = function(meta){ return keepPV(meta, 6); };     // tryApplyProject as a version 6 build runs it
+  try { await tryApplyProject(); } finally { ProjectFile.tooNew = keepPV; }
+  o21.v6said = document.getElementById("status").textContent;
+  // ...and without level content the file still says 5, so a version 5 or 6 build opens it.
+  lv.layers = [fill("#0000ff", null, { name: "plain" })];
+  var pblob = null;
+  URL.createObjectURL = function(b){ pblob = b; return "blob:stub"; };
+  HTMLAnchorElement.prototype.click = function(){};
+  try { await saveProject(); } finally { URL.createObjectURL = realCOU; HTMLAnchorElement.prototype.click = realClick; }
+  o21.plain = JSON.parse(await (await JSZip.loadAsync(await pblob.arrayBuffer())).file("project.json").async("string")).version;
+  // A saved stack carries the ranges through the same writer, and says 7 too.
+  var stz = await JSZip.loadAsync(await Stack.pack(lv, nearG));
+  var stm = JSON.parse(await stz.file("stack.json").async("string"));
+  o21.stack = { version: stm.version, levels: JSON.stringify(stm.node.levels) };
+  out.v7 = o21;
+
   App.slots = savedSlots; App.skinUnits = savedUnits;
   App.activeSlot = null; App.activeLayer = null;
   App.slots.delete("g57"); App.activeSlot = null; App.activeLayer = null;
@@ -1107,6 +1160,19 @@ R.is(CL.srcName === "Shape2" && CL.left && CL.left[2] > 200 && CL.right && CL.ri
 R.is(CM.srcName === "Green" && CM.left && CM.left[0] > 200 && CM.left[2] > 200 && CM.right && CM.right[2] > 200 && CM.right[0] < 60,
   `and it FOLLOWS the stack: with Green moved in underneath and Shape2 on top, the clip is to “${CM.srcName}” — Shape2's white left, blue right`);
 R.is(CB.src === null && CB.left && CB.left[2] > 200, "at the bottom of its list nothing masks it, so it shows whole");
+
+console.log("\n=== format 7: which mip levels a node shows at (4.58) ===");
+const V7 = o.v7;
+R.is(V7.version === 7 && V7.written === '- {"from":0,"to":2,"soft":1} {"from":3,"to":15,"soft":0}',
+  `a file holding level content says 7 and writes each range on its node — a group's and a layer's (${V7.version}: ${V7.written})`);
+R.is(V7.read === V7.written && V7.same === "true,true,true" && V7.differ,
+  `it reads back range for range, and the sheet at levels 0, 2 and 3 — three different sheets — is the same after the load (${V7.same})`);
+R.is(V7.gate.reads7 === null && /project version 9, this build reads 8/.test(V7.gate.refuses8 || ""),
+  "this build reads version 7 and refuses 9 with the gate's sentence");
+R.is(/project version 7, this build reads 6/.test(V7.gate.v6refuses7 || "") && V7.gate.v6reads6 === null && /project version 7, this build reads 6/.test(V7.v6said),
+  `a version 6 build refuses it plainly instead of drawing every far-only layer up close (${V7.v6said})`);
+R.is(V7.plain === 5, `a file without level content still says 5 (${V7.plain}), so older builds open it`);
+R.is(V7.stack.version === 7 && V7.stack.levels === '{"from":0,"to":2,"soft":1}', `a saved stack carries its range and says 7 too (${JSON.stringify(V7.stack)})`);
 
 const errs = (o.__errs || []).filter(e => !/three|jszip|cdnjs|net::|Failed to load/i.test(e));
 R.is(errs.length === 0, errs.length ? "uncaught errors during the run:\n        " + errs.join("\n        ") : "no uncaught errors during the run");

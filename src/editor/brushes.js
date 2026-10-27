@@ -8,27 +8,33 @@ function brushStamp(){
   const T = Tips.get(b.tip);
   const key = brushStamp.key(b, T);
   if (brushStamp._key === key) return brushStamp._c;
-  const d = Math.max(2, b.size);
-  let col;
-  if (b.target === "mask") col = "#ffffff";                     // a mask is coverage, not a colour
-  else if (b.tool === "clone") col = "#ffffff";                 // only its alpha is used: the pixels come from the sheet
-  else if (b.tool === "flatten") col = "rgb(128,128,128)";      // the normal map's "no bump" value
-  else if (b.chan === "color") col = b.color;
-  else col = `rgb(${b.value},${b.value},${b.value})`;           // every other channel is one value
-  // Every other tip is coverage in this ink (editor/tips.js); the round one is the gradient it always was.
-  if (T.id !== "round") {
-    brushStamp._key = key; brushStamp._c = Tips.stamp(T, d, b.hardness, col);
-    return brushStamp._c;
-  }
+  brushStamp._key = key; brushStamp._c = brushStamp.make(T, Math.max(2, b.size), b.hardness, brushStamp.ink(b));
+  return brushStamp._c;
+}
+// What a dab lays, as a CSS colour — the one statement of it, read by the stamp and by the projected
+// 3-D brush, whose dabs take their colour from here and only their coverage from the stamp. Every
+// channel but colour is one value.
+brushStamp.ink = b => {
+  if (b.target === "mask") return "#ffffff";                     // a mask is coverage, not a colour
+  if (b.tool === "clone" || b.tool === "retouch") return "#ffffff";   // only its alpha is used: the pixels come from the sheet
+  if (b.tool === "flatten") return "rgb(128,128,128)";           // the normal map's "no bump" value
+  if (b.chan === "color") return b.color;
+  return `rgb(${b.value},${b.value},${b.value})`;
+};
+// A stamp `d` texels across: every tip but Round is coverage in this ink (editor/tips.js), and Round
+// is the gradient it always was. Apart from `brushStamp` so the panel's sample stroke (ROADMAP 3.41
+// (3)) makes its small stamp with the code a stroke's comes from, and does not throw away the
+// stroke's own cached one by asking for a size of its own.
+brushStamp.make = (T, d, hard, col) => {
+  if (T.id !== "round") return Tips.stamp(T, d, hard, col);
   const c = mkCanvas(d, d), g = ctx2d(c);
-  const grad = g.createRadialGradient(d/2, d/2, d/2 * b.hardness * .95, d/2, d/2, d/2);
+  const grad = g.createRadialGradient(d/2, d/2, d/2 * hard * .95, d/2, d/2, d/2);
   grad.addColorStop(0, col);
   grad.addColorStop(1, col.startsWith("#") ? col + "00" : col.replace("rgb", "rgba").replace(")", ",0)"));
   g.fillStyle = grad;
   g.fillRect(0, 0, d, d);
-  brushStamp._key = key; brushStamp._c = c;
   return c;
-}
+};
 brushStamp.key = (b, T) => [b.tool, b.chan, b.target, b.color, b.size, b.hardness, b.value, T.key].join("|");
 // The stamp made BEFORE the first dab needs it (4.50 (10)'s review, 2026-09-26). A Chip at Size 400
 // is 5–8 ms of arithmetic once V8 has compiled its loop and ~24 the first time in a session (Node and
@@ -143,6 +149,8 @@ function paintTarget(){
   // A projected layer's pixels are regenerated from its source image every time it moves or
   // resizes, so brush work on it would silently disappear. Duplicating it frees the pixels.
   if (c.proj) return { err: "This is a projected decal — its pixels are rebuilt when it moves. Duplicate it (⧉) to paint on the copy." };
+  // A path layer's are rebuilt from its path (4.52 (3)), for the same reason.
+  if (c.shape) return { err: "“" + L.name + "” is a path layer — its pixels are redrawn from its path. Edit it with the shape tool, or duplicate it (⧉) to paint on the copy." };
   // Same rule, one level down and new with 4.28(f): a decal's surface response is content in the
   // decal's own node now, so the brush can reach it in a way it never could when it was a sibling
   // layer behind the 4.18 rule. It is rebuilt from the Look every time the decal moves, so a stroke
@@ -224,6 +232,9 @@ function strokeBufferDirty(x, y, r){
 // over the rectangle the last stroke touched — the same bargain `strokeBuffer` makes just above,
 // for the same reason. Zeroing a 4096² field outright is 16.7 M writes at every mousedown.
 // ROADMAP 4.17.
+// What a stroke wrote outside `embossInto`, so the next stroke clears it: the projected brush's Panel
+// line adds its field a window at a time (editor/paint-proj.js).
+heightBuffer.mark = r => { heightBuffer._dirty = rectUnion(heightBuffer._dirty, r); };
 function heightBuffer(w, h){
   let a = heightBuffer._a;
   if (!a || heightBuffer._w !== w || heightBuffer._h !== h) {

@@ -60,7 +60,7 @@ function vehicleRow(rec){
   row.onclick = () => loadVehicleModelPrompt(model);
   return row;
 }
-// One row for an individual texture: add (bind by name) or →slot (apply to active slot).
+// One row for an individual texture: add (bind by name), →slot (apply to active slot) or save.
 function textureRow(rec, quality){
   const en = pickVariant(rec, quality);
   if (!en) return null;
@@ -76,7 +76,7 @@ function textureRow(rec, quality){
   const shown = usable ? en : (GameDB.unreadOf(rec) || en);
   // The format by its name — "L8", not "2", which is what its Direct3D number printed as (2026-10-10).
   const fmt = GameDB.fmtName(shown);
-  nm.title = tierLabel(shown) + " " + fmt + " · " + shown.compName + (usable ? "" : " — " + entryBlockReason(shown));
+  nm.title = tierLabel(shown) + " " + fmt + " · " + shown.compName + (usable ? "" : " — " + Oodle.entryBlockReason(shown));
   nm.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" + (usable ? "" : ";opacity:.4");
   row.appendChild(nm);
   const tag = document.createElement("span");
@@ -92,7 +92,12 @@ function textureRow(rec, quality){
     bSlot.textContent = "→slot"; bSlot.title = "Replace the ACTIVE slot's base with this texture (how you apply any stock camo)";
     bSlot.style.cssText = "padding:0 6px;font-size:11px;flex:0 0 auto";
     bSlot.onclick = () => loadGameEntry(en, true);
-    row.append(bAdd, bSlot);
+    // The texture as a file of its own (ROADMAP 4.59): the game's .dds, or level 0 as PNG / TGA.
+    const bSave = document.createElement("button");
+    bSave.textContent = "save"; bSave.title = "Save this texture as a file — the game's own .dds, or as an image (PNG / TGA)";
+    bSave.style.cssText = "padding:0 6px;font-size:11px;flex:0 0 auto";
+    bSave.onclick = () => OneTex.fromSearch(en);
+    row.append(bAdd, bSlot, bSave);
   }
   return row;
 }

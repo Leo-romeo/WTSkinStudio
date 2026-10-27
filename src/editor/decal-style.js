@@ -37,7 +37,7 @@ const DecalStyle = {
   carry(surf){
     const out = {};
     if (!surf) return out;
-    for (const k of DecalStyle.KEYS.concat(["relief", "bevel", "heightInv", "heightFrom", "glossSrc", "cavity"])) if (surf[k] != null) out[k] = surf[k];
+    for (const k of DecalStyle.KEYS.concat(["relief", "bevel", "heightInv", "heightFrom", "heightGen", "glossSrc", "cavity"])) if (surf[k] != null) out[k] = surf[k];
     return out;
   },
   // The same outline and shadow, in pixels, on an image whose shorter side is `m1` where it was `m0`.
@@ -60,12 +60,20 @@ const DecalStyle = {
   key(S, bmp, shadow){
     return [bmp.width, bmp.height, S.ol, S.olc, shadow ? S.sh : 0, S.shx, S.shy, S.shb, S.shc].join("|");
   },
-  // Padding, in bitmap pixels, that keeps the outline and the shadow inside the styled canvas.
+  // Padding, in bitmap pixels, that keeps the outline and the shadow inside the styled canvas — up
+  // to a limit: never further from the decal than twice its own size, and never past MAX a side,
+  // the largest sheet a decal lands on. A width is a share of the bitmap's side and `refit` takes it
+  // past the sliders on purpose, so a bound on the number could not bound the pixels; this does.
+  // Measured 2026-10-17 on an 8-px decal out of a crafted .wtproj: an outline of 1e5 % made a 20012²
+  // canvas and 8.3 s of one composite, and 1e6 % threw "Out of memory at ImageData creation" out of
+  // the compositor. Past the limit the outline and the shadow are cut off at the canvas edge.
+  MAX: 8192,
   pad(bmp, S, shadow){
-    const m = Math.min(bmp.width, bmp.height);
+    const m = Math.min(bmp.width, bmp.height), M = Math.max(bmp.width, bmp.height);
     let p = S.ol / 100 * m;
     if (shadow && S.sh > 0) p += Math.max(Math.abs(S.shx), Math.abs(S.shy)) / 100 * m + S.shb / 100 * m * 3;
-    return Math.ceil(p) + 1;
+    const most = Math.max(0, Math.min(2 * M, Math.floor((DecalStyle.MAX - M) / 2) - 1));
+    return Math.min(Math.max(0, Math.ceil(p)), most) + 1;
   },
   // The bitmap to draw for `holder` — the source itself when the Look asks for no style, else the
   // styled copy, built once per (bitmap, numbers) and kept on the holder. `holder` is whatever owns

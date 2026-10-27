@@ -1,5 +1,8 @@
 "use strict";
 /*==TGA==*/
+// One scope per module (ROADMAP 2.3): the body below is private, `TGA` — returned at the end — is
+// the only name this module puts into the shared scope. Not re-indented; see `codecs/dds.js`.
+const TGA = (() => {
 function parseTGA(buf){
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   const idLen = u8[0], type = u8[2];
@@ -29,4 +32,6 @@ function parseTGA(buf){
   }
   return { width: w, height: h, mips: [{ w, h, rgba: out }] };
 }
+return { parseTGA };
+})();
 /*==ENDTGA==*/
